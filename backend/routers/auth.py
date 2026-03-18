@@ -115,56 +115,66 @@ async def login(
     """
     Authenticate user and return JWT token.
     
-    **Note:** This is a mock implementation for the kickoff.
-    In production, this should:
-    1. Query the database for the user
-    2. Verify the password hash
-    3. Check if user is active
-    4. Return proper error messages
+    Queries the database for the user, verifies password hash,
+    and returns a JWT token with user information.
     """
+    # Import models here to avoid circular imports
+    from backend.models import User, Tenant
     
-    # Mock authentication - REPLACE WITH REAL DATABASE QUERY
-    # For demo purposes, accept any email/password combination
+    # Query database for user by email
+    user = db.query(User).filter(User.email == login_data.email).first()
     
-    # Simulate database user lookup
-    mock_user = {
-        "id": "user-123-456",
-        "tenant_id": "tenant-abc-def",
-        "email": login_data.email,
-        "name": "Demo User",
-        "role": "admin",
-        "permissions": [
-            "po.create",
-            "po.read",
-            "po.update",
-            "po.approve_comercial",
-            "po.approve_pcp",
-            "po.approve_producao",
-            "po.complete_expedicao",
-            "po.complete_faturamento",
-            "po.approve_despacho"
-        ],
-        "is_active": True,
-        "hashed_password": get_password_hash("password123")  # Mock password
-    }
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password"
+        )
     
-    # In production, verify password:
-    # if not verify_password(login_data.password, mock_user["hashed_password"]):
-    #     raise HTTPException(
-    #         status_code=status.HTTP_401_UNAUTHORIZED,
-    #         detail="Incorrect email or password"
-    #     )
+    # Verify password
+    if not verify_password(login_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password"
+        )
+    
+    # Check if user is active
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is inactive"
+        )
+    
+    # Get tenant information
+    tenant = db.query(Tenant).filter(Tenant.id == user.tenant_id).first()
+    if not tenant or not tenant.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tenant account is inactive"
+        )
+    
+    # Define permissions based on role (can be expanded later)
+    permissions = [
+        "po.create",
+        "po.read",
+        "po.update",
+        "po.approve_comercial",
+        "po.approve_pcp",
+        "po.approve_producao",
+        "po.complete_expedicao",
+        "po.complete_faturamento",
+        "po.approve_despacho"
+    ]
     
     # Create JWT token
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={
-            "sub": mock_user["id"],
-            "tenant_id": mock_user["tenant_id"],
-            "email": mock_user["email"],
-            "name": mock_user["name"],
-            "role": mock_user["role"],
-            "permissions": mock_user["permissions"]
+            "sub": str(user.id),
+            "tenant_id": str(user.tenant_id),
+            "email": user.email,
+            "name": user.name,
+            "role": user.role,
+            "permissions": permissions
         },
         expires_delta=access_token_expires
     )
