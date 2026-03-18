@@ -8,8 +8,11 @@ environment variables for database connection configuration.
 import os
 from typing import Generator
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import sessionmaker, Session, declarative_base
 from sqlalchemy.pool import QueuePool
+
+# Create declarative base for models
+Base = declarative_base()
 
 # Database URL from environment variable
 # Format: postgresql://user:password@host:port/database
@@ -65,7 +68,8 @@ def init_db() -> None:
     This should be called on application startup to ensure
     all tables defined in models are created.
     """
-    from backend.models import Base
+    # Import models to register them with Base
+    # from backend.models import PurchaseOrder, OrderItem, etc.
     Base.metadata.create_all(bind=engine)
 
 
@@ -75,5 +79,4 @@ def drop_all_tables() -> None:
     
     WARNING: This will delete all data. Use only in development/testing.
     """
-    from backend.models import Base
     Base.metadata.drop_all(bind=engine)
