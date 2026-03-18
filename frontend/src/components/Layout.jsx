@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useNotifications } from '../context/NotificationContext'
 import {
     LayoutDashboard,
     Kanban,
@@ -14,6 +15,7 @@ import {
 const Layout = () => {
     const [sidebarOpen, setSidebarOpen] = useState(true)
     const { user, logout } = useAuth()
+    const { badges } = useNotifications()
     const navigate = useNavigate()
 
     const handleLogout = () => {
@@ -22,9 +24,9 @@ const Layout = () => {
     }
 
     const navItems = [
-        { path: '/kanban', icon: Kanban, label: 'Kanban Board' },
-        { path: '/import', icon: Upload, label: 'Import POs' },
-        { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+        { path: '/kanban', icon: Kanban, label: 'Kanban Board', badge: 'kanban' },
+        { path: '/import', icon: Upload, label: 'Import POs', badge: 'import' },
+        { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', badge: 'dashboard' },
     ]
 
     return (
@@ -59,7 +61,7 @@ const Layout = () => {
                             key={item.path}
                             to={item.path}
                             className={({ isActive }) =>
-                                `flex items-center gap-3 px-3 py-3 rounded-lg transition-colors ${isActive
+                                `flex items-center gap-3 px-3 py-3 rounded-lg transition-colors relative ${isActive
                                     ? 'bg-primary-50 text-primary-700'
                                     : 'text-gray-700 hover:bg-gray-100'
                                 }`
@@ -67,7 +69,12 @@ const Layout = () => {
                         >
                             <item.icon className="w-5 h-5 flex-shrink-0" />
                             {sidebarOpen && (
-                                <span className="font-medium">{item.label}</span>
+                                <span className="font-medium flex-1">{item.label}</span>
+                            )}
+                            {badges[item.badge] > 0 && (
+                                <span className={`${sidebarOpen ? '' : 'absolute -top-1 -right-1'} flex items-center justify-center min-w-[20px] h-5 px-1.5 text-xs font-bold text-white bg-red-500 rounded-full`}>
+                                    {badges[item.badge] > 99 ? '99+' : badges[item.badge]}
+                                </span>
                             )}
                         </NavLink>
                     ))}

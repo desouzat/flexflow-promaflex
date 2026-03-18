@@ -1,13 +1,17 @@
 import React, { useState, useEffect } from 'react'
 import KanbanColumn from '../components/kanban/KanbanColumn'
 import api from '../utils/api'
-import { RefreshCw, Filter, Search } from 'lucide-react'
+import { showSuccess, showError } from '../utils/toast'
+import { useNotifications } from '../context/NotificationContext'
+import { RefreshCw, Filter, Search, Maximize2, Minimize2 } from 'lucide-react'
 
 const KanbanPage = () => {
     const [pos, setPOs] = useState([])
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState(null)
     const [searchTerm, setSearchTerm] = useState('')
+    const [compactView, setCompactView] = useState(false)
+    const { refreshNotifications } = useNotifications()
 
     const columns = [
         { status: 'pending', title: 'Pending', color: 'yellow' },
@@ -23,8 +27,11 @@ const KanbanPage = () => {
             setError(null)
             const response = await api.get('/kanban/pos')
             setPOs(response.data)
+            refreshNotifications()
         } catch (err) {
-            setError(err.response?.data?.detail || 'Failed to load purchase orders')
+            const errorMsg = err.response?.data?.detail || 'Failed to load purchase orders'
+            setError(errorMsg)
+            showError(errorMsg)
             console.error('Error fetching POs:', err)
         } finally {
             setLoading(false)
@@ -38,6 +45,17 @@ const KanbanPage = () => {
     const handleCardClick = (po) => {
         console.log('PO clicked:', po)
         // TODO: Open modal with PO details
+    }
+
+    const handleMoveCard = async (poId, newStatus) => {
+        try {
+            await api.patch(`/kanban/pos/${poId}/status`, { status: newStatus })
+            showSuccess(`PO moved to ${newStatus.replace('_', ' ')}`)
+            fetchPOs()
+        } catch (err) {
+            showError('Failed to move card')
+            console.error('Error moving card:', err)
+        }
     }
 
     const filterPOs = (status) => {
@@ -100,6 +118,17 @@ const KanbanPage = () => {
                             />
                         </div>
                         <button
+                            onClick={() => setCompactView(!compactView)}
+                            className="btn-secondary flex items-center gap-2"
+                            title={compactView ? 'Expand view' : 'Compact view'}
+                        >
+                            {compactView ? (
+                                <Maximize2 className="w-5 h-5" />
+                            ) : (
+                                <Minimize2 className="w-5 h-5" />
+                            )}
+                        </button>
+                        <button
                             onClick={fetchPOs}
                             className="btn-secondary flex items-center gap-2"
                             aria-label="Refresh"
@@ -125,7 +154,9 @@ const KanbanPage = () => {
                             status={column.status}
                             pos={filterPOs(column.status)}
                             onCardClick={handleCardClick}
+                            onMoveCard={handleMoveCard}
                             color={column.color}
+                            compactView={compactView}
                         />
                     ))}
                 </div>

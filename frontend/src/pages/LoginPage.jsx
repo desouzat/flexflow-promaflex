@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
+import { showSuccess, showError } from '../utils/toast'
 import { LogIn, AlertCircle } from 'lucide-react'
 
 const LoginPage = () => {
@@ -24,10 +25,16 @@ const LoginPage = () => {
             const result = await login(username, password)
 
             if (!result.success) {
-                setLocalError(result.error || 'Login failed')
+                const errorMsg = result.error || 'Login failed'
+                setLocalError(errorMsg)
+                showError(errorMsg)
+            } else {
+                showSuccess('Login successful! Welcome back.')
             }
         } catch (err) {
-            setLocalError('An unexpected error occurred')
+            const errorMsg = 'An unexpected error occurred'
+            setLocalError(errorMsg)
+            showError(errorMsg)
         } finally {
             setIsSubmitting(false)
         }

@@ -2,7 +2,7 @@ import React from 'react'
 import KanbanCard from './KanbanCard'
 import { MoreVertical } from 'lucide-react'
 
-const KanbanColumn = ({ title, status, pos, onCardClick, color = 'gray' }) => {
+const KanbanColumn = ({ title, status, pos, onCardClick, onMoveCard, color = 'gray', compactView = false }) => {
     const colorClasses = {
         gray: 'bg-gray-100 border-gray-300',
         yellow: 'bg-yellow-50 border-yellow-300',
@@ -52,6 +52,7 @@ const KanbanColumn = ({ title, status, pos, onCardClick, color = 'gray' }) => {
                                 key={po.id}
                                 po={po}
                                 onCardClick={onCardClick}
+                                compactView={compactView}
                             />
                         ))
                     )}

@@ -8,7 +8,7 @@ import {
     Clock
 } from 'lucide-react'
 
-const KanbanCard = ({ po, onCardClick }) => {
+const KanbanCard = ({ po, onCardClick, compactView = false }) => {
     const getStatusColor = (status) => {
         const colors = {
             pending: 'bg-yellow-100 text-yellow-800 border-yellow-200',
@@ -32,6 +32,36 @@ const KanbanCard = ({ po, onCardClick }) => {
         return <Icon className="w-4 h-4" />
     }
 
+    // Calculate SLA status based on deadline
+    const getSLAStatus = () => {
+        if (!po.expected_delivery_date) return 'green'
+
+        const deadline = new Date(po.expected_delivery_date)
+        const today = new Date()
+        const daysUntilDeadline = Math.ceil((deadline - today) / (1000 * 60 * 60 * 24))
+
+        // If already delivered, return green
+        if (po.status === 'delivered') return 'green'
+
+        // Red: overdue or less than 3 days
+        if (daysUntilDeadline < 3) return 'red'
+
+        // Orange: 3-7 days
+        if (daysUntilDeadline < 7) return 'orange'
+
+        // Green: more than 7 days
+        return 'green'
+    }
+
+    const getSLABorderColor = (slaStatus) => {
+        const colors = {
+            green: 'border-l-green-500',
+            orange: 'border-l-orange-500',
+            red: 'border-l-red-500',
+        }
+        return colors[slaStatus] || 'border-l-gray-300'
+    }
+
     const formatCurrency = (value) => {
         return new Intl.NumberFormat('pt-BR', {
             style: 'currency',
@@ -44,10 +74,39 @@ const KanbanCard = ({ po, onCardClick }) => {
         return new Date(dateString).toLocaleDateString('pt-BR')
     }
 
+    const slaStatus = getSLAStatus()
+
+    if (compactView) {
+        return (
+            <div
+                onClick={() => onCardClick?.(po)}
+                className={`bg-white rounded-lg shadow-sm border border-gray-200 border-l-4 ${getSLABorderColor(slaStatus)} p-3 hover:shadow-md transition-shadow cursor-pointer`}
+            >
+                <div className="flex items-center justify-between mb-2">
+                    <h3 className="font-semibold text-gray-900 text-sm">
+                        PO #{po.po_number}
+                    </h3>
+                    <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${getStatusColor(po.status)}`}>
+                        {getStatusIcon(po.status)}
+                    </div>
+                </div>
+                <p className="text-xs text-gray-600 mb-2">{po.supplier_name}</p>
+                <div className="flex items-center justify-between text-xs">
+                    <span className="font-medium text-gray-900">
+                        {formatCurrency(po.total_value)}
+                    </span>
+                    <span className="text-gray-500">
+                        {formatDate(po.expected_delivery_date)}
+                    </span>
+                </div>
+            </div>
+        )
+    }
+
     return (
         <div
             onClick={() => onCardClick?.(po)}
-            className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 hover:shadow-md transition-shadow cursor-pointer"
+            className={`bg-white rounded-lg shadow-sm border border-gray-200 border-l-4 ${getSLABorderColor(slaStatus)} p-4 hover:shadow-md transition-shadow cursor-pointer`}
         >
             {/* Header */}
             <div className="flex items-start justify-between mb-3">
@@ -88,6 +147,18 @@ const KanbanCard = ({ po, onCardClick }) => {
                     </div>
                 )}
             </div>
+
+            {/* SLA Indicator */}
+            {slaStatus !== 'green' && (
+                <div className="mt-3 pt-3 border-t border-gray-100">
+                    <div className={`flex items-center gap-1 text-xs ${slaStatus === 'red' ? 'text-red-600' : 'text-orange-600'}`}>
+                        <AlertCircle className="w-3 h-3" />
+                        <span className="font-medium">
+                            {slaStatus === 'red' ? 'Urgent - Deadline approaching!' : 'Attention needed'}
+                        </span>
+                    </div>
+                </div>
+            )}
 
             {/* Priority Indicator */}
             {po.priority === 'high' && (
