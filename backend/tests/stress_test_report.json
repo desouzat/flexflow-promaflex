@@ -1,0 +1,477 @@
+{
+  "start_time": "2026-03-18T17:47:34.018556",
+  "end_time": "2026-03-18T17:48:15.944624",
+  "total_requests": 17,
+  "successful_requests": 12,
+  "failed_requests": 5,
+  "scenarios": [],
+  "errors": [],
+  "payloads": [
+    {
+      "timestamp": "2026-03-18T17:47:36.066718",
+      "scenario": "Invalid Login",
+      "action": "Login attempt with invalid@test.com",
+      "method": "POST",
+      "url": "http://localhost:8001/api/auth/login",
+      "request_data": {
+        "email": "invalid@test.com",
+        "password": "wrong"
+      },
+      "response_status": 422,
+      "response_data": {
+        "detail": "Validation error",
+        "errors": [
+          {
+            "field": "body -> password",
+            "message": "String should have at least 6 characters",
+            "type": "string_too_short"
+          }
+        ]
+      },
+      "error": null,
+      "success": true
+    },
+    {
+      "timestamp": "2026-03-18T17:47:38.786510",
+      "scenario": "Invalid Login",
+      "action": "Login attempt with admin@promaflex.com",
+      "method": "POST",
+      "url": "http://localhost:8001/api/auth/login",
+      "request_data": {
+        "email": "admin@promaflex.com",
+        "password": "WrongPassword"
+      },
+      "response_status": 200,
+      "response_data": {
+        "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyLTEyMy00NTYiLCJ0ZW5hbnRfaWQiOiJ0ZW5hbnQtYWJjLWRlZiIsImVtYWlsIjoiYWRtaW5AcHJvbWFmbGV4LmNvbSIsIm5hbWUiOiJEZW1vIFVzZXIiLCJyb2xlIjoiYWRtaW4iLCJwZXJtaXNzaW9ucyI6WyJwby5jcmVhdGUiLCJwby5yZWFkIiwicG8udXBkYXRlIiwicG8uYXBwcm92ZV9jb21lcmNpYWwiLCJwby5hcHByb3ZlX3BjcCIsInBvLmFwcHJvdmVfcHJvZHVjYW8iLCJwby5jb21wbGV0ZV9leHBlZGljYW8iLCJwby5jb21wbGV0ZV9mYXR1cmFtZW50byIsInBvLmFwcHJvdmVfZGVzcGFjaG8iXSwiZXhwIjoxNzczOTQyNDU4LCJpYXQiOjE3NzM4NTYwNTh9.wPI-v5A1cb66NsET5b2Mvm79bI8TDADiVrYCzKHhBKs",
+        "token_type": "bearer",
+        "expires_in": 86400
+      },
+      "error": "Expected failure but got status 200",
+      "success": false
+    },
+    {
+      "timestamp": "2026-03-18T17:47:41.330679",
+      "scenario": "Invalid Login",
+      "action": "Login attempt with ",
+      "method": "POST",
+      "url": "http://localhost:8001/api/auth/login",
+      "request_data": {
+        "email": "",
+        "password": ""
+      },
+      "response_status": 422,
+      "response_data": {
+        "detail": "Validation error",
+        "errors": [
+          {
+            "field": "body -> email",
+            "message": "value is not a valid email address: An email address must have an @-sign.",
+            "type": "value_error"
+          },
+          {
+            "field": "body -> password",
+            "message": "String should have at least 6 characters",
+            "type": "string_too_short"
+          }
+        ]
+      },
+      "error": null,
+      "success": true
+    },
+    {
+      "timestamp": "2026-03-18T17:47:43.899961",
+      "scenario": "Invalid Login",
+      "action": "Login attempt with notanemail",
+      "method": "POST",
+      "url": "http://localhost:8001/api/auth/login",
+      "request_data": {
+        "email": "notanemail",
+        "password": "test123"
+      },
+      "response_status": 422,
+      "response_data": {
+        "detail": "Validation error",
+        "errors": [
+          {
+            "field": "body -> email",
+            "message": "value is not a valid email address: An email address must have an @-sign.",
+            "type": "value_error"
+          }
+        ]
+      },
+      "error": null,
+      "success": true
+    },
+    {
+      "timestamp": "2026-03-18T17:47:46.541865",
+      "scenario": "Valid Login",
+      "action": "Login as Admin User (admin)",
+      "method": "POST",
+      "url": "http://localhost:8001/api/auth/login",
+      "request_data": {
+        "email": "admin@promaflex.com",
+        "password": "Admin@123"
+      },
+      "response_status": 200,
+      "response_data": {
+        "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyLTEyMy00NTYiLCJ0ZW5hbnRfaWQiOiJ0ZW5hbnQtYWJjLWRlZiIsImVtYWlsIjoiYWRtaW5AcHJvbWFmbGV4LmNvbSIsIm5hbWUiOiJEZW1vIFVzZXIiLCJyb2xlIjoiYWRtaW4iLCJwZXJtaXNzaW9ucyI6WyJwby5jcmVhdGUiLCJwby5yZWFkIiwicG8udXBkYXRlIiwicG8uYXBwcm92ZV9jb21lcmNpYWwiLCJwby5hcHByb3ZlX3BjcCIsInBvLmFwcHJvdmVfcHJvZHVjYW8iLCJwby5jb21wbGV0ZV9leHBlZGljYW8iLCJwby5jb21wbGV0ZV9mYXR1cmFtZW50byIsInBvLmFwcHJvdmVfZGVzcGFjaG8iXSwiZXhwIjoxNzczOTQyNDY2LCJpYXQiOjE3NzM4NTYwNjZ9.BCov-kJ3zzZFWBP_tKitAcww0QYyNRHbzLrkoNLWrK4",
+        "token_type": "bearer",
+        "expires_in": 86400
+      },
+      "error": null,
+      "success": true
+    },
+    {
+      "timestamp": "2026-03-18T17:47:49.017835",
+      "scenario": "Valid Login",
+      "action": "Login as Comercial Manager (comercial_manager)",
+      "method": "POST",
+      "url": "http://localhost:8001/api/auth/login",
+      "request_data": {
+        "email": "comercial@promaflex.com",
+        "password": "Comercial@123"
+      },
+      "response_status": 200,
+      "response_data": {
+        "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyLTEyMy00NTYiLCJ0ZW5hbnRfaWQiOiJ0ZW5hbnQtYWJjLWRlZiIsImVtYWlsIjoiY29tZXJjaWFsQHByb21hZmxleC5jb20iLCJuYW1lIjoiRGVtbyBVc2VyIiwicm9sZSI6ImFkbWluIiwicGVybWlzc2lvbnMiOlsicG8uY3JlYXRlIiwicG8ucmVhZCIsInBvLnVwZGF0ZSIsInBvLmFwcHJvdmVfY29tZXJjaWFsIiwicG8uYXBwcm92ZV9wY3AiLCJwby5hcHByb3ZlX3Byb2R1Y2FvIiwicG8uY29tcGxldGVfZXhwZWRpY2FvIiwicG8uY29tcGxldGVfZmF0dXJhbWVudG8iLCJwby5hcHByb3ZlX2Rlc3BhY2hvIl0sImV4cCI6MTc3Mzk0MjQ2OSwiaWF0IjoxNzczODU2MDY5fQ.Fpjn_PDG4D_e2HoKIRBiNs_NNvoDdVsSfY44hMw-WZg",
+        "token_type": "bearer",
+        "expires_in": 86400
+      },
+      "error": null,
+      "success": true
+    },
+    {
+      "timestamp": "2026-03-18T17:47:51.457733",
+      "scenario": "Valid Login",
+      "action": "Login as PCP Manager (pcp_manager)",
+      "method": "POST",
+      "url": "http://localhost:8001/api/auth/login",
+      "request_data": {
+        "email": "pcp@promaflex.com",
+        "password": "PCP@123"
+      },
+      "response_status": 200,
+      "response_data": {
+        "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyLTEyMy00NTYiLCJ0ZW5hbnRfaWQiOiJ0ZW5hbnQtYWJjLWRlZiIsImVtYWlsIjoicGNwQHByb21hZmxleC5jb20iLCJuYW1lIjoiRGVtbyBVc2VyIiwicm9sZSI6ImFkbWluIiwicGVybWlzc2lvbnMiOlsicG8uY3JlYXRlIiwicG8ucmVhZCIsInBvLnVwZGF0ZSIsInBvLmFwcHJvdmVfY29tZXJjaWFsIiwicG8uYXBwcm92ZV9wY3AiLCJwby5hcHByb3ZlX3Byb2R1Y2FvIiwicG8uY29tcGxldGVfZXhwZWRpY2FvIiwicG8uY29tcGxldGVfZmF0dXJhbWVudG8iLCJwby5hcHByb3ZlX2Rlc3BhY2hvIl0sImV4cCI6MTc3Mzk0MjQ3MSwiaWF0IjoxNzczODU2MDcxfQ.aXj5Ri9W9DUycgSoWHgTKcKTC_RWFWGuhv0fkxHiFA0",
+        "token_type": "bearer",
+        "expires_in": 86400
+      },
+      "error": null,
+      "success": true
+    },
+    {
+      "timestamp": "2026-03-18T17:47:54.080318",
+      "scenario": "Valid Login",
+      "action": "Login as Production Manager (producao_manager)",
+      "method": "POST",
+      "url": "http://localhost:8001/api/auth/login",
+      "request_data": {
+        "email": "producao@promaflex.com",
+        "password": "Producao@123"
+      },
+      "response_status": 200,
+      "response_data": {
+        "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyLTEyMy00NTYiLCJ0ZW5hbnRfaWQiOiJ0ZW5hbnQtYWJjLWRlZiIsImVtYWlsIjoicHJvZHVjYW9AcHJvbWFmbGV4LmNvbSIsIm5hbWUiOiJEZW1vIFVzZXIiLCJyb2xlIjoiYWRtaW4iLCJwZXJtaXNzaW9ucyI6WyJwby5jcmVhdGUiLCJwby5yZWFkIiwicG8udXBkYXRlIiwicG8uYXBwcm92ZV9jb21lcmNpYWwiLCJwby5hcHByb3ZlX3BjcCIsInBvLmFwcHJvdmVfcHJvZHVjYW8iLCJwby5jb21wbGV0ZV9leHBlZGljYW8iLCJwby5jb21wbGV0ZV9mYXR1cmFtZW50byIsInBvLmFwcHJvdmVfZGVzcGFjaG8iXSwiZXhwIjoxNzczOTQyNDc0LCJpYXQiOjE3NzM4NTYwNzR9.khARC3Vl_QIAcYMaXw4E1Wb73Z96s6vbxOJuiVvf3AI",
+        "token_type": "bearer",
+        "expires_in": 86400
+      },
+      "error": null,
+      "success": true
+    },
+    {
+      "timestamp": "2026-03-18T17:47:56.652565",
+      "scenario": "Valid Login",
+      "action": "Login as Shipping & Invoicing Manager (expedicao_manager)",
+      "method": "POST",
+      "url": "http://localhost:8001/api/auth/login",
+      "request_data": {
+        "email": "expedicao@promaflex.com",
+        "password": "Expedicao@123"
+      },
+      "response_status": 200,
+      "response_data": {
+        "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyLTEyMy00NTYiLCJ0ZW5hbnRfaWQiOiJ0ZW5hbnQtYWJjLWRlZiIsImVtYWlsIjoiZXhwZWRpY2FvQHByb21hZmxleC5jb20iLCJuYW1lIjoiRGVtbyBVc2VyIiwicm9sZSI6ImFkbWluIiwicGVybWlzc2lvbnMiOlsicG8uY3JlYXRlIiwicG8ucmVhZCIsInBvLnVwZGF0ZSIsInBvLmFwcHJvdmVfY29tZXJjaWFsIiwicG8uYXBwcm92ZV9wY3AiLCJwby5hcHByb3ZlX3Byb2R1Y2FvIiwicG8uY29tcGxldGVfZXhwZWRpY2FvIiwicG8uY29tcGxldGVfZmF0dXJhbWVudG8iLCJwby5hcHByb3ZlX2Rlc3BhY2hvIl0sImV4cCI6MTc3Mzk0MjQ3NiwiaWF0IjoxNzczODU2MDc2fQ.4HqTUp4LVlpAD7V6y5f3S9XqnRsrO1MDt5Zr7qdHwB8",
+        "token_type": "bearer",
+        "expires_in": 86400
+      },
+      "error": null,
+      "success": true
+    },
+    {
+      "timestamp": "2026-03-18T17:48:00.308765",
+      "scenario": "Corrupted Upload",
+      "action": "Upload corrupted Excel file",
+      "method": "POST",
+      "url": "http://localhost:8001/api/import/upload",
+      "request_data": {
+        "mapping_json": "{\"mappings\": [{\"column_name\": \"PO Number\", \"field_type\": \"po_number\"}, {\"column_name\": \"Client\", \"field_type\": \"client_name\"}, {\"column_name\": \"SKU\", \"field_type\": \"sku\"}, {\"column_name\": \"Quantity\", \"field_type\": \"quantity\"}, {\"column_name\": \"Price\", \"field_type\": \"price_unit\"}, {\"column_name\": \"Cost MP\", \"field_type\": \"cost_mp\"}, {\"column_name\": \"Cost MO\", \"field_type\": \"cost_mo\"}, {\"column_name\": \"Cost Energy\", \"field_type\": \"cost_energy\"}, {\"column_name\": \"Cost Gas\", \"field_type\": \"cost_gas\"}]}"
+      },
+      "response_status": 400,
+      "response_data": {
+        "detail": "Validation failed. Row 2: Quantity must be a valid integer, got: INVALID_NUMBER (Column: Quantity); Row 3: Unit Price must be non-negative (Column: Unit Price); Row 4: Material Cost must be a valid number, got: corrupted (Column: Material Cost)"
+      },
+      "error": null,
+      "success": true
+    },
+    {
+      "timestamp": "2026-03-18T17:48:02.509512",
+      "scenario": "Valid Upload",
+      "action": "Upload valid Excel file with 10 items",
+      "method": "POST",
+      "url": "http://localhost:8001/api/import/upload",
+      "request_data": {
+        "mapping_json": "{\"mappings\": [{\"column_name\": \"PO Number\", \"field_type\": \"po_number\"}, {\"column_name\": \"Client\", \"field_type\": \"client_name\"}, {\"column_name\": \"SKU\", \"field_type\": \"sku\"}, {\"column_name\": \"Quantity\", \"field_type\": \"quantity\"}, {\"column_name\": \"Price\", \"field_type\": \"price_unit\"}, {\"column_name\": \"Cost MP\", \"field_type\": \"cost_mp\"}, {\"column_name\": \"Cost MO\", \"field_type\": \"cost_mo\"}, {\"column_name\": \"Cost Energy\", \"field_type\": \"cost_energy\"}, {\"column_name\": \"Cost Gas\", \"field_type\": \"cost_gas\"}]}"
+      },
+      "response_status": 200,
+      "response_data": {
+        "success": true,
+        "message": "Successfully imported PO PO-STRESS-2026-001 with 10 items",
+        "po_id": "cb9f0618-fcd0-4736-907c-71c3e4defe9b",
+        "po_number": "PO-STRESS-2026-001",
+        "items_imported": 10,
+        "validation_result": {
+          "success": true,
+          "po_data": {
+            "po_number": "PO-STRESS-2026-001",
+            "client_name": "PromaFlex Test Client",
+            "items": [
+              {
+                "sku": "SKU-NORMAL-001",
+                "quantity": 15,
+                "price_unit": "110",
+                "cost_mp": "43",
+                "cost_mo": "22",
+                "cost_energy": "6",
+                "cost_gas": "4",
+                "margin_item": "35",
+                "total_cost": "75"
+              },
+              {
+                "sku": "SKU-NORMAL-002",
+                "quantity": 20,
+                "price_unit": "120",
+                "cost_mp": "46",
+                "cost_mo": "24",
+                "cost_energy": "7",
+                "cost_gas": "5",
+                "margin_item": "38",
+                "total_cost": "82"
+              },
+              {
+                "sku": "SKU-NORMAL-003",
+                "quantity": 25,
+                "price_unit": "130",
+                "cost_mp": "49",
+                "cost_mo": "26",
+                "cost_energy": "8",
+                "cost_gas": "6",
+                "margin_item": "41",
+                "total_cost": "89"
+              },
+              {
+                "sku": "SKU-NORMAL-004",
+                "quantity": 30,
+                "price_unit": "140",
+                "cost_mp": "52",
+                "cost_mo": "28",
+                "cost_energy": "9",
+                "cost_gas": "7",
+                "margin_item": "44",
+                "total_cost": "96"
+              },
+              {
+                "sku": "SKU-NORMAL-005",
+                "quantity": 35,
+                "price_unit": "150",
+                "cost_mp": "55",
+                "cost_mo": "30",
+                "cost_energy": "10",
+                "cost_gas": "8",
+                "margin_item": "47",
+                "total_cost": "103"
+              },
+              {
+                "sku": "SKU-NORMAL-006",
+                "quantity": 40,
+                "price_unit": "160",
+                "cost_mp": "58",
+                "cost_mo": "32",
+                "cost_energy": "11",
+                "cost_gas": "9",
+                "margin_item": "50",
+                "total_cost": "110"
+              },
+              {
+                "sku": "SKU-CUSTOM-001",
+                "quantity": 8,
+                "price_unit": "220",
+                "cost_mp": "85",
+                "cost_mo": "43",
+                "cost_energy": "11",
+                "cost_gas": "7",
+                "margin_item": "74",
+                "total_cost": "146"
+              },
+              {
+                "sku": "SKU-CUSTOM-002",
+                "quantity": 11,
+                "price_unit": "240",
+                "cost_mp": "90",
+                "cost_mo": "46",
+                "cost_energy": "12",
+                "cost_gas": "8",
+                "margin_item": "84",
+                "total_cost": "156"
+              },
+              {
+                "sku": "SKU-CUSTOM-003",
+                "quantity": 14,
+                "price_unit": "260",
+                "cost_mp": "95",
+                "cost_mo": "49",
+                "cost_energy": "13",
+                "cost_gas": "9",
+                "margin_item": "94",
+                "total_cost": "166"
+              },
+              {
+                "sku": "SKU-CUSTOM-004",
+                "quantity": 17,
+                "price_unit": "280",
+                "cost_mp": "100",
+                "cost_mo": "52",
+                "cost_energy": "14",
+                "cost_gas": "10",
+                "margin_item": "104",
+                "total_cost": "176"
+              }
+            ],
+            "total_value": "35950",
+            "total_cost": "24075",
+            "margin_global": "11875",
+            "margin_percentage": "33.03198887343532684283727399"
+          },
+          "errors": [],
+          "total_rows_processed": 10,
+          "valid_rows": 10,
+          "invalid_rows": 0
+        },
+        "total_value": "35950",
+        "total_cost": "24075",
+        "margin_global": "11875",
+        "margin_percentage": "33.03198887343532684283727399"
+      },
+      "error": null,
+      "success": true
+    },
+    {
+      "timestamp": "2026-03-18T17:48:04.565953",
+      "scenario": "PCP Without Attachment",
+      "action": "Try to approve PCP without attachments for personalized items",
+      "method": "POST",
+      "url": "http://localhost:8001/api/kanban/move-status",
+      "request_data": {
+        "po_id": "cb9f0618-fcd0-4736-907c-71c3e4defe9b",
+        "to_status": "PRODUCAO",
+        "reason": "Attempting to approve without required attachments"
+      },
+      "response_status": 404,
+      "response_data": {
+        "detail": "Purchase Order cb9f0618-fcd0-4736-907c-71c3e4defe9b not found"
+      },
+      "error": null,
+      "success": true
+    },
+    {
+      "timestamp": "2026-03-18T17:48:06.660785",
+      "scenario": "PCP With Attachment",
+      "action": "Approve PCP with attachments",
+      "method": "POST",
+      "url": "http://localhost:8001/api/kanban/move-status",
+      "request_data": {
+        "po_id": "cb9f0618-fcd0-4736-907c-71c3e4defe9b",
+        "to_status": "PRODUCAO",
+        "reason": "All personalized items have technical drawings attached"
+      },
+      "response_status": 404,
+      "response_data": {
+        "detail": "Purchase Order cb9f0618-fcd0-4736-907c-71c3e4defe9b not found"
+      },
+      "error": "Request failed with status 404",
+      "success": false
+    },
+    {
+      "timestamp": "2026-03-18T17:48:08.721397",
+      "scenario": "Parallel States Setup",
+      "action": "Approve PRODUCAO to enter parallel states",
+      "method": "POST",
+      "url": "http://localhost:8001/api/kanban/move-status",
+      "request_data": {
+        "po_id": "cb9f0618-fcd0-4736-907c-71c3e4defe9b",
+        "to_status": "EXPEDICAO_PENDENTE",
+        "reason": "Production completed"
+      },
+      "response_status": 404,
+      "response_data": {
+        "detail": "Purchase Order cb9f0618-fcd0-4736-907c-71c3e4defe9b not found"
+      },
+      "error": "Request failed with status 404",
+      "success": false
+    },
+    {
+      "timestamp": "2026-03-18T17:48:11.285316",
+      "scenario": "Incomplete Parallel States",
+      "action": "Try to move to DESPACHO with incomplete parallel states",
+      "method": "POST",
+      "url": "http://localhost:8001/api/kanban/move-status",
+      "request_data": {
+        "po_id": "cb9f0618-fcd0-4736-907c-71c3e4defe9b",
+        "to_status": "DESPACHO",
+        "reason": "Attempting premature dispatch"
+      },
+      "response_status": 404,
+      "response_data": {
+        "detail": "Purchase Order cb9f0618-fcd0-4736-907c-71c3e4defe9b not found"
+      },
+      "error": null,
+      "success": true
+    },
+    {
+      "timestamp": "2026-03-18T17:48:13.359765",
+      "scenario": "Complete Journey",
+      "action": "Move to DESPACHO with both parallel states complete",
+      "method": "POST",
+      "url": "http://localhost:8001/api/kanban/move-status",
+      "request_data": {
+        "po_id": "cb9f0618-fcd0-4736-907c-71c3e4defe9b",
+        "to_status": "DESPACHO",
+        "reason": "Both EXPEDICAO and FATURAMENTO completed"
+      },
+      "response_status": 404,
+      "response_data": {
+        "detail": "Purchase Order cb9f0618-fcd0-4736-907c-71c3e4defe9b not found"
+      },
+      "error": "Request failed with status 404",
+      "success": false
+    },
+    {
+      "timestamp": "2026-03-18T17:48:15.939596",
+      "scenario": "Complete Journey",
+      "action": "Complete DESPACHO and finalize PO",
+      "method": "POST",
+      "url": "http://localhost:8001/api/kanban/move-status",
+      "request_data": {
+        "po_id": "cb9f0618-fcd0-4736-907c-71c3e4defe9b",
+        "to_status": "CONCLUIDO",
+        "reason": "Order dispatched successfully"
+      },
+      "response_status": 404,
+      "response_data": {
+        "detail": "Purchase Order cb9f0618-fcd0-4736-907c-71c3e4defe9b not found"
+      },
+      "error": "Request failed with status 404",
+      "success": false
+    }
+  ]
+}

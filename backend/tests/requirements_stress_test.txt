@@ -1,0 +1,21 @@
+# FlexFlow Stress Test - Additional Requirements
+# Install with: pip install -r requirements_stress_test.txt
+
+# HTTP Requests
+requests>=2.31.0
+
+# Data manipulation and Excel generation
+pandas>=2.0.0
+openpyxl>=3.1.0
+
+# Colored terminal output
+colorama>=0.4.6
+
+# Async support (usually included with Python 3.7+)
+# asyncio is part of standard library
+
+# Optional: For better JSON handling
+# python-json-logger>=2.0.7
+
+# Optional: For performance monitoring
+# psutil>=5.9.0

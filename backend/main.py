@@ -46,12 +46,12 @@ async def lifespan(app: FastAPI):
     Handles startup and shutdown events.
     """
     # Startup
-    print("🚀 Starting FlexFlow API...")
+    print("Starting FlexFlow API...")
     
     # Create database tables (in production, use Alembic migrations)
     # Base.metadata.create_all(bind=engine)
     
-    print("✅ FlexFlow API started successfully")
+    print("FlexFlow API started successfully")
     
     yield
     
@@ -104,9 +104,9 @@ async def add_process_time_header(request: Request, call_next):
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     """Log all requests"""
-    print(f"📥 {request.method} {request.url.path}")
+    print(f"[IN] {request.method} {request.url.path}")
     response = await call_next(request)
-    print(f"📤 {request.method} {request.url.path} - Status: {response.status_code}")
+    print(f"[OUT] {request.method} {request.url.path} - Status: {response.status_code}")
     return response
 
 
@@ -137,7 +137,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
     """Handle unexpected errors"""
-    print(f"❌ Unexpected error: {str(exc)}")
+    print(f"[ERROR] Unexpected error: {str(exc)}")
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={

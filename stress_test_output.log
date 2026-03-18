@@ -1,0 +1,18 @@
+c:\Documentos\BotCase\FlexFlow\backend\tests\stress_test_journey.py:30: DeprecationWarning: 
+Pyarrow will become a required dependency of pandas in the next major release of pandas (pandas 3.0),
+(to allow more performant data types, such as the Arrow string type, and better interoperability with other libraries)
+but was not found to be installed on your system.
+If this would cause problems for you,
+please provide us feedback at https://github.com/pandas-dev/pandas/issues/54466
+        
+  import pandas as pd
+
+================================================================================
+FlexFlow - Stress & Journey Test Integrado
+================================================================================
+
+[!] ATENCAO: Este e um teste de stress que simula erros propositais!
+[!] NAO EXECUTE em ambiente de producao!
+[!] Certifique-se de que o servidor esta rodando em http://localhost:8000
+
+[ERROR] Server returned status 500
