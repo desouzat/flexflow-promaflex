@@ -167,22 +167,58 @@ async def login(
     
     # Create JWT token
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    
+    # DEBUG: Print token payload before encoding
+    token_data = {
+        "sub": str(user.id),
+        "tenant_id": str(user.tenant_id),
+        "email": user.email,
+        "name": user.name,
+        "role": user.role,
+        "permissions": permissions
+    }
+    print("\n" + "="*80)
+    print("[AUTH LOGIN] Token Payload BEFORE encoding:")
+    print(f"  - sub (user_id): {token_data['sub']}")
+    print(f"  - tenant_id: {token_data['tenant_id']}")
+    print(f"  - email: {token_data['email']}")
+    print(f"  - name: {token_data['name']}")
+    print(f"  - role: {token_data['role']}")
+    print(f"  - permissions: {token_data['permissions']}")
+    print(f"  - SECRET_KEY (first 20 chars): {SECRET_KEY[:20]}...")
+    print(f"  - ALGORITHM: {ALGORITHM}")
+    print("="*80 + "\n")
+    
     access_token = create_access_token(
-        data={
-            "sub": str(user.id),
-            "tenant_id": str(user.tenant_id),
-            "email": user.email,
-            "name": user.name,
-            "role": user.role,
-            "permissions": permissions
-        },
+        data=token_data,
         expires_delta=access_token_expires
     )
+    
+    # DEBUG: Print generated token info
+    print("\n" + "="*80)
+    print("[AUTH LOGIN] Token GENERATED:")
+    print(f"  - Token (first 50 chars): {access_token[:50]}...")
+    print(f"  - Token (last 50 chars): ...{access_token[-50:]}")
+    print(f"  - Token length: {len(access_token)} chars")
+    print(f"  - Expires in: {ACCESS_TOKEN_EXPIRE_MINUTES} minutes")
+    print("="*80 + "\n")
+    
+    # Prepare user data for frontend
+    user_data = {
+        "id": str(user.id),
+        "tenant_id": str(user.tenant_id),
+        "email": user.email,
+        "name": user.name,
+        "role": user.role,
+        "permissions": permissions,
+        "is_active": user.is_active
+    }
     
     return TokenResponse(
         access_token=access_token,
         token_type="bearer",
-        expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60  # Convert to seconds
+        expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,  # Convert to seconds
+        user=user_data
     )
 
 

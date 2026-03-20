@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { showSuccess, showError } from '../utils/toast'
 import { LogIn, AlertCircle } from 'lucide-react'
@@ -9,6 +10,7 @@ const LoginPage = () => {
     const [isSubmitting, setIsSubmitting] = useState(false)
     const [localError, setLocalError] = useState('')
     const { login } = useAuth()
+    const navigate = useNavigate()
 
     const handleSubmit = async (e) => {
         e.preventDefault()
@@ -19,19 +21,49 @@ const LoginPage = () => {
             return
         }
 
+        console.log('[LoginPage] Starting login process for:', username)
         setIsSubmitting(true)
 
         try {
             const result = await login(username, password)
 
             if (!result.success) {
+                console.error('[LoginPage] Login failed:', result.error)
                 const errorMsg = result.error || 'Login failed'
                 setLocalError(errorMsg)
                 showError(errorMsg)
             } else {
+                console.log('[LoginPage] Login successful!')
                 showSuccess('Login successful! Welcome back.')
+
+                // Double-check that token is in localStorage
+                const tokenCheck = localStorage.getItem('token')
+                const userCheck = localStorage.getItem('user')
+                console.log('[LoginPage] Post-login verification - Token:', !!tokenCheck, 'User:', !!userCheck)
+
+                // Wait a bit for state to fully propagate
+                await new Promise(resolve => setTimeout(resolve, 100))
+
+                console.log('[LoginPage] Attempting navigation to /kanban')
+
+                // Try React Router navigation first
+                navigate('/kanban', { replace: true })
+
+                // Fallback: If navigation doesn't work within 500ms, force a hard redirect
+                setTimeout(() => {
+                    const currentPath = window.location.pathname
+                    console.log('[LoginPage] Current path after navigate:', currentPath)
+
+                    if (currentPath !== '/kanban') {
+                        console.warn('[LoginPage] React Router navigation failed, forcing hard redirect')
+                        window.location.href = '/kanban'
+                    } else {
+                        console.log('[LoginPage] Navigation successful via React Router')
+                    }
+                }, 500)
             }
         } catch (err) {
+            console.error('[LoginPage] Unexpected error during login:', err)
             const errorMsg = 'An unexpected error occurred'
             setLocalError(errorMsg)
             showError(errorMsg)
@@ -113,7 +145,7 @@ const LoginPage = () => {
 
                     <div className="mt-6 text-center text-sm text-gray-600">
                         <p>Demo credentials:</p>
-                        <p className="font-mono text-xs mt-1">admin / admin123</p>
+                        <p className="font-mono text-xs mt-1">admin@botcase.com.br / admin123</p>
                     </div>
                 </div>
             </div>

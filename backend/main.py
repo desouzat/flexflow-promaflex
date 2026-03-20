@@ -12,6 +12,7 @@ import time
 
 from backend.routers import auth, import_router, kanban, dashboard
 from backend.database import engine, Base
+from backend.middleware import AuthenticationMiddleware, TenantIsolationMiddleware
 
 # Application metadata
 APP_TITLE = "FlexFlow API"
@@ -75,17 +76,27 @@ app = FastAPI(
 # MIDDLEWARE
 # ============================================================================
 
-# CORS Middleware
+# CORS Middleware (must be first)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",  # React dev server
-        "http://localhost:5173",  # Vite dev server
-        "http://localhost:8080",  # Alternative frontend port
-    ],
+    allow_origins=["*"],  # Allow all origins for development
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+# Authentication Middleware (validates JWT and injects context)
+# MUST come BEFORE TenantIsolationMiddleware
+# Excludes /api/auth/login, /api/auth/me and other public paths
+app.add_middleware(
+    AuthenticationMiddleware,
+    exclude_paths=["/api/auth/login", "/api/auth/me"]
+)
+
+# Tenant Isolation Middleware (checks tenant_id in context)
+# MUST come AFTER AuthenticationMiddleware
+app.add_middleware(
+    TenantIsolationMiddleware
 )
 
 

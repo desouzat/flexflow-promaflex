@@ -18,46 +18,65 @@ export const AuthProvider = ({ children }) => {
 
     useEffect(() => {
         // Check if user is already logged in
+        console.log('[AuthContext] Initializing - checking localStorage')
         const token = localStorage.getItem('token')
         const savedUser = localStorage.getItem('user')
 
+        console.log('[AuthContext] Token exists:', !!token)
+        console.log('[AuthContext] Saved user exists:', !!savedUser)
+
         if (token && savedUser) {
             try {
-                setUser(JSON.parse(savedUser))
+                const parsedUser = JSON.parse(savedUser)
+                console.log('[AuthContext] Restoring user session:', parsedUser.email)
+                setUser(parsedUser)
             } catch (err) {
-                console.error('Error parsing saved user:', err)
+                console.error('[AuthContext] Error parsing saved user:', err)
                 localStorage.removeItem('user')
                 localStorage.removeItem('token')
             }
         }
         setLoading(false)
+        console.log('[AuthContext] Initialization complete')
     }, [])
 
     const login = async (username, password) => {
         try {
+            console.log('[AuthContext] Login attempt for:', username)
             setError(null)
             setLoading(true)
 
-            // Create form data for OAuth2 password flow
-            const formData = new FormData()
-            formData.append('username', username)
-            formData.append('password', password)
-
-            const response = await api.post('/auth/login', formData, {
-                headers: {
-                    'Content-Type': 'multipart/form-data',
-                },
+            // Send JSON payload with email field (backend expects email, not username)
+            const response = await api.post('/auth/login', {
+                email: username,
+                password: password
             })
 
             const { access_token, user: userData } = response.data
+            console.log('[AuthContext] Login successful, received token and user data')
 
-            // Save token and user data
+            // Save token and user data synchronously
             localStorage.setItem('token', access_token)
             localStorage.setItem('user', JSON.stringify(userData))
+            console.log('[AuthContext] Token saved to localStorage')
+            console.log('[AuthContext] User data saved to localStorage')
 
+            // Verify the save was successful
+            const verifyToken = localStorage.getItem('token')
+            const verifyUser = localStorage.getItem('user')
+            console.log('[AuthContext] Verification - Token in localStorage:', !!verifyToken)
+            console.log('[AuthContext] Verification - User in localStorage:', !!verifyUser)
+
+            // Update state - this will trigger re-render
             setUser(userData)
-            return { success: true }
+            console.log('[AuthContext] User state updated, isAuthenticated will be true')
+
+            // Wait for state to propagate (React 18 batching)
+            await new Promise(resolve => setTimeout(resolve, 0))
+
+            return { success: true, user: userData }
         } catch (err) {
+            console.error('[AuthContext] Login failed:', err.response?.data || err.message)
             const errorMessage = err.response?.data?.detail || 'Login failed. Please try again.'
             setError(errorMessage)
             return { success: false, error: errorMessage }
@@ -67,6 +86,7 @@ export const AuthProvider = ({ children }) => {
     }
 
     const logout = () => {
+        console.log('[AuthContext] Logging out user')
         localStorage.removeItem('token')
         localStorage.removeItem('user')
         setUser(null)

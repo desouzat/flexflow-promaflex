@@ -5,7 +5,23 @@ This module sets up the SQLAlchemy engine and session factory using
 environment variables for database connection configuration.
 """
 
+# CRITICAL: Load environment variables FIRST before any other imports or operations
+from dotenv import load_dotenv
+from pathlib import Path
 import os
+
+# Get the directory where this file is located (backend/)
+current_dir = Path(__file__).resolve().parent
+env_path = current_dir / '.env'
+
+# Load .env file with explicit path
+load_dotenv(dotenv_path=env_path)
+
+# Debug: Check if .env file exists and was loaded
+print(f"[DEBUG] Procurando .env em: {env_path}")
+print(f"[DEBUG] Arquivo .env existe: {env_path.exists()}")
+print(f"[DEBUG] DATABASE_URL carregada: {os.getenv('DATABASE_URL', 'NAO ENCONTRADA')}")
+
 from typing import Generator
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session, declarative_base
@@ -16,14 +32,18 @@ Base = declarative_base()
 
 # Database URL from environment variable
 # Format: postgresql://user:password@host:port/database
-DATABASE_URL = os.getenv(
+# Fallback updated to use Google Cloud credentials
+SQLALCHEMY_DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql://flexflow_user:flexflow_pass@localhost:5432/flexflow_db"
+    "postgresql://flexflow_app:Souza%40123@127.0.0.1:5433/flexflow_prod"
 )
+
+# Debug print to verify the correct connection is being used
+print(f"[DEBUG] Conectando ao banco em: {SQLALCHEMY_DATABASE_URL}")
 
 # Create SQLAlchemy engine with connection pooling
 engine = create_engine(
-    DATABASE_URL,
+    SQLALCHEMY_DATABASE_URL,
     poolclass=QueuePool,
     pool_size=10,  # Number of connections to maintain in the pool
     max_overflow=20,  # Maximum number of connections that can be created beyond pool_size
