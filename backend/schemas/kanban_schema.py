@@ -6,7 +6,7 @@ Pydantic schemas for Kanban board operations.
 from typing import List, Optional
 from decimal import Decimal
 from datetime import datetime, date
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 
 
 class POItemResponse(BaseModel):
@@ -27,11 +27,16 @@ class POResponse(BaseModel):
     id: str = Field(..., description="PO ID")
     po_number: str = Field(..., description="PO number")
     client_name: Optional[str] = Field(None, description="Client name")
+    supplier_name: Optional[str] = Field(None, description="Supplier name (alias for client_name)")
     status_macro: str = Field(..., description="PO status")
+    status: str = Field(..., description="PO status (alias for status_macro)")
     items: List[POItemResponse] = Field(default_factory=list, description="PO items")
+    items_count: int = Field(0, description="Number of items in PO")
     total_value: Optional[Decimal] = Field(None, description="Total PO value")
     margin_global: Optional[Decimal] = Field(None, description="Global margin")
     margin_percentage: Optional[Decimal] = Field(None, description="Margin percentage")
+    expected_delivery_date: Optional[datetime] = Field(None, description="Expected delivery date")
+    priority: Optional[str] = Field("normal", description="Priority level (normal, high)")
     created_at: datetime = Field(..., description="Creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
     created_by: Optional[str] = Field(None, description="Creator user ID")
@@ -57,6 +62,23 @@ class MoveStatusRequest(BaseModel):
     to_status: str = Field(..., description="Target status")
     reason: Optional[str] = Field(None, description="Reason for status change")
     metadata: Optional[dict] = Field(None, description="Additional metadata")
+    skip_validation: bool = Field(
+        default=False,
+        description="Permitir salto de etapa (apenas LEADER/MASTER)"
+    )
+    justificativa_lider: Optional[str] = Field(
+        None,
+        description="Justificativa obrigatória para salto de etapa"
+    )
+
+    @validator('justificativa_lider')
+    def validate_justification(cls, v, values):
+        """Validar que justificativa é obrigatória quando skip_validation=True"""
+        if values.get('skip_validation') and not v:
+            raise ValueError('Justificativa é obrigatória para salto de etapa')
+        if values.get('skip_validation') and v and len(v.strip()) < 10:
+            raise ValueError('Justificativa deve ter pelo menos 10 caracteres')
+        return v
 
 
 class MoveStatusResponse(BaseModel):
@@ -67,6 +89,7 @@ class MoveStatusResponse(BaseModel):
     from_status: str = Field(..., description="Previous status")
     to_status: str = Field(..., description="New status")
     validation_errors: Optional[List[str]] = Field(None, description="Validation errors if any")
+    is_exception: bool = Field(default=False, description="Se foi um salto de etapa excepcional")
 
 
 class POFilterParams(BaseModel):

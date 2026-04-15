@@ -5,6 +5,7 @@ Endpoints for dashboard metrics and analytics.
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import Optional
 from decimal import Decimal
 from datetime import datetime, timedelta
@@ -21,8 +22,43 @@ from backend.schemas.dashboard_schema import (
 from backend.schemas.auth_schema import UserInfo
 from backend.database import get_db
 from backend.routers.auth import get_current_user
+from backend.models import PurchaseOrder, OrderItem
 
 router = APIRouter(prefix="/api/dashboard", tags=["Dashboard"])
+
+
+# Status mapping: Database status -> Display name (Portuguese)
+STATUS_DISPLAY_MAP = {
+    "DRAFT": "Pendente",
+    "SUBMITTED": "PCP",
+    "APPROVED": "Produção",
+    "IN_PROGRESS": "Expedição",
+    "COMPLETED": "Concluído",
+    "CANCELLED": "Cancelado"
+}
+
+
+def calculate_po_metrics(pos: list) -> dict:
+    """Calculate aggregate metrics for a list of POs"""
+    total_value = Decimal("0.00")
+    total_cost = Decimal("0.00")
+    
+    for po in pos:
+        for item in po.items:
+            item_total = Decimal(str(item.price)) * item.quantity
+            total_value += item_total
+            # Assuming 70% cost ratio if no cost data available
+            total_cost += item_total * Decimal("0.70")
+    
+    margin_global = total_value - total_cost
+    margin_percentage = (margin_global / total_value * 100) if total_value > 0 else Decimal("0.00")
+    
+    return {
+        "total_value": total_value,
+        "total_cost": total_cost,
+        "margin_global": margin_global,
+        "margin_percentage": margin_percentage
+    }
 
 
 @router.get("/metrics", response_model=DashboardMetrics)
@@ -46,81 +82,85 @@ async def get_dashboard_metrics(
     - Complete dashboard metrics
     """
     
-    # In production, query database:
-    # from sqlalchemy import func
-    # pos = db.query(PurchaseOrder).filter(
-    #     PurchaseOrder.tenant_id == current_user.tenant_id,
-    #     PurchaseOrder.created_at >= datetime.utcnow() - timedelta(days=days)
-    # ).all()
-    
-    # Mock data for demonstration
+    # Query database for POs in the specified time range
+    cutoff_date = datetime.utcnow() - timedelta(days=days)
+    pos = db.query(PurchaseOrder).filter(
+        PurchaseOrder.tenant_id == current_user.tenant_id,
+        PurchaseOrder.created_at >= cutoff_date
+    ).all()
     
     # 1. Margin Metrics
+    metrics = calculate_po_metrics(pos)
     margin_metrics = MarginMetrics(
-        total_margin=Decimal("45750.00"),  # Sum of all PO margins
-        average_margin_percentage=Decimal("31.00"),  # Average margin %
-        total_value=Decimal("150000.00"),  # Total value of all POs
-        total_cost=Decimal("104250.00"),  # Total cost of all POs
-        po_count=3  # Number of POs
+        total_margin=metrics["margin_global"],
+        average_margin_percentage=metrics["margin_percentage"],
+        total_value=metrics["total_value"],
+        total_cost=metrics["total_cost"],
+        po_count=len(pos)
     )
     
     # 2. Lead Time Metrics
-    # Calculate average time from creation to completion
-    lead_time_metrics = LeadTimeMetrics(
-        average_lead_time_days=15.5,  # Average days to complete
-        median_lead_time_days=14.0,  # Median days
-        min_lead_time_days=10.0,  # Fastest completion
-        max_lead_time_days=25.0,  # Slowest completion
-        completed_po_count=5  # Number of completed POs
-    )
+    completed_pos = [po for po in pos if po.status_macro == "COMPLETED"]
+    if completed_pos:
+        lead_times = []
+        for po in completed_pos:
+            delta = po.updated_at - po.created_at
+            lead_times.append(delta.total_seconds() / 86400)  # Convert to days
+        
+        lead_times.sort()
+        avg_lead_time = sum(lead_times) / len(lead_times)
+        median_idx = len(lead_times) // 2
+        median_lead_time = lead_times[median_idx] if lead_times else 0.0
+        
+        lead_time_metrics = LeadTimeMetrics(
+            average_lead_time_days=avg_lead_time,
+            median_lead_time_days=median_lead_time,
+            min_lead_time_days=min(lead_times) if lead_times else 0.0,
+            max_lead_time_days=max(lead_times) if lead_times else 0.0,
+            completed_po_count=len(completed_pos)
+        )
+    else:
+        lead_time_metrics = LeadTimeMetrics(
+            average_lead_time_days=0.0,
+            median_lead_time_days=0.0,
+            min_lead_time_days=0.0,
+            max_lead_time_days=0.0,
+            completed_po_count=0
+        )
     
     # 3. Items by Area/Status
+    all_items = db.query(OrderItem).filter(
+        OrderItem.tenant_id == current_user.tenant_id
+    ).all()
+    
+    # Count items by PO status
+    status_counts = {}
+    for item in all_items:
+        po_status = item.purchase_order.status_macro
+        display_status = STATUS_DISPLAY_MAP.get(po_status, po_status)
+        status_counts[display_status] = status_counts.get(display_status, 0) + 1
+    
+    total_items = len(all_items)
+    by_area = []
+    for status_name in ["Pendente", "PCP", "Produção", "Expedição", "Concluído"]:
+        count = status_counts.get(status_name, 0)
+        percentage = Decimal(str((count / total_items * 100) if total_items > 0 else 0))
+        by_area.append(AreaItemCount(
+            area=status_name,
+            count=count,
+            percentage=percentage
+        ))
+    
     items_by_area = ItemsByAreaMetrics(
-        total_items=225,
-        by_area=[
-            AreaItemCount(
-                area="COMERCIAL",
-                count=100,
-                percentage=Decimal("44.44")
-            ),
-            AreaItemCount(
-                area="PCP",
-                count=50,
-                percentage=Decimal("22.22")
-            ),
-            AreaItemCount(
-                area="PRODUCAO",
-                count=40,
-                percentage=Decimal("17.78")
-            ),
-            AreaItemCount(
-                area="EXPEDICAO_PENDENTE",
-                count=15,
-                percentage=Decimal("6.67")
-            ),
-            AreaItemCount(
-                area="FATURAMENTO_PENDENTE",
-                count=10,
-                percentage=Decimal("4.44")
-            ),
-            AreaItemCount(
-                area="DESPACHO",
-                count=5,
-                percentage=Decimal("2.22")
-            ),
-            AreaItemCount(
-                area="CONCLUIDO",
-                count=5,
-                percentage=Decimal("2.22")
-            )
-        ]
+        total_items=total_items,
+        by_area=by_area
     )
     
     return DashboardMetrics(
         margin=margin_metrics,
         lead_time=lead_time_metrics,
         items_by_area=items_by_area,
-        tenant_id=current_user.tenant_id,
+        tenant_id=str(current_user.tenant_id),
         generated_at=datetime.utcnow().isoformat()
     )
 
@@ -139,53 +179,48 @@ async def get_dashboard_summary(
     - Summary statistics and status distribution
     """
     
-    # Mock data
-    status_distribution = [
-        StatusDistribution(
-            status="COMERCIAL",
-            count=5,
-            percentage=Decimal("25.00")
-        ),
-        StatusDistribution(
-            status="PCP",
-            count=4,
-            percentage=Decimal("20.00")
-        ),
-        StatusDistribution(
-            status="PRODUCAO",
-            count=3,
-            percentage=Decimal("15.00")
-        ),
-        StatusDistribution(
-            status="EXPEDICAO_PENDENTE",
-            count=2,
-            percentage=Decimal("10.00")
-        ),
-        StatusDistribution(
-            status="FATURAMENTO_PENDENTE",
-            count=2,
-            percentage=Decimal("10.00")
-        ),
-        StatusDistribution(
-            status="DESPACHO",
-            count=2,
-            percentage=Decimal("10.00")
-        ),
-        StatusDistribution(
-            status="CONCLUIDO",
-            count=2,
-            percentage=Decimal("10.00")
-        )
-    ]
+    # Query all POs for tenant
+    pos = db.query(PurchaseOrder).filter(
+        PurchaseOrder.tenant_id == current_user.tenant_id
+    ).all()
+    
+    # Count items
+    total_items = db.query(OrderItem).filter(
+        OrderItem.tenant_id == current_user.tenant_id
+    ).count()
+    
+    # Status distribution
+    status_counts = {}
+    for po in pos:
+        display_status = STATUS_DISPLAY_MAP.get(po.status_macro, po.status_macro)
+        status_counts[display_status] = status_counts.get(display_status, 0) + 1
+    
+    total_pos = len(pos)
+    status_distribution = []
+    for status_name in ["Pendente", "PCP", "Produção", "Expedição", "Concluído"]:
+        count = status_counts.get(status_name, 0)
+        percentage = Decimal(str((count / total_pos * 100) if total_pos > 0 else 0))
+        status_distribution.append(StatusDistribution(
+            status=status_name,
+            count=count,
+            percentage=percentage
+        ))
+    
+    # Calculate totals
+    metrics = calculate_po_metrics(pos)
+    
+    # Count active vs completed
+    completed_pos = len([po for po in pos if po.status_macro == "COMPLETED"])
+    active_pos = total_pos - completed_pos
     
     return DashboardSummary(
-        total_pos=20,
-        total_items=225,
-        active_pos=18,  # Not completed
-        completed_pos=2,
+        total_pos=total_pos,
+        total_items=total_items,
+        active_pos=active_pos,
+        completed_pos=completed_pos,
         status_distribution=status_distribution,
-        total_value=Decimal("500000.00"),
-        total_margin=Decimal("150000.00")
+        total_value=metrics["total_value"],
+        total_margin=metrics["margin_global"]
     )
 
 
@@ -207,26 +242,53 @@ async def get_margin_trend(
     - Daily margin data points
     """
     
-    # Mock trend data
+    # Query POs in date range
+    cutoff_date = datetime.utcnow() - timedelta(days=days)
+    pos = db.query(PurchaseOrder).filter(
+        PurchaseOrder.tenant_id == current_user.tenant_id,
+        PurchaseOrder.created_at >= cutoff_date
+    ).all()
+    
+    # Group by date
+    daily_data = {}
+    for po in pos:
+        date_key = po.created_at.strftime("%Y-%m-%d")
+        if date_key not in daily_data:
+            daily_data[date_key] = {"pos": [], "count": 0}
+        daily_data[date_key]["pos"].append(po)
+        daily_data[date_key]["count"] += 1
+    
+    # Calculate daily margins
     trend_data = []
     base_date = datetime.utcnow() - timedelta(days=days)
     
     for i in range(days):
         date = base_date + timedelta(days=i)
-        # Simulate varying margins
-        margin = 1000 + (i * 50) + ((i % 7) * 200)
+        date_key = date.strftime("%Y-%m-%d")
+        
+        if date_key in daily_data:
+            day_pos = daily_data[date_key]["pos"]
+            metrics = calculate_po_metrics(day_pos)
+            margin = float(metrics["margin_global"])
+            po_count = daily_data[date_key]["count"]
+        else:
+            margin = 0
+            po_count = 0
         
         trend_data.append({
-            "date": date.strftime("%Y-%m-%d"),
+            "date": date_key,
             "margin": margin,
-            "po_count": 1 + (i % 3)
+            "po_count": po_count
         })
+    
+    total_margin = sum(d["margin"] for d in trend_data)
+    avg_margin = total_margin / days if days > 0 else 0
     
     return {
         "trend": trend_data,
         "period_days": days,
-        "total_margin": sum(d["margin"] for d in trend_data),
-        "average_daily_margin": sum(d["margin"] for d in trend_data) / days
+        "total_margin": total_margin,
+        "average_daily_margin": avg_margin
     }
 
 
@@ -244,19 +306,56 @@ async def get_lead_time_distribution(
     - Lead time distribution data
     """
     
-    # Mock distribution data
+    # Query completed POs
+    completed_pos = db.query(PurchaseOrder).filter(
+        PurchaseOrder.tenant_id == current_user.tenant_id,
+        PurchaseOrder.status_macro == "COMPLETED"
+    ).all()
+    
+    # Calculate lead times
+    lead_times = []
+    for po in completed_pos:
+        delta = po.updated_at - po.created_at
+        days = delta.total_seconds() / 86400
+        lead_times.append(days)
+    
+    # Bucket into ranges
+    buckets = {
+        "0-7 days": 0,
+        "8-14 days": 0,
+        "15-21 days": 0,
+        "22-30 days": 0,
+        "30+ days": 0
+    }
+    
+    for days in lead_times:
+        if days <= 7:
+            buckets["0-7 days"] += 1
+        elif days <= 14:
+            buckets["8-14 days"] += 1
+        elif days <= 21:
+            buckets["15-21 days"] += 1
+        elif days <= 30:
+            buckets["22-30 days"] += 1
+        else:
+            buckets["30+ days"] += 1
+    
+    total = len(lead_times)
     distribution = [
-        {"range": "0-7 days", "count": 5, "percentage": 25.0},
-        {"range": "8-14 days", "count": 8, "percentage": 40.0},
-        {"range": "15-21 days", "count": 4, "percentage": 20.0},
-        {"range": "22-30 days", "count": 2, "percentage": 10.0},
-        {"range": "30+ days", "count": 1, "percentage": 5.0}
+        {
+            "range": range_name,
+            "count": count,
+            "percentage": (count / total * 100) if total > 0 else 0
+        }
+        for range_name, count in buckets.items()
     ]
+    
+    avg_lead_time = sum(lead_times) / len(lead_times) if lead_times else 0
     
     return {
         "distribution": distribution,
-        "total_pos": 20,
-        "average_lead_time": 15.5
+        "total_pos": total,
+        "average_lead_time": avg_lead_time
     }
 
 
@@ -276,47 +375,16 @@ async def get_top_clients(
     - List of top clients with their metrics
     """
     
-    # Mock client data
+    # For now, return placeholder since we don't have client_name in the model
+    # This would need to be implemented when client data is added
     clients = [
         {
-            "client_name": "Acme Corp",
-            "total_value": Decimal("150000.00"),
-            "total_margin": Decimal("45000.00"),
-            "margin_percentage": Decimal("30.00"),
-            "po_count": 5,
-            "avg_lead_time": 14.5
-        },
-        {
-            "client_name": "Beta Industries",
-            "total_value": Decimal("120000.00"),
-            "total_margin": Decimal("36000.00"),
-            "margin_percentage": Decimal("30.00"),
-            "po_count": 4,
-            "avg_lead_time": 16.0
-        },
-        {
-            "client_name": "Gamma Solutions",
-            "total_value": Decimal("100000.00"),
-            "total_margin": Decimal("32000.00"),
-            "margin_percentage": Decimal("32.00"),
-            "po_count": 3,
-            "avg_lead_time": 15.0
-        },
-        {
-            "client_name": "Delta Corp",
-            "total_value": Decimal("80000.00"),
-            "total_margin": Decimal("24000.00"),
-            "margin_percentage": Decimal("30.00"),
-            "po_count": 3,
-            "avg_lead_time": 17.0
-        },
-        {
-            "client_name": "Epsilon Ltd",
-            "total_value": Decimal("50000.00"),
-            "total_margin": Decimal("15000.00"),
-            "margin_percentage": Decimal("30.00"),
-            "po_count": 2,
-            "avg_lead_time": 13.0
+            "client_name": "Cliente Demo",
+            "total_value": Decimal("0.00"),
+            "total_margin": Decimal("0.00"),
+            "margin_percentage": Decimal("0.00"),
+            "po_count": 0,
+            "avg_lead_time": 0.0
         }
     ]
     
@@ -346,28 +414,23 @@ async def get_status_timeline(
     
     if po_id:
         # Specific PO timeline
+        po = db.query(PurchaseOrder).filter(
+            PurchaseOrder.id == po_id,
+            PurchaseOrder.tenant_id == current_user.tenant_id
+        ).first()
+        
+        if not po:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Purchase Order {po_id} not found"
+            )
+        
+        # For now, return basic timeline
+        # This would be enhanced with audit log data
         timeline = [
             {
-                "status": "COMERCIAL",
-                "entered_at": "2024-03-01T10:00:00Z",
-                "exited_at": "2024-03-03T14:30:00Z",
-                "duration_hours": 52.5
-            },
-            {
-                "status": "PCP",
-                "entered_at": "2024-03-03T14:30:00Z",
-                "exited_at": "2024-03-05T09:00:00Z",
-                "duration_hours": 42.5
-            },
-            {
-                "status": "PRODUCAO",
-                "entered_at": "2024-03-05T09:00:00Z",
-                "exited_at": "2024-03-15T17:00:00Z",
-                "duration_hours": 248.0
-            },
-            {
-                "status": "EXPEDICAO_PENDENTE",
-                "entered_at": "2024-03-15T17:00:00Z",
+                "status": STATUS_DISPLAY_MAP.get(po.status_macro, po.status_macro),
+                "entered_at": po.created_at.isoformat(),
                 "exited_at": None,
                 "duration_hours": None
             }
@@ -376,25 +439,27 @@ async def get_status_timeline(
         return {
             "po_id": po_id,
             "timeline": timeline,
-            "current_status": "EXPEDICAO_PENDENTE",
-            "total_elapsed_hours": 343.0
+            "current_status": STATUS_DISPLAY_MAP.get(po.status_macro, po.status_macro),
+            "total_elapsed_hours": 0
         }
     else:
         # Average timeline across all POs
+        # This would be calculated from audit logs in production
         avg_timeline = [
-            {"status": "COMERCIAL", "avg_duration_hours": 48.0},
+            {"status": "Pendente", "avg_duration_hours": 48.0},
             {"status": "PCP", "avg_duration_hours": 36.0},
-            {"status": "PRODUCAO", "avg_duration_hours": 240.0},
-            {"status": "EXPEDICAO_PENDENTE", "avg_duration_hours": 24.0},
-            {"status": "FATURAMENTO_PENDENTE", "avg_duration_hours": 24.0},
-            {"status": "DESPACHO", "avg_duration_hours": 12.0}
+            {"status": "Produção", "avg_duration_hours": 240.0},
+            {"status": "Expedição", "avg_duration_hours": 24.0},
+            {"status": "Concluído", "avg_duration_hours": 0.0}
         ]
         
         return {
             "type": "average",
             "timeline": avg_timeline,
             "total_avg_hours": sum(s["avg_duration_hours"] for s in avg_timeline),
-            "po_count": 20
+            "po_count": db.query(PurchaseOrder).filter(
+                PurchaseOrder.tenant_id == current_user.tenant_id
+            ).count()
         }
 
 
@@ -416,51 +481,34 @@ async def get_dashboard_alerts(
     - List of alerts with severity levels
     """
     
-    alerts = [
-        {
-            "id": "alert-001",
-            "severity": "high",
-            "type": "deadline",
-            "message": "PO-2024-001 delivery date is in 2 days",
-            "po_id": "po-001",
-            "po_number": "PO-2024-001",
-            "created_at": "2024-03-15T10:00:00Z"
-        },
-        {
-            "id": "alert-002",
+    alerts = []
+    
+    # Check for POs stuck in DRAFT status for more than 7 days
+    week_ago = datetime.utcnow() - timedelta(days=7)
+    stuck_pos = db.query(PurchaseOrder).filter(
+        PurchaseOrder.tenant_id == current_user.tenant_id,
+        PurchaseOrder.status_macro == "DRAFT",
+        PurchaseOrder.created_at < week_ago
+    ).all()
+    
+    for po in stuck_pos:
+        days_stuck = (datetime.utcnow() - po.created_at).days
+        alerts.append({
+            "id": f"alert-stuck-{po.id}",
             "severity": "medium",
             "type": "stuck",
-            "message": "PO-2024-005 has been in PCP for 7 days",
-            "po_id": "po-005",
-            "po_number": "PO-2024-005",
-            "created_at": "2024-03-14T15:30:00Z"
-        },
-        {
-            "id": "alert-003",
-            "severity": "low",
-            "type": "margin",
-            "message": "PO-2024-008 has margin below 20%",
-            "po_id": "po-008",
-            "po_number": "PO-2024-008",
-            "created_at": "2024-03-13T09:00:00Z"
-        },
-        {
-            "id": "alert-004",
-            "severity": "high",
-            "type": "attachment",
-            "message": "PO-2024-003 has personalized items without attachments",
-            "po_id": "po-003",
-            "po_number": "PO-2024-003",
-            "created_at": "2024-03-12T14:00:00Z"
-        }
-    ]
+            "message": f"Pedido {po.po_number} está pendente há {days_stuck} dias",
+            "po_id": str(po.id),
+            "po_number": po.po_number,
+            "created_at": po.created_at.isoformat()
+        })
     
     return {
         "alerts": alerts,
         "total": len(alerts),
         "by_severity": {
-            "high": 2,
-            "medium": 1,
-            "low": 1
+            "high": len([a for a in alerts if a["severity"] == "high"]),
+            "medium": len([a for a in alerts if a["severity"] == "medium"]),
+            "low": len([a for a in alerts if a["severity"] == "low"])
         }
     }

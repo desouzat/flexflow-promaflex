@@ -8,6 +8,7 @@ import Layout from './components/Layout'
 import KanbanPage from './pages/KanbanPage'
 import ImportPage from './pages/ImportPage'
 import DashboardPage from './pages/DashboardPage'
+import CostsPage from './pages/CostsPage'
 
 // Protected Route Component
 const ProtectedRoute = ({ children }) => {
@@ -80,6 +81,7 @@ function AppRoutes() {
                 <Route path="kanban" element={<KanbanPage />} />
                 <Route path="import" element={<ImportPage />} />
                 <Route path="dashboard" element={<DashboardPage />} />
+                <Route path="costs" element={<CostsPage />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

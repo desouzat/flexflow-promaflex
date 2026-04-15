@@ -268,13 +268,14 @@ class OrderItem(Base):
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     status_item: Mapped[str] = mapped_column(String(50), nullable=False)
+    extra_metadata: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), 
+        DateTime(timezone=True),
         server_default=func.now()
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), 
-        server_default=func.now(), 
+        DateTime(timezone=True),
+        server_default=func.now(),
         onupdate=func.now()
     )
     
@@ -334,8 +335,10 @@ class AuditLog(Base):
     to_status: Mapped[str] = mapped_column(String(50), nullable=False)
     hash: Mapped[str] = mapped_column(String(64), nullable=False)
     previous_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    is_exception: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    justification: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), 
+        DateTime(timezone=True),
         server_default=func.now()
     )
     changed_by: Mapped[Optional[uuid.UUID]] = mapped_column(
@@ -362,6 +365,7 @@ class AuditLog(Base):
         Index('idx_audit_created_at', 'created_at'),
         Index('idx_audit_hash', 'hash'),
         Index('idx_audit_changed_by', 'changed_by'),
+        Index('idx_audit_is_exception', 'is_exception'),
     )
     
     @staticmethod
@@ -421,3 +425,77 @@ def get_last_audit_hash(session, item_id: uuid.UUID) -> Optional[str]:
     ).order_by(AuditLog.created_at.desc()).first()
     
     return last_log.hash if last_log else None
+
+
+# ============================================================================
+# MODELO: MaterialCost
+# ============================================================================
+
+class MaterialCost(Base):
+    """
+    Modelo de Custos de Material.
+    Gerencia custos de matéria-prima e rendimento por SKU.
+    Acesso exclusivo para role MASTER.
+    """
+    __tablename__ = "material_costs"
+    
+    # Colunas
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False
+    )
+    sku: Mapped[str] = mapped_column(String(100), nullable=False)
+    nome: Mapped[str] = mapped_column(String(255), nullable=False)
+    custo_mp_kg: Mapped[float] = mapped_column(
+        Numeric(10, 2),
+        nullable=False,
+        comment="Custo de matéria-prima por kg"
+    )
+    rendimento: Mapped[float] = mapped_column(
+        Numeric(10, 4),
+        nullable=False,
+        comment="Rendimento em kg por unidade"
+    )
+    indice_impostos: Mapped[float] = mapped_column(
+        Numeric(5, 2),
+        nullable=False,
+        default=22.25,
+        comment="Índice de impostos em percentual (padrão 22.25%)"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now()
+    )
+    updated_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True
+    )
+    
+    # Relacionamentos
+    tenant: Mapped["Tenant"] = relationship("Tenant")
+    updated_by_user: Mapped[Optional["User"]] = relationship("User")
+    
+    # Índices e Constraints
+    __table_args__ = (
+        Index('idx_material_cost_tenant_id', 'tenant_id'),
+        Index('idx_material_cost_sku', 'sku'),
+        Index('idx_material_cost_tenant_sku', 'tenant_id', 'sku', unique=True),
+        CheckConstraint('custo_mp_kg >= 0', name='check_custo_mp_kg_non_negative'),
+        CheckConstraint('rendimento > 0', name='check_rendimento_positive'),
+        CheckConstraint('indice_impostos >= 0 AND indice_impostos <= 100', name='check_indice_impostos_range'),
+    )
+    
+    def __repr__(self):
+        return f"<MaterialCost(id={self.id}, sku={self.sku}, nome={self.nome})>"

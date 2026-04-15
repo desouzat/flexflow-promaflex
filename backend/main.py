@@ -10,7 +10,7 @@ from fastapi.exceptions import RequestValidationError
 from contextlib import asynccontextmanager
 import time
 
-from backend.routers import auth, import_router, kanban, dashboard
+from backend.routers import auth, import_router, kanban, dashboard, costs, workshop
 from backend.database import engine, Base
 from backend.middleware import AuthenticationMiddleware, TenantIsolationMiddleware
 
@@ -167,6 +167,7 @@ app.include_router(auth.router)
 app.include_router(import_router.router)
 app.include_router(kanban.router)
 app.include_router(dashboard.router)
+app.include_router(costs.router)
 
 
 # ============================================================================
@@ -188,7 +189,8 @@ async def root():
             "auth": "/api/auth",
             "import": "/api/import",
             "kanban": "/api/kanban",
-            "dashboard": "/api/dashboard"
+            "dashboard": "/api/dashboard",
+            "costs": "/api/costs"
         }
     }
 
@@ -241,6 +243,14 @@ async def api_info():
                 "top_clients": "GET /api/dashboard/top-clients",
                 "status_timeline": "GET /api/dashboard/status-timeline",
                 "alerts": "GET /api/dashboard/alerts"
+            },
+            "costs": {
+                "list_materials": "GET /api/costs/materials",
+                "get_material": "GET /api/costs/materials/{sku}",
+                "create_material": "POST /api/costs/materials",
+                "update_material": "PUT /api/costs/materials/{sku}",
+                "delete_material": "DELETE /api/costs/materials/{sku}",
+                "settings": "GET /api/costs/settings"
             }
         }
     }

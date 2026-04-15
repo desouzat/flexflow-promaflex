@@ -21,90 +21,44 @@ from backend.schemas.kanban_schema import (
 from backend.schemas.auth_schema import UserInfo
 from backend.database import get_db
 from backend.routers.auth import get_current_user
+from backend.models import PurchaseOrder, OrderItem
 
 router = APIRouter(prefix="/api/kanban", tags=["Kanban"])
 
 
-# Mock data for demonstration (replace with database queries in production)
-def get_mock_pos(tenant_id: str) -> List[dict]:
-    """Generate mock PO data for demonstration"""
-    return [
-        {
-            "id": "po-001",
-            "po_number": "PO-2024-001",
-            "client_name": "Acme Corp",
-            "status_macro": "COMERCIAL",
-            "total_value": Decimal("25000.00"),
-            "margin_global": Decimal("8250.00"),
-            "margin_percentage": Decimal("33.00"),
-            "created_at": datetime(2024, 3, 1),
-            "updated_at": datetime(2024, 3, 1),
-            "created_by": "user-123",
-            "items": [
-                {
-                    "id": "item-001",
-                    "sku": "SKU-001",
-                    "quantity": 100,
-                    "price": Decimal("150.00"),
-                    "status_item": "PENDING",
-                    "margin_item": Decimal("55.00"),
-                    "total_cost": Decimal("95.00"),
-                    "created_at": datetime(2024, 3, 1),
-                    "updated_at": datetime(2024, 3, 1)
-                }
-            ]
-        },
-        {
-            "id": "po-002",
-            "po_number": "PO-2024-002",
-            "client_name": "Beta Industries",
-            "status_macro": "PCP",
-            "total_value": Decimal("50000.00"),
-            "margin_global": Decimal("15000.00"),
-            "margin_percentage": Decimal("30.00"),
-            "created_at": datetime(2024, 3, 5),
-            "updated_at": datetime(2024, 3, 10),
-            "created_by": "user-123",
-            "items": [
-                {
-                    "id": "item-002",
-                    "sku": "SKU-002",
-                    "quantity": 50,
-                    "price": Decimal("200.00"),
-                    "status_item": "ORDERED",
-                    "margin_item": Decimal("65.00"),
-                    "total_cost": Decimal("135.00"),
-                    "created_at": datetime(2024, 3, 5),
-                    "updated_at": datetime(2024, 3, 10)
-                }
-            ]
-        },
-        {
-            "id": "po-003",
-            "po_number": "PO-2024-003",
-            "client_name": "Gamma Solutions",
-            "status_macro": "PRODUCAO",
-            "total_value": Decimal("75000.00"),
-            "margin_global": Decimal("22500.00"),
-            "margin_percentage": Decimal("30.00"),
-            "created_at": datetime(2024, 3, 8),
-            "updated_at": datetime(2024, 3, 15),
-            "created_by": "user-456",
-            "items": [
-                {
-                    "id": "item-003",
-                    "sku": "SKU-003",
-                    "quantity": 75,
-                    "price": Decimal("300.00"),
-                    "status_item": "RECEIVED",
-                    "margin_item": Decimal("100.00"),
-                    "total_cost": Decimal("200.00"),
-                    "created_at": datetime(2024, 3, 8),
-                    "updated_at": datetime(2024, 3, 15)
-                }
-            ]
-        }
-    ]
+# Status mapping: Database status -> Display name (Portuguese)
+STATUS_DISPLAY_MAP = {
+    "DRAFT": "Pendente",
+    "SUBMITTED": "PCP",
+    "APPROVED": "Produção",
+    "IN_PROGRESS": "Expedição",
+    "COMPLETED": "Concluído",
+    "CANCELLED": "Cancelado"
+}
+
+# Reverse mapping for API compatibility
+DISPLAY_TO_DB_STATUS = {v: k for k, v in STATUS_DISPLAY_MAP.items()}
+
+
+def calculate_po_metrics(po: PurchaseOrder) -> dict:
+    """Calculate metrics for a Purchase Order"""
+    total_value = Decimal("0.00")
+    total_cost = Decimal("0.00")
+    
+    for item in po.items:
+        item_total = Decimal(str(item.price)) * item.quantity
+        total_value += item_total
+        # Assuming 70% cost ratio if no cost data available
+        total_cost += item_total * Decimal("0.70")
+    
+    margin_global = total_value - total_cost
+    margin_percentage = (margin_global / total_value * 100) if total_value > 0 else Decimal("0.00")
+    
+    return {
+        "total_value": total_value,
+        "margin_global": margin_global,
+        "margin_percentage": margin_percentage
+    }
 
 
 @router.get("/board", response_model=KanbanBoardResponse)
@@ -121,52 +75,70 @@ async def get_kanban_board(
     - Kanban board with columns for each status
     """
     
-    # In production, query database:
-    # pos = db.query(PurchaseOrder).filter(
-    #     PurchaseOrder.tenant_id == current_user.tenant_id
-    # ).all()
+    # Query database for POs
+    pos = db.query(PurchaseOrder).filter(
+        PurchaseOrder.tenant_id == current_user.tenant_id
+    ).all()
     
-    # For demo, use mock data
-    mock_pos = get_mock_pos(current_user.tenant_id)
-    
-    # Define status columns
+    # Define status columns (in Portuguese)
     status_columns = [
-        "COMERCIAL",
-        "PCP",
-        "PRODUCAO",
-        "EXPEDICAO_PENDENTE",
-        "FATURAMENTO_PENDENTE",
-        "DESPACHO",
-        "CONCLUIDO"
+        ("DRAFT", "Pendente"),
+        ("SUBMITTED", "PCP"),
+        ("APPROVED", "Produção"),
+        ("IN_PROGRESS", "Expedição"),
+        ("COMPLETED", "Concluído")
     ]
     
     # Group POs by status
     columns = []
-    for status_name in status_columns:
+    for db_status, display_name in status_columns:
         # Filter POs for this status
-        status_pos = [po for po in mock_pos if po["status_macro"] == status_name]
+        status_pos = [po for po in pos if po.status_macro == db_status]
         
         # Convert to response models
         po_responses = []
         for po in status_pos:
-            items = [POItemResponse(**item) for item in po["items"]]
+            # Calculate metrics
+            metrics = calculate_po_metrics(po)
+            
+            # Convert items
+            items = [
+                POItemResponse(
+                    id=str(item.id),
+                    sku=item.sku,
+                    quantity=item.quantity,
+                    price=Decimal(str(item.price)),
+                    status_item=item.status_item,
+                    margin_item=Decimal("0.00"),  # Calculate if needed
+                    total_cost=Decimal("0.00"),  # Calculate if needed
+                    created_at=item.created_at,
+                    updated_at=item.updated_at
+                )
+                for item in po.items
+            ]
+            
             po_response = POResponse(
-                id=po["id"],
-                po_number=po["po_number"],
-                client_name=po["client_name"],
-                status_macro=po["status_macro"],
+                id=str(po.id),
+                po_number=po.po_number,
+                client_name=getattr(po, 'client_name', None) or "Cliente",
+                supplier_name=getattr(po, 'supplier_name', None) or getattr(po, 'client_name', None) or "Fornecedor Desconhecido",
+                status_macro=display_name,  # Use display name
+                status=display_name,  # Alias for frontend compatibility
                 items=items,
-                total_value=po["total_value"],
-                margin_global=po["margin_global"],
-                margin_percentage=po["margin_percentage"],
-                created_at=po["created_at"],
-                updated_at=po["updated_at"],
-                created_by=po["created_by"]
+                items_count=len(items),
+                total_value=metrics["total_value"],
+                margin_global=metrics["margin_global"],
+                margin_percentage=metrics["margin_percentage"],
+                expected_delivery_date=getattr(po, 'expected_delivery_date', None),
+                priority=getattr(po, 'priority', 'normal'),
+                created_at=po.created_at,
+                updated_at=po.updated_at,
+                created_by=str(po.created_by) if po.created_by else None
             )
             po_responses.append(po_response)
         
         column = KanbanColumn(
-            status=status_name,
+            status=display_name,  # Use display name
             count=len(po_responses),
             pos=po_responses
         )
@@ -174,8 +146,8 @@ async def get_kanban_board(
     
     return KanbanBoardResponse(
         columns=columns,
-        total_pos=len(mock_pos),
-        tenant_id=current_user.tenant_id
+        total_pos=len(pos),
+        tenant_id=str(current_user.tenant_id)
     )
 
 
@@ -203,46 +175,60 @@ async def list_purchase_orders(
     - List of Purchase Orders
     """
     
-    # Get mock data
-    mock_pos = get_mock_pos(current_user.tenant_id)
+    # Query database
+    query = db.query(PurchaseOrder).filter(
+        PurchaseOrder.tenant_id == current_user.tenant_id
+    )
     
     # Apply filters
-    filtered_pos = mock_pos
-    
     if status:
-        filtered_pos = [po for po in filtered_pos if po["status_macro"] == status]
-    
-    if client_name:
-        filtered_pos = [
-            po for po in filtered_pos 
-            if client_name.lower() in po["client_name"].lower()
-        ]
+        # Convert display name to DB status if needed
+        db_status = DISPLAY_TO_DB_STATUS.get(status, status)
+        query = query.filter(PurchaseOrder.status_macro == db_status)
     
     if po_number:
-        filtered_pos = [
-            po for po in filtered_pos 
-            if po_number.lower() in po["po_number"].lower()
-        ]
+        query = query.filter(PurchaseOrder.po_number.ilike(f"%{po_number}%"))
     
     # Apply pagination
-    paginated_pos = filtered_pos[skip:skip + limit]
+    pos = query.offset(skip).limit(limit).all()
     
     # Convert to response models
     po_responses = []
-    for po in paginated_pos:
-        items = [POItemResponse(**item) for item in po["items"]]
+    for po in pos:
+        metrics = calculate_po_metrics(po)
+        
+        items = [
+            POItemResponse(
+                id=str(item.id),
+                sku=item.sku,
+                quantity=item.quantity,
+                price=Decimal(str(item.price)),
+                status_item=item.status_item,
+                margin_item=Decimal("0.00"),
+                total_cost=Decimal("0.00"),
+                created_at=item.created_at,
+                updated_at=item.updated_at
+            )
+            for item in po.items
+        ]
+        
         po_response = POResponse(
-            id=po["id"],
-            po_number=po["po_number"],
-            client_name=po["client_name"],
-            status_macro=po["status_macro"],
+            id=str(po.id),
+            po_number=po.po_number,
+            client_name=getattr(po, 'client_name', None) or "Cliente",
+            supplier_name=getattr(po, 'supplier_name', None) or getattr(po, 'client_name', None) or "Fornecedor Desconhecido",
+            status_macro=STATUS_DISPLAY_MAP.get(po.status_macro, po.status_macro),
+            status=STATUS_DISPLAY_MAP.get(po.status_macro, po.status_macro),
             items=items,
-            total_value=po["total_value"],
-            margin_global=po["margin_global"],
-            margin_percentage=po["margin_percentage"],
-            created_at=po["created_at"],
-            updated_at=po["updated_at"],
-            created_by=po["created_by"]
+            items_count=len(items),
+            total_value=metrics["total_value"],
+            margin_global=metrics["margin_global"],
+            margin_percentage=metrics["margin_percentage"],
+            expected_delivery_date=getattr(po, 'expected_delivery_date', None),
+            priority=getattr(po, 'priority', 'normal'),
+            created_at=po.created_at,
+            updated_at=po.updated_at,
+            created_by=str(po.created_by) if po.created_by else None
         )
         po_responses.append(po_response)
     
@@ -265,11 +251,11 @@ async def get_purchase_order(
     - Purchase Order details with items
     """
     
-    # Get mock data
-    mock_pos = get_mock_pos(current_user.tenant_id)
-    
-    # Find PO
-    po = next((p for p in mock_pos if p["id"] == po_id), None)
+    # Query database
+    po = db.query(PurchaseOrder).filter(
+        PurchaseOrder.id == po_id,
+        PurchaseOrder.tenant_id == current_user.tenant_id
+    ).first()
     
     if not po:
         raise HTTPException(
@@ -277,20 +263,42 @@ async def get_purchase_order(
             detail=f"Purchase Order {po_id} not found"
         )
     
-    # Convert to response model
-    items = [POItemResponse(**item) for item in po["items"]]
+    # Calculate metrics
+    metrics = calculate_po_metrics(po)
+    
+    # Convert items
+    items = [
+        POItemResponse(
+            id=str(item.id),
+            sku=item.sku,
+            quantity=item.quantity,
+            price=Decimal(str(item.price)),
+            status_item=item.status_item,
+            margin_item=Decimal("0.00"),
+            total_cost=Decimal("0.00"),
+            created_at=item.created_at,
+            updated_at=item.updated_at
+        )
+        for item in po.items
+    ]
+    
     return POResponse(
-        id=po["id"],
-        po_number=po["po_number"],
-        client_name=po["client_name"],
-        status_macro=po["status_macro"],
+        id=str(po.id),
+        po_number=po.po_number,
+        client_name=getattr(po, 'client_name', None) or "Cliente",
+        supplier_name=getattr(po, 'supplier_name', None) or getattr(po, 'client_name', None) or "Fornecedor Desconhecido",
+        status_macro=STATUS_DISPLAY_MAP.get(po.status_macro, po.status_macro),
+        status=STATUS_DISPLAY_MAP.get(po.status_macro, po.status_macro),
         items=items,
-        total_value=po["total_value"],
-        margin_global=po["margin_global"],
-        margin_percentage=po["margin_percentage"],
-        created_at=po["created_at"],
-        updated_at=po["updated_at"],
-        created_by=po["created_by"]
+        items_count=len(items),
+        total_value=metrics["total_value"],
+        margin_global=metrics["margin_global"],
+        margin_percentage=metrics["margin_percentage"],
+        expected_delivery_date=getattr(po, 'expected_delivery_date', None),
+        priority=getattr(po, 'priority', 'normal'),
+        created_at=po.created_at,
+        updated_at=po.updated_at,
+        created_by=str(po.created_by) if po.created_by else None
     )
 
 
@@ -306,77 +314,137 @@ async def move_po_status(
     This endpoint validates the state transition and updates the PO status
     if all validation rules pass.
     
+    **Salto de Etapa (LEADER/MASTER):**
+    - Usuários com role LEADER ou MASTER podem pular etapas
+    - Requer skip_validation=True e justificativa_lider (mínimo 10 caracteres)
+    - Registra no AuditLog com is_exception=True
+    
     **Parameters:**
     - **po_id**: Purchase Order ID
     - **to_status**: Target status
     - **reason**: Optional reason for the transition
     - **metadata**: Optional additional data
+    - **skip_validation**: Permitir salto de etapa (LEADER/MASTER only)
+    - **justificativa_lider**: Justificativa obrigatória para salto
     
     **Returns:**
     - Result of the status transition
     """
     
-    # Get mock data
-    mock_pos = get_mock_pos(current_user.tenant_id)
-    
-    # Find PO
-    po = next((p for p in mock_pos if p["id"] == request.po_id), None)
+    # Query database
+    po = db.query(PurchaseOrder).filter(
+        PurchaseOrder.id == request.po_id,
+        PurchaseOrder.tenant_id == current_user.tenant_id
+    ).first()
     
     if not po:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Purchase Order {request.po_id} not found"
+            detail=f"Pedido {request.po_id} não encontrado"
         )
     
-    from_status = po["status_macro"]
+    from_status = po.status_macro
     
-    # In production, use WorkflowService:
-    # from backend.services.workflow_service import WorkflowService
-    # workflow_service = WorkflowService(db)
-    # result = workflow_service.transition_state(
-    #     po_id=request.po_id,
-    #     to_status=request.to_status,
-    #     user_id=current_user.id,
-    #     reason=request.reason,
-    #     metadata=request.metadata
-    # )
+    # Convert display name to DB status if needed
+    to_status_db = DISPLAY_TO_DB_STATUS.get(request.to_status, request.to_status)
     
-    # For demo, simulate validation
+    # Define valid transitions
     valid_transitions = {
-        "COMERCIAL": ["PCP"],
-        "PCP": ["PRODUCAO", "COMERCIAL"],
-        "PRODUCAO": ["EXPEDICAO_PENDENTE", "FATURAMENTO_PENDENTE"],
-        "EXPEDICAO_PENDENTE": ["DESPACHO"],
-        "FATURAMENTO_PENDENTE": ["DESPACHO"],
-        "DESPACHO": ["CONCLUIDO"],
-        "CONCLUIDO": []
+        "DRAFT": ["SUBMITTED"],
+        "SUBMITTED": ["APPROVED", "DRAFT"],
+        "APPROVED": ["IN_PROGRESS"],
+        "IN_PROGRESS": ["COMPLETED"],
+        "COMPLETED": [],
+        "CANCELLED": []
     }
     
-    # Check if transition is valid
-    if request.to_status not in valid_transitions.get(from_status, []):
-        return MoveStatusResponse(
-            success=False,
-            message=f"Invalid transition from {from_status} to {request.to_status}",
-            po_id=request.po_id,
-            from_status=from_status,
-            to_status=request.to_status,
-            validation_errors=[
-                f"Cannot transition from {from_status} to {request.to_status}",
-                f"Valid transitions from {from_status}: {', '.join(valid_transitions.get(from_status, []))}"
-            ]
-        )
+    is_exception = False
     
-    # Simulate successful transition
-    po["status_macro"] = request.to_status
-    po["updated_at"] = datetime.utcnow()
+    # Check if transition is valid
+    if to_status_db not in valid_transitions.get(from_status, []):
+        # Check if user can skip validation
+        if request.skip_validation:
+            # Verify user has LEADER or MASTER role
+            if current_user.role not in ["LEADER", "MASTER"]:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Apenas usuários LEADER ou MASTER podem realizar salto de etapa"
+                )
+            
+            # Justification is validated by Pydantic validator
+            is_exception = True
+        else:
+            return MoveStatusResponse(
+                success=False,
+                message=f"Transição inválida de {STATUS_DISPLAY_MAP.get(from_status, from_status)} para {request.to_status}",
+                po_id=request.po_id,
+                from_status=STATUS_DISPLAY_MAP.get(from_status, from_status),
+                to_status=request.to_status,
+                validation_errors=[
+                    f"Não é possível transitar de {STATUS_DISPLAY_MAP.get(from_status, from_status)} para {request.to_status}",
+                    f"Transições válidas: {', '.join([STATUS_DISPLAY_MAP.get(s, s) for s in valid_transitions.get(from_status, [])])}"
+                ],
+                is_exception=False
+            )
+    
+    # Update status
+    po.status_macro = to_status_db
+    po.updated_at = datetime.utcnow()
+    
+    # Create audit log for exception if applicable
+    if is_exception:
+        from backend.models import AuditLog
+        
+        # Log the exception for each item in the PO
+        for item in po.items:
+            # Get previous hash for blockchain
+            from backend.models import get_last_audit_hash
+            previous_hash = get_last_audit_hash(db, item.id)
+            
+            # Calculate new hash
+            audit_hash = AuditLog.calculate_hash(
+                item_id=item.id,
+                from_status=from_status,
+                to_status=to_status_db,
+                timestamp=datetime.utcnow(),
+                previous_hash=previous_hash,
+                changed_by=current_user.user_id
+            )
+            
+            # Create audit log entry
+            audit_entry = AuditLog(
+                item_id=item.id,
+                from_status=from_status,
+                to_status=to_status_db,
+                hash=audit_hash,
+                previous_hash=previous_hash,
+                is_exception=True,
+                justification=request.justificativa_lider,
+                changed_by=current_user.user_id,
+                extra_data={
+                    "po_id": str(po.id),
+                    "po_number": po.po_number,
+                    "user_role": current_user.role,
+                    "reason": request.reason,
+                    "metadata": request.metadata
+                }
+            )
+            db.add(audit_entry)
+    
+    db.commit()
+    
+    message = f"Pedido {po.po_number} movido de {STATUS_DISPLAY_MAP.get(from_status, from_status)} para {request.to_status}"
+    if is_exception:
+        message += " (SALTO DE ETAPA EXCEPCIONAL)"
     
     return MoveStatusResponse(
         success=True,
-        message=f"Successfully moved PO {po['po_number']} from {from_status} to {request.to_status}",
+        message=message,
         po_id=request.po_id,
-        from_status=from_status,
+        from_status=STATUS_DISPLAY_MAP.get(from_status, from_status),
         to_status=request.to_status,
-        validation_errors=None
+        validation_errors=None,
+        is_exception=is_exception
     )
 
 
@@ -402,40 +470,46 @@ async def list_items(
     - List of items with their PO information
     """
     
-    # Get mock data
-    mock_pos = get_mock_pos(current_user.tenant_id)
-    
-    # Flatten items from all POs
-    all_items = []
-    for po in mock_pos:
-        for item in po["items"]:
-            item_with_po = {
-                **item,
-                "po_id": po["id"],
-                "po_number": po["po_number"],
-                "client_name": po["client_name"],
-                "po_status": po["status_macro"]
-            }
-            all_items.append(item_with_po)
+    # Query database
+    query = db.query(OrderItem).filter(
+        OrderItem.tenant_id == current_user.tenant_id
+    )
     
     # Apply filters
-    filtered_items = all_items
-    
     if status:
-        filtered_items = [item for item in filtered_items if item["status_item"] == status]
+        query = query.filter(OrderItem.status_item == status)
     
     if sku:
-        filtered_items = [
-            item for item in filtered_items 
-            if sku.lower() in item["sku"].lower()
-        ]
+        query = query.filter(OrderItem.sku.ilike(f"%{sku}%"))
     
     # Apply pagination
-    paginated_items = filtered_items[skip:skip + limit]
+    items = query.offset(skip).limit(limit).all()
+    
+    # Convert to response
+    result_items = []
+    for item in items:
+        po = item.purchase_order
+        result_items.append({
+            "id": str(item.id),
+            "sku": item.sku,
+            "quantity": item.quantity,
+            "price": float(item.price),
+            "status_item": item.status_item,
+            "po_id": str(po.id),
+            "po_number": po.po_number,
+            "client_name": "Cliente",
+            "po_status": STATUS_DISPLAY_MAP.get(po.status_macro, po.status_macro),
+            "created_at": item.created_at.isoformat(),
+            "updated_at": item.updated_at.isoformat()
+        })
+    
+    total = db.query(OrderItem).filter(
+        OrderItem.tenant_id == current_user.tenant_id
+    ).count()
     
     return {
-        "items": paginated_items,
-        "total": len(filtered_items),
+        "items": result_items,
+        "total": total,
         "skip": skip,
         "limit": limit
     }

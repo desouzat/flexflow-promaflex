@@ -9,7 +9,8 @@ import {
     LogOut,
     Menu,
     X,
-    User
+    User,
+    DollarSign
 } from 'lucide-react'
 
 const Layout = () => {
@@ -27,6 +28,7 @@ const Layout = () => {
         { path: '/kanban', icon: Kanban, label: 'Kanban Board', badge: 'kanban' },
         { path: '/import', icon: Upload, label: 'Import POs', badge: 'import' },
         { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', badge: 'dashboard' },
+        { path: '/costs', icon: DollarSign, label: 'Custos (MASTER)', badge: 'costs', masterOnly: true },
     ]
 
     return (
@@ -56,28 +58,35 @@ const Layout = () => {
 
                 {/* Navigation */}
                 <nav className="flex-1 px-3 py-4 space-y-1">
-                    {navItems.map((item) => (
-                        <NavLink
-                            key={item.path}
-                            to={item.path}
-                            className={({ isActive }) =>
-                                `flex items-center gap-3 px-3 py-3 rounded-lg transition-colors relative ${isActive
-                                    ? 'bg-primary-50 text-primary-700'
-                                    : 'text-gray-700 hover:bg-gray-100'
-                                }`
-                            }
-                        >
-                            <item.icon className="w-5 h-5 flex-shrink-0" />
-                            {sidebarOpen && (
-                                <span className="font-medium flex-1">{item.label}</span>
-                            )}
-                            {badges[item.badge] > 0 && (
-                                <span className={`${sidebarOpen ? '' : 'absolute -top-1 -right-1'} flex items-center justify-center min-w-[20px] h-5 px-1.5 text-xs font-bold text-white bg-red-500 rounded-full`}>
-                                    {badges[item.badge] > 99 ? '99+' : badges[item.badge]}
-                                </span>
-                            )}
-                        </NavLink>
-                    ))}
+                    {navItems.map((item) => {
+                        // Hide MASTER-only items if user is not MASTER
+                        if (item.masterOnly && user?.role !== 'MASTER') {
+                            return null
+                        }
+
+                        return (
+                            <NavLink
+                                key={item.path}
+                                to={item.path}
+                                className={({ isActive }) =>
+                                    `flex items-center gap-3 px-3 py-3 rounded-lg transition-colors relative ${isActive
+                                        ? 'bg-primary-50 text-primary-700'
+                                        : 'text-gray-700 hover:bg-gray-100'
+                                    }`
+                                }
+                            >
+                                <item.icon className="w-5 h-5 flex-shrink-0" />
+                                {sidebarOpen && (
+                                    <span className="font-medium flex-1">{item.label}</span>
+                                )}
+                                {badges[item.badge] > 0 && (
+                                    <span className={`${sidebarOpen ? '' : 'absolute -top-1 -right-1'} flex items-center justify-center min-w-[20px] h-5 px-1.5 text-xs font-bold text-white bg-red-500 rounded-full`}>
+                                        {badges[item.badge] > 99 ? '99+' : badges[item.badge]}
+                                    </span>
+                                )}
+                            </NavLink>
+                        )
+                    })}
                 </nav>
 
                 {/* User Section */}
