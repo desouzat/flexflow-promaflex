@@ -7,16 +7,41 @@ from datetime import datetime
 from typing import Optional, List
 import uuid
 import hashlib
+import enum
 
 from sqlalchemy import (
-    Column, String, Boolean, Integer, Numeric, DateTime, 
-    ForeignKey, CheckConstraint, Index, Text, JSON
+    Column, String, Boolean, Integer, Numeric, DateTime,
+    ForeignKey, CheckConstraint, Index, Text, JSON, Enum
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from sqlalchemy.sql import func
 
 from backend.database import Base
+
+
+# ============================================================================
+# ENUMS
+# ============================================================================
+
+class PackagingType(str, enum.Enum):
+    """Tipos de embalagem para produtos"""
+    CAIXA = "CAIXA"
+    SACO = "SACO"
+    PALLET = "PALLET"
+    GRANEL = "GRANEL"
+    OUTRO = "OUTRO"
+
+
+class ProductionImpediment(str, enum.Enum):
+    """Impedimentos de produção estruturados"""
+    FALTA_MATERIA_PRIMA = "FALTA_MATERIA_PRIMA"
+    FALTA_INSUMO = "FALTA_INSUMO"
+    EQUIPAMENTO_QUEBRADO = "EQUIPAMENTO_QUEBRADO"
+    FALTA_MO = "FALTA_MO"  # Mão de obra
+    PROBLEMA_QUALIDADE = "PROBLEMA_QUALIDADE"
+    AGUARDANDO_APROVACAO = "AGUARDANDO_APROVACAO"
+    OUTRO = "OUTRO"
 
 
 # ============================================================================
@@ -499,3 +524,96 @@ class MaterialCost(Base):
     
     def __repr__(self):
         return f"<MaterialCost(id={self.id}, sku={self.sku}, nome={self.nome})>"
+
+
+# ============================================================================
+# MODELO: GlobalConfig
+# ============================================================================
+
+class GlobalConfig(Base):
+    """
+    Modelo de Configuração Global do Sistema.
+    Armazena parâmetros configuráveis como multiplicadores de SLA.
+    Acesso exclusivo para role MASTER.
+    """
+    __tablename__ = "global_config"
+    
+    # Colunas
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False
+    )
+    config_key: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        comment="Chave de configuração (ex: replacement_sla_multiplier)"
+    )
+    config_value: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        comment="Valor da configuração (armazenado como string)"
+    )
+    config_type: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="string",
+        comment="Tipo do valor: string, float, int, bool, json"
+    )
+    description: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Descrição da configuração"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now()
+    )
+    updated_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True
+    )
+    
+    # Relacionamentos
+    tenant: Mapped["Tenant"] = relationship("Tenant")
+    updated_by_user: Mapped[Optional["User"]] = relationship("User")
+    
+    # Índices e Constraints
+    __table_args__ = (
+        Index('idx_global_config_tenant_id', 'tenant_id'),
+        Index('idx_global_config_key', 'config_key'),
+        Index('idx_global_config_tenant_key', 'tenant_id', 'config_key', unique=True),
+    )
+    
+    def get_typed_value(self):
+        """
+        Retorna o valor da configuração convertido para o tipo apropriado.
+        
+        Returns:
+            Valor convertido para o tipo especificado em config_type
+        """
+        if self.config_type == "float":
+            return float(self.config_value)
+        elif self.config_type == "int":
+            return int(self.config_value)
+        elif self.config_type == "bool":
+            return self.config_value.lower() in ("true", "1", "yes")
+        elif self.config_type == "json":
+            import json
+            return json.loads(self.config_value)
+        else:
+            return self.config_value
+    
+    def __repr__(self):
+        return f"<GlobalConfig(id={self.id}, key={self.config_key}, value={self.config_value})>"

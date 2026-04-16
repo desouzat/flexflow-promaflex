@@ -1,8 +1,10 @@
-import React from 'react'
+import React, { useState } from 'react'
 import KanbanCard from './KanbanCard'
-import { MoreVertical } from 'lucide-react'
+import { MoreVertical, HelpCircle } from 'lucide-react'
+import HelpModal from '../HelpModal'
 
 const KanbanColumn = ({ title, status, pos, onCardClick, onMoveCard, color = 'gray', compactView = false }) => {
+    const [showHelp, setShowHelp] = useState(false)
     const colorClasses = {
         gray: 'bg-gray-100 border-gray-300',
         yellow: 'bg-yellow-50 border-yellow-300',
@@ -31,12 +33,22 @@ const KanbanColumn = ({ title, status, pos, onCardClick, onMoveCard, color = 'gr
                         {pos.length}
                     </span>
                 </div>
-                <button
-                    className="p-1 hover:bg-white hover:bg-opacity-30 rounded transition-colors"
-                    aria-label="Column options"
-                >
-                    <MoreVertical className="w-4 h-4" />
-                </button>
+                <div className="flex items-center gap-1">
+                    <button
+                        onClick={() => setShowHelp(true)}
+                        className="p-1 hover:bg-white hover:bg-opacity-30 rounded transition-colors"
+                        aria-label="Ajuda"
+                        title="Ajuda - The Compass"
+                    >
+                        <HelpCircle className="w-4 h-4" />
+                    </button>
+                    <button
+                        className="p-1 hover:bg-white hover:bg-opacity-30 rounded transition-colors"
+                        aria-label="Column options"
+                    >
+                        <MoreVertical className="w-4 h-4" />
+                    </button>
+                </div>
             </div>
 
             {/* Column Content */}
@@ -58,6 +70,13 @@ const KanbanColumn = ({ title, status, pos, onCardClick, onMoveCard, color = 'gr
                     )}
                 </div>
             </div>
+
+            {/* Help Modal */}
+            <HelpModal
+                isOpen={showHelp}
+                onClose={() => setShowHelp(false)}
+                status={title}
+            />
         </div>
     )
 }

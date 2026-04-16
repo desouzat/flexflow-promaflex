@@ -5,8 +5,13 @@ import {
     Package,
     AlertCircle,
     CheckCircle,
-    Clock
+    Clock,
+    Globe,
+    Star,
+    RefreshCw,
+    Zap
 } from 'lucide-react'
+import { STRATEGIC_INDICATORS } from '../../config/helpConfig'
 
 const KanbanCard = ({ po, onCardClick, compactView = false }) => {
     // Ensure po object has safe defaults
@@ -86,6 +91,47 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
         return new Date(dateString).toLocaleDateString('pt-BR')
     }
 
+    // Get strategic indicators from metadata
+    const getStrategicIndicators = () => {
+        const indicators = []
+        const metadata = safepo.extra_metadata || {}
+
+        if (metadata.is_export) {
+            indicators.push({
+                key: 'is_export',
+                icon: Globe,
+                ...STRATEGIC_INDICATORS.is_export
+            })
+        }
+
+        if (metadata.is_first_order) {
+            indicators.push({
+                key: 'is_first_order',
+                icon: Star,
+                ...STRATEGIC_INDICATORS.is_first_order
+            })
+        }
+
+        if (metadata.is_replacement) {
+            indicators.push({
+                key: 'is_replacement',
+                icon: RefreshCw,
+                ...STRATEGIC_INDICATORS.is_replacement
+            })
+        }
+
+        if (metadata.is_urgent || safepo.priority === 'high') {
+            indicators.push({
+                key: 'is_urgent',
+                icon: Zap,
+                ...STRATEGIC_INDICATORS.is_urgent
+            })
+        }
+
+        return indicators
+    }
+
+    const strategicIndicators = getStrategicIndicators()
     const slaStatus = getSLAStatus()
 
     if (compactView) {
@@ -123,9 +169,28 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
             {/* Header */}
             <div className="flex items-start justify-between mb-3">
                 <div className="flex-1">
-                    <h3 className="font-semibold text-gray-900 text-sm mb-1">
-                        PO #{safepo.po_number}
-                    </h3>
+                    <div className="flex items-center gap-2 mb-1">
+                        <h3 className="font-semibold text-gray-900 text-sm">
+                            PO #{safepo.po_number}
+                        </h3>
+                        {/* Strategic Indicators */}
+                        {strategicIndicators.length > 0 && (
+                            <div className="flex items-center gap-1">
+                                {strategicIndicators.map((indicator) => {
+                                    const IconComponent = indicator.icon
+                                    return (
+                                        <div
+                                            key={indicator.key}
+                                            className={`p-1 rounded-full bg-${indicator.color}-100 text-${indicator.color}-600`}
+                                            title={indicator.tooltip}
+                                        >
+                                            <IconComponent className="w-3 h-3" />
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                        )}
+                    </div>
                     <p className="text-xs text-gray-600">{safepo.supplier_name}</p>
                 </div>
                 <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium border ${getStatusColor(safepo.status)}`}>
