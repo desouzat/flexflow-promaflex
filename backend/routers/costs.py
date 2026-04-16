@@ -24,15 +24,15 @@ from backend.models import MaterialCost, User
 router = APIRouter(prefix="/api/costs", tags=["Custos"])
 
 
-def require_master_role(current_user: UserInfo = Depends(get_current_user)):
+def require_admin_or_master_role(current_user: UserInfo = Depends(get_current_user)):
     """
-    Dependency para verificar se o usuário tem role MASTER.
-    Apenas usuários MASTER podem acessar endpoints de custos.
+    Dependency para verificar se o usuário tem role admin ou master.
+    Apenas usuários admin ou master podem acessar endpoints de custos.
     """
-    if current_user.role != "MASTER":
+    if current_user.role not in ["admin", "master"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Acesso negado. Apenas usuários MASTER podem gerenciar custos."
+            detail="Acesso negado. Apenas usuários admin ou master podem gerenciar custos."
         )
     return current_user
 
@@ -42,13 +42,13 @@ async def list_material_costs(
     skip: int = Query(0, ge=0, description="Número de registros a pular"),
     limit: int = Query(100, ge=1, le=1000, description="Máximo de registros a retornar"),
     sku: Optional[str] = Query(None, description="Filtrar por SKU (busca parcial)"),
-    current_user: UserInfo = Depends(require_master_role),
+    current_user: UserInfo = Depends(require_admin_or_master_role),
     db: Session = Depends(get_db)
 ):
     """
     Listar todos os custos de materiais.
     
-    **Acesso:** Apenas MASTER
+    **Acesso:** Admin ou Master
     
     **Query Parameters:**
     - **skip**: Paginação - registros a pular
@@ -102,13 +102,13 @@ async def list_material_costs(
 @router.get("/materials/{sku}", response_model=MaterialCostResponse)
 async def get_material_cost(
     sku: str,
-    current_user: UserInfo = Depends(require_master_role),
+    current_user: UserInfo = Depends(require_admin_or_master_role),
     db: Session = Depends(get_db)
 ):
     """
     Obter custo de um material específico por SKU.
     
-    **Acesso:** Apenas MASTER
+    **Acesso:** Admin ou Master
     
     **Parameters:**
     - **sku**: SKU do material
@@ -145,13 +145,13 @@ async def get_material_cost(
 @router.post("/materials", response_model=MaterialCostResponse, status_code=status.HTTP_201_CREATED)
 async def create_material_cost(
     material_data: MaterialCostCreate,
-    current_user: UserInfo = Depends(require_master_role),
+    current_user: UserInfo = Depends(require_admin_or_master_role),
     db: Session = Depends(get_db)
 ):
     """
     Criar novo custo de material.
     
-    **Acesso:** Apenas MASTER
+    **Acesso:** Admin ou Master
     
     **Body:**
     - Dados do material (sku, nome, custo_mp_kg, rendimento, indice_impostos)
@@ -205,13 +205,13 @@ async def create_material_cost(
 async def update_material_cost(
     sku: str,
     material_data: MaterialCostUpdate,
-    current_user: UserInfo = Depends(require_master_role),
+    current_user: UserInfo = Depends(require_admin_or_master_role),
     db: Session = Depends(get_db)
 ):
     """
     Atualizar custo de material existente.
     
-    **Acesso:** Apenas MASTER
+    **Acesso:** Admin ou Master
     
     **Parameters:**
     - **sku**: SKU do material
@@ -261,13 +261,13 @@ async def update_material_cost(
 @router.delete("/materials/{sku}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_material_cost(
     sku: str,
-    current_user: UserInfo = Depends(require_master_role),
+    current_user: UserInfo = Depends(require_admin_or_master_role),
     db: Session = Depends(get_db)
 ):
     """
     Deletar custo de material.
     
-    **Acesso:** Apenas MASTER
+    **Acesso:** Admin ou Master
     
     **Parameters:**
     - **sku**: SKU do material
@@ -295,13 +295,13 @@ async def delete_material_cost(
 
 @router.get("/settings", response_model=GlobalSettingsResponse)
 async def get_global_settings(
-    current_user: UserInfo = Depends(require_master_role),
+    current_user: UserInfo = Depends(require_admin_or_master_role),
     db: Session = Depends(get_db)
 ):
     """
     Obter configurações globais de custos.
     
-    **Acesso:** Apenas MASTER
+    **Acesso:** Admin ou Master
     
     **Returns:**
     - Configurações globais (índice de impostos padrão)

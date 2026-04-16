@@ -28,7 +28,7 @@ const Layout = () => {
         { path: '/kanban', icon: Kanban, label: 'Kanban Board', badge: 'kanban' },
         { path: '/import', icon: Upload, label: 'Import POs', badge: 'import' },
         { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', badge: 'dashboard' },
-        { path: '/costs', icon: DollarSign, label: 'Custos (MASTER)', badge: 'costs', masterOnly: true },
+        { path: '/costs', icon: DollarSign, label: 'Gerenciar Custos', badge: 'costs', adminOnly: true },
     ]
 
     return (
@@ -59,8 +59,8 @@ const Layout = () => {
                 {/* Navigation */}
                 <nav className="flex-1 px-3 py-4 space-y-1">
                     {navItems.map((item) => {
-                        // Hide MASTER-only items if user is not MASTER
-                        if (item.masterOnly && user?.role !== 'MASTER') {
+                        // Hide admin-only items if user is not admin or master
+                        if (item.adminOnly && user?.role !== 'admin' && user?.role !== 'master') {
                             return null
                         }
 
