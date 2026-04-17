@@ -28,10 +28,28 @@ const DashboardPage = () => {
         try {
             setLoading(true)
             const response = await api.get('/dashboard/metrics')
-            setDashboardData(response.data)
+            const data = response.data
+
+            // Transform backend data to frontend format
+            const transformedData = {
+                total_pos: data.margin?.po_count || 0,
+                total_value: parseFloat(data.margin?.total_value || 0),
+                total_margin: parseFloat(data.margin?.total_margin || 0),
+                pending_approval: data.items_by_area?.by_area?.find(a => a.area === 'Comercial')?.count || 0,
+                delivered: data.items_by_area?.by_area?.find(a => a.area === 'Concluído')?.count || 0,
+                area_distribution: data.items_by_area?.by_area?.map(area => ({
+                    area: area.area,
+                    count: area.count,
+                    value: 0 // Backend doesn't provide value per area yet
+                })) || [],
+                margin_by_category: [], // Not yet implemented in backend
+                average_lead_time: data.lead_time?.average_lead_time_days || 0,
+            }
+
+            setDashboardData(transformedData)
         } catch (error) {
-            console.error('Error fetching dashboard data:', error)
-            showError('Failed to load dashboard data')
+            console.error('Erro ao carregar dados do dashboard:', error)
+            showError('Falha ao carregar dados do dashboard')
             // Set mock data for demo
             setDashboardData(getMockData())
         } finally {
@@ -65,7 +83,7 @@ const DashboardPage = () => {
             <div className="flex items-center justify-center h-full">
                 <div className="text-center">
                     <div className="w-16 h-16 border-4 border-primary-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-                    <p className="text-gray-600">Loading dashboard...</p>
+                    <p className="text-gray-600">Carregando dashboard...</p>
                 </div>
             </div>
         )
@@ -75,35 +93,38 @@ const DashboardPage = () => {
 
     const stats = [
         {
-            label: 'Total POs',
-            value: data.total_pos.toString(),
+            label: 'Total de Pedidos',
+            value: (data?.total_pos ?? 0).toString(),
             icon: Package,
             color: 'bg-blue-500',
-            change: '+12%',
+            change: `${data?.total_pos ?? 0} POs`,
         },
         {
-            label: 'Total Value',
+            label: 'Valor Total',
             value: new Intl.NumberFormat('pt-BR', {
                 style: 'currency',
                 currency: 'BRL',
-            }).format(data.total_value),
+            }).format(data?.total_value ?? 0),
             icon: DollarSign,
             color: 'bg-green-500',
-            change: '+8%',
+            change: 'Margem: ' + new Intl.NumberFormat('pt-BR', {
+                style: 'currency',
+                currency: 'BRL',
+            }).format(data?.total_margin ?? 0),
         },
         {
-            label: 'Pending Approval',
-            value: data.pending_approval.toString(),
+            label: 'Em Comercial',
+            value: (data?.pending_approval ?? 0).toString(),
             icon: TrendingUp,
             color: 'bg-yellow-500',
-            change: data.pending_approval.toString(),
+            change: `${data?.pending_approval ?? 0} itens`,
         },
         {
-            label: 'Delivered',
-            value: data.delivered.toString(),
+            label: 'Concluídos',
+            value: (data?.delivered ?? 0).toString(),
             icon: BarChart3,
             color: 'bg-purple-500',
-            change: '+15%',
+            change: `${data?.delivered ?? 0} itens`,
         },
     ]
 
@@ -123,7 +144,7 @@ const DashboardPage = () => {
             <div className="bg-white border-b border-gray-200 px-6 py-4">
                 <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
                 <p className="text-sm text-gray-600 mt-1">
-                    Overview of purchase order metrics
+                    Visão geral das métricas de pedidos
                 </p>
             </div>
 
@@ -157,7 +178,7 @@ const DashboardPage = () => {
                             Distribuição por Área
                         </h3>
                         <ResponsiveContainer width="100%" height={300}>
-                            <BarChart data={data.area_distribution}>
+                            <BarChart data={data?.area_distribution ?? []}>
                                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                                 <XAxis
                                     dataKey="area"
@@ -189,7 +210,7 @@ const DashboardPage = () => {
                         <ResponsiveContainer width="100%" height={300}>
                             <PieChart>
                                 <Pie
-                                    data={data.margin_by_category}
+                                    data={data?.margin_by_category ?? []}
                                     cx="50%"
                                     cy="50%"
                                     labelLine={false}
@@ -200,7 +221,7 @@ const DashboardPage = () => {
                                     fill="#8884d8"
                                     dataKey="margin"
                                 >
-                                    {data.margin_by_category.map((entry, index) => (
+                                    {(data?.margin_by_category ?? []).map((entry, index) => (
                                         <Cell
                                             key={`cell-${index}`}
                                             fill={COLORS[index % COLORS.length]}
@@ -232,7 +253,7 @@ const DashboardPage = () => {
                                     Lead Time Médio
                                 </p>
                                 <h3 className="text-3xl font-bold text-gray-900">
-                                    {data.average_lead_time}
+                                    {data?.average_lead_time ?? 0}
                                     <span className="text-lg text-gray-600 ml-1">dias</span>
                                 </h3>
                             </div>
@@ -250,7 +271,7 @@ const DashboardPage = () => {
                             Resumo de Valores por Área
                         </h3>
                         <div className="space-y-3">
-                            {data.area_distribution.map((area, index) => (
+                            {(data?.area_distribution ?? []).map((area, index) => (
                                 <div key={index} className="flex items-center justify-between">
                                     <div className="flex items-center gap-3">
                                         <div

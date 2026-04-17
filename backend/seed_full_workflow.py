@@ -42,12 +42,12 @@ MATERIAL_COSTS_DATA = [
 
 # Dados dos pedidos - 15 pedidos distribuídos em 5 colunas
 DEMO_ORDERS = [
-    # PENDENTE (3 pedidos)
+    # COMERCIAL (3 pedidos)
     {
         'po_number': 'PO-2024-001',
         'client_name': 'Acme Corp',
         'status_macro': 'DRAFT',
-        'column': 'Pendente',
+        'column': 'Comercial',
         'items': [
             {
                 'sku': 'FLEX-1000', 'quantity': 100, 'price': Decimal('150.00'),
@@ -63,7 +63,7 @@ DEMO_ORDERS = [
         'po_number': 'PO-2024-002',
         'client_name': 'Beta Industries',
         'status_macro': 'DRAFT',
-        'column': 'Pendente',
+        'column': 'Comercial',
         'items': [
             {
                 'sku': 'FLEX-3000', 'quantity': 75, 'price': Decimal('420.00'),
@@ -75,7 +75,7 @@ DEMO_ORDERS = [
         'po_number': 'PO-2024-003',
         'client_name': 'Gamma Solutions',
         'status_macro': 'DRAFT',
-        'column': 'Pendente',
+        'column': 'Comercial',
         'items': [
             {
                 'sku': 'FLEX-4000', 'quantity': 120, 'price': Decimal('195.00'),
@@ -88,7 +88,7 @@ DEMO_ORDERS = [
     {
         'po_number': 'PO-2024-004',
         'client_name': 'Delta Corp',
-        'status_macro': 'APPROVED',
+        'status_macro': 'SUBMITTED',
         'column': 'PCP',
         'items': [
             {
@@ -104,7 +104,7 @@ DEMO_ORDERS = [
     {
         'po_number': 'PO-2024-005',
         'client_name': 'Epsilon Ltd',
-        'status_macro': 'APPROVED',
+        'status_macro': 'SUBMITTED',
         'column': 'PCP',
         'items': [
             {
@@ -116,7 +116,7 @@ DEMO_ORDERS = [
     {
         'po_number': 'PO-2024-006',
         'client_name': 'Zeta Manufacturing',
-        'status_macro': 'APPROVED',
+        'status_macro': 'SUBMITTED',
         'column': 'PCP',
         'items': [
             {
@@ -126,12 +126,12 @@ DEMO_ORDERS = [
         ]
     },
     
-    # PRODUÇÃO (4 pedidos - alguns com impedimentos)
+    # PRODUÇÃO/EMBALAGEM (4 pedidos - alguns com impedimentos)
     {
         'po_number': 'PO-2024-007',
         'client_name': 'Eta Enterprises',
-        'status_macro': 'IN_PRODUCTION',
-        'column': 'Produção',
+        'status_macro': 'APPROVED',
+        'column': 'Produção/Embalagem',
         'items': [
             {
                 'sku': 'FLEX-9000', 'quantity': 80, 'price': Decimal('380.00'),
@@ -146,8 +146,8 @@ DEMO_ORDERS = [
     {
         'po_number': 'PO-2024-008',
         'client_name': 'Theta Systems',
-        'status_macro': 'IN_PRODUCTION',
-        'column': 'Produção',
+        'status_macro': 'APPROVED',
+        'column': 'Produção/Embalagem',
         'items': [
             {
                 'sku': 'FLEX-10000', 'quantity': 110, 'price': Decimal('295.00'),
@@ -158,8 +158,8 @@ DEMO_ORDERS = [
     {
         'po_number': 'PO-2024-009',
         'client_name': 'Iota Industries',
-        'status_macro': 'IN_PRODUCTION',
-        'column': 'Produção',
+        'status_macro': 'APPROVED',
+        'column': 'Produção/Embalagem',
         'items': [
             {
                 'sku': 'FLEX-11000', 'quantity': 95, 'price': Decimal('410.00'),
@@ -174,8 +174,8 @@ DEMO_ORDERS = [
     {
         'po_number': 'PO-2024-010',
         'client_name': 'Kappa Global',
-        'status_macro': 'IN_PRODUCTION',
-        'column': 'Produção',
+        'status_macro': 'APPROVED',
+        'column': 'Produção/Embalagem',
         'items': [
             {
                 'sku': 'FLEX-12000', 'quantity': 130, 'price': Decimal('175.00'),
@@ -184,12 +184,12 @@ DEMO_ORDERS = [
         ]
     },
     
-    # EXPEDIÇÃO (3 pedidos)
+    # EXPEDIÇÃO/FATURAMENTO (3 pedidos)
     {
         'po_number': 'PO-2024-011',
         'client_name': 'Lambda Logistics',
-        'status_macro': 'READY_TO_SHIP',
-        'column': 'Expedição',
+        'status_macro': 'IN_PROGRESS',
+        'column': 'Expedição/Faturamento',
         'items': [
             {
                 'sku': 'FLEX-13000', 'quantity': 85, 'price': Decimal('340.00'),
@@ -200,8 +200,8 @@ DEMO_ORDERS = [
     {
         'po_number': 'PO-2024-012',
         'client_name': 'Mu Trading',
-        'status_macro': 'READY_TO_SHIP',
-        'column': 'Expedição',
+        'status_macro': 'IN_PROGRESS',
+        'column': 'Expedição/Faturamento',
         'items': [
             {
                 'sku': 'FLEX-14000', 'quantity': 70, 'price': Decimal('520.00'),
@@ -212,8 +212,8 @@ DEMO_ORDERS = [
     {
         'po_number': 'PO-2024-013',
         'client_name': 'Nu Exports',
-        'status_macro': 'READY_TO_SHIP',
-        'column': 'Expedição',
+        'status_macro': 'IN_PROGRESS',
+        'column': 'Expedição/Faturamento',
         'items': [
             {
                 'sku': 'FLEX-15000', 'quantity': 105, 'price': Decimal('265.00'),
@@ -270,7 +270,7 @@ def get_admin_user(db: Session, tenant_id) -> User:
     return user
 
 
-def seed_material_costs(db: Session, tenant_id):
+def seed_material_costs(db: Session, tenant_id, force_recreate=False):
     """Popula a tabela de custos de materiais"""
     print("\n📦 Populando custos de materiais...")
     
@@ -281,11 +281,16 @@ def seed_material_costs(db: Session, tenant_id):
     
     if existing_count > 0:
         print(f"   ⚠️  Já existem {existing_count} materiais cadastrados.")
-        response = input("   Deseja limpar e recriar? (s/N): ")
-        if response.lower() == 's':
+        if force_recreate:
             db.query(MaterialCost).filter(MaterialCost.tenant_id == tenant_id).delete()
             db.commit()
             print("   ✅ Materiais anteriores removidos.")
+        else:
+            response = input("   Deseja limpar e recriar? (s/N): ")
+            if response.lower() == 's':
+                db.query(MaterialCost).filter(MaterialCost.tenant_id == tenant_id).delete()
+                db.commit()
+                print("   ✅ Materiais anteriores removidos.")
     
     created_count = 0
     for material_data in MATERIAL_COSTS_DATA:
@@ -301,7 +306,7 @@ def seed_material_costs(db: Session, tenant_id):
     print(f"\n   📊 Total de materiais criados: {created_count}")
 
 
-def seed_orders(db: Session):
+def seed_orders(db: Session, force_recreate=False):
     """Insere os pedidos demo no banco de dados"""
     
     print("\n" + "="*70)
@@ -316,7 +321,7 @@ def seed_orders(db: Session):
     print(f"👤 Usuário: {admin_user.name} (ID: {admin_user.id})")
     
     # Seed material costs
-    seed_material_costs(db, tenant.id)
+    seed_material_costs(db, tenant.id, force_recreate)
     
     # Verificar se já existem pedidos
     existing_count = db.query(PurchaseOrder).filter(
@@ -325,15 +330,21 @@ def seed_orders(db: Session):
     
     if existing_count > 0:
         print(f"\n⚠️  Já existem {existing_count} pedidos no banco de dados.")
-        response = input("Deseja limpar e recriar todos os pedidos? (s/N): ")
-        if response.lower() == 's':
+        if force_recreate:
             # Deletar todos os pedidos (cascade vai deletar os itens)
             db.query(PurchaseOrder).filter(PurchaseOrder.tenant_id == tenant.id).delete()
             db.commit()
             print("✅ Pedidos anteriores removidos.")
         else:
-            print("❌ Operação cancelada.")
-            return
+            response = input("Deseja limpar e recriar todos os pedidos? (s/N): ")
+            if response.lower() == 's':
+                # Deletar todos os pedidos (cascade vai deletar os itens)
+                db.query(PurchaseOrder).filter(PurchaseOrder.tenant_id == tenant.id).delete()
+                db.commit()
+                print("✅ Pedidos anteriores removidos.")
+            else:
+                print("❌ Operação cancelada.")
+                return
     
     print(f"\n📊 Inserindo {len(DEMO_ORDERS)} pedidos distribuídos em 5 colunas...")
     
@@ -426,6 +437,13 @@ def seed_orders(db: Session):
 
 def main():
     """Função principal"""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Seed FlexFlow database with demo data')
+    parser.add_argument('--force', '-f', action='store_true',
+                       help='Force recreate all data without prompting')
+    args = parser.parse_args()
+    
     print("\n🔍 Verificando conexão com o banco de dados...")
     
     try:
@@ -447,7 +465,7 @@ def main():
     # Executar seed
     db = SessionLocal()
     try:
-        seed_orders(db)
+        seed_orders(db, force_recreate=args.force)
     finally:
         db.close()
 

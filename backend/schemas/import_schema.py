@@ -100,9 +100,19 @@ class ImportItemData(BaseModel):
     cost_energy: Decimal = Field(..., ge=0, description="Energy cost must be non-negative")
     cost_gas: Decimal = Field(..., ge=0, description="Gas cost must be non-negative")
     
+    # Staging Area / Customization fields
+    is_personalized: bool = Field(default=False, description="Whether item is personalized")
+    is_new_client: bool = Field(default=False, description="Whether this is a new client")
+    customization_notes: Optional[str] = Field(None, description="Customization description")
+    attachment_path: Optional[str] = Field(None, description="Path to attachment file")
+    
     # Calculated fields
     margin_item: Optional[Decimal] = Field(None, description="Item margin (calculated)")
     total_cost: Optional[Decimal] = Field(None, description="Total cost per unit (calculated)")
+    
+    # Validation flags
+    needs_mapping: bool = Field(default=False, description="Whether SKU needs cost mapping")
+    validation_errors: List[str] = Field(default_factory=list, description="Validation errors")
     
     @field_validator('sku')
     @classmethod

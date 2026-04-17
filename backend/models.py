@@ -294,6 +294,12 @@ class OrderItem(Base):
     price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     status_item: Mapped[str] = mapped_column(String(50), nullable=False)
     extra_metadata: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    
+    # Staging Area / Customization fields
+    is_personalized: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_new_client: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    customization_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    attachment_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now()

@@ -3,9 +3,9 @@ FlexFlow Import Router
 Endpoints for file upload and import configuration.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, Form
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 import json
 
 from backend.schemas.import_schema import (
@@ -13,10 +13,12 @@ from backend.schemas.import_schema import (
     ImportResponse,
     ImportRequest,
     ColumnMapping,
-    ImportFieldType
+    ImportFieldType,
+    ImportItemData
 )
 from backend.schemas.auth_schema import UserInfo
 from backend.services.import_service import ImportService
+from backend.services.file_service import FileService
 from backend.database import get_db
 from backend.routers.auth import get_current_user
 
@@ -374,4 +376,76 @@ async def delete_import_config(
     
     return {
         "message": f"Configuration '{config_name}' deleted successfully"
+    }
+
+
+@router.post("/upload-attachment")
+async def upload_attachment(
+    file: UploadFile = File(..., description="Attachment file (PDF, JPG, PNG)"),
+    current_user: UserInfo = Depends(get_current_user)
+):
+    """
+    Upload an attachment file for a personalized order item.
+    
+    **Parameters:**
+    - **file**: Attachment file (PDF, JPG, PNG) - Max 5MB
+    
+    **Returns:**
+    - File path and original filename
+    """
+    
+    file_service = FileService()
+    
+    try:
+        file_path, original_filename = await file_service.save_file(
+            file,
+            str(current_user.tenant_id)
+        )
+        
+        return {
+            "success": True,
+            "file_path": file_path,
+            "original_filename": original_filename,
+            "message": "File uploaded successfully"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error uploading file: {str(e)}"
+        )
+
+
+@router.post("/validate-staging-item")
+async def validate_staging_item(
+    is_personalized: bool = Form(...),
+    is_new_client: bool = Form(...),
+    customization_notes: Optional[str] = Form(None),
+    attachment_path: Optional[str] = Form(None),
+    current_user: UserInfo = Depends(get_current_user)
+):
+    """
+    Validate a staging item against business rules.
+    
+    **Business Rules:**
+    1. If is_personalized is True, customization_notes is MANDATORY
+    2. If is_personalized is True AND is_new_client is True, attachment is MANDATORY
+    
+    **Returns:**
+    - Validation result with errors if any
+    """
+    
+    is_valid, error_msg = FileService.validate_customization_rules(
+        is_personalized=is_personalized,
+        is_new_client=is_new_client,
+        customization_notes=customization_notes,
+        attachment_path=attachment_path
+    )
+    
+    return {
+        "valid": is_valid,
+        "errors": [error_msg] if error_msg else [],
+        "is_personalized": is_personalized,
+        "is_new_client": is_new_client
     }

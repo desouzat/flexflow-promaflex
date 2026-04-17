@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Plus, Edit2, Trash2, Save, X, DollarSign, Package, TrendingUp, Search } from 'lucide-react'
+import { Plus, Edit2, Trash2, Save, X, DollarSign, Package, TrendingUp, Search, AlertTriangle } from 'lucide-react'
 import api from '../utils/api'
 import { showSuccess, showError } from '../utils/toast'
 import ErrorBoundary from '../components/ErrorBoundary'
@@ -17,6 +17,7 @@ const CostsPage = () => {
     const [searchTerm, setSearchTerm] = useState('')
     const [isCreating, setIsCreating] = useState(false)
     const [editingId, setEditingId] = useState(null)
+    const [deleteConfirm, setDeleteConfirm] = useState(null) // { sku, nome }
     const [formData, setFormData] = useState({
         sku: '',
         nome: '',
@@ -34,7 +35,11 @@ const CostsPage = () => {
             setLoading(true)
             setError(null)
             const response = await api.get('/costs/materials')
-            setMaterials(response.data)
+            // Backend returns { items: [], total, skip, limit }
+            // Handle both array and object response for safety
+            const data = response.data
+            const materialsArray = Array.isArray(data) ? data : (data.items || [])
+            setMaterials(materialsArray)
         } catch (err) {
             const errorMsg = err.response?.data?.detail || 'Falha ao carregar custos'
             setError(errorMsg)
@@ -52,13 +57,28 @@ const CostsPage = () => {
 
     const handleCreate = async () => {
         try {
-            await api.post('/costs/materials', {
-                sku: formData.sku,
-                nome: formData.nome,
+            // Validate required fields
+            if (!formData.sku || !formData.nome || !formData.custo_mp_kg || !formData.rendimento) {
+                showError('Por favor, preencha todos os campos obrigatórios')
+                return
+            }
+
+            // Convert strings to floats
+            const payload = {
+                sku: formData.sku.trim(),
+                nome: formData.nome.trim(),
                 custo_mp_kg: parseFloat(formData.custo_mp_kg),
                 rendimento: parseFloat(formData.rendimento),
-                indice_impostos: parseFloat(formData.indice_impostos)
-            })
+                indice_impostos: parseFloat(formData.indice_impostos || '22.25')
+            }
+
+            // Validate numeric conversions
+            if (isNaN(payload.custo_mp_kg) || isNaN(payload.rendimento) || isNaN(payload.indice_impostos)) {
+                showError('Por favor, insira valores numéricos válidos')
+                return
+            }
+
+            await api.post('/costs/materials', payload)
             showSuccess('Material criado com sucesso')
             setIsCreating(false)
             resetForm()
@@ -71,35 +91,55 @@ const CostsPage = () => {
 
     const handleUpdate = async (sku) => {
         try {
-            await api.put(`/costs/materials/${sku}`, {
-                nome: formData.nome,
+            // Validate required fields
+            if (!formData.nome || !formData.custo_mp_kg || !formData.rendimento) {
+                showError('Por favor, preencha todos os campos obrigatórios')
+                return
+            }
+
+            // Convert strings to floats
+            const payload = {
+                nome: formData.nome.trim(),
                 custo_mp_kg: parseFloat(formData.custo_mp_kg),
                 rendimento: parseFloat(formData.rendimento),
-                indice_impostos: parseFloat(formData.indice_impostos)
-            })
+                indice_impostos: parseFloat(formData.indice_impostos || '22.25')
+            }
+
+            // Validate numeric conversions
+            if (isNaN(payload.custo_mp_kg) || isNaN(payload.rendimento) || isNaN(payload.indice_impostos)) {
+                showError('Por favor, insira valores numéricos válidos')
+                return
+            }
+
+            await api.put(`/costs/materials/${sku}`, payload)
             showSuccess('Material atualizado com sucesso')
             setEditingId(null)
             resetForm()
             fetchMaterials()
         } catch (err) {
-            const errorMsg = err.response?.data?.detail || 'Falha ao atualizar material'
+            const errorMsg = err.response?.data?.detail || 'Falha ao atualizar o material'
             showError(errorMsg)
         }
     }
 
     const handleDelete = async (sku) => {
-        if (!window.confirm(`Tem certeza que deseja deletar o material ${sku}?`)) {
-            return
-        }
-
         try {
             await api.delete(`/costs/materials/${sku}`)
             showSuccess('Material deletado com sucesso')
+            setDeleteConfirm(null)
             fetchMaterials()
         } catch (err) {
             const errorMsg = err.response?.data?.detail || 'Falha ao deletar material'
             showError(errorMsg)
         }
+    }
+
+    const confirmDelete = (material) => {
+        setDeleteConfirm({ sku: material.sku, nome: material.nome })
+    }
+
+    const cancelDelete = () => {
+        setDeleteConfirm(null)
     }
 
     const startEdit = (material) => {
@@ -129,13 +169,13 @@ const CostsPage = () => {
         })
     }
 
-    const filteredMaterials = materials.filter((material) => {
+    const filteredMaterials = Array.isArray(materials) ? materials.filter((material) => {
         const search = searchTerm.toLowerCase()
         return (
             material.sku.toLowerCase().includes(search) ||
             material.nome.toLowerCase().includes(search)
         )
-    })
+    }) : []
 
     const calculateCostPerUnit = (material) => {
         const costPerKg = parseFloat(material.custo_mp_kg)
@@ -198,7 +238,11 @@ const CostsPage = () => {
                                 />
                             </div>
                             <button
-                                onClick={() => setIsCreating(true)}
+                                onClick={() => {
+                                    setIsCreating(true)
+                                    setEditingId(null)
+                                    resetForm()
+                                }}
                                 className="btn-primary flex items-center gap-2"
                             >
                                 <Plus className="w-5 h-5" />
@@ -416,7 +460,7 @@ const CostsPage = () => {
                                                             <Edit2 className="w-4 h-4" />
                                                         </button>
                                                         <button
-                                                            onClick={() => handleDelete(material.sku)}
+                                                            onClick={() => confirmDelete(material)}
                                                             className="text-red-600 hover:text-red-900"
                                                         >
                                                             <Trash2 className="w-4 h-4" />
@@ -431,6 +475,50 @@ const CostsPage = () => {
                         </table>
                     </div>
                 </div>
+
+                {/* Delete Confirmation Modal */}
+                {deleteConfirm && (
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                        <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+                            <div className="flex items-center gap-3 mb-4">
+                                <div className="flex-shrink-0 w-12 h-12 rounded-full bg-red-100 flex items-center justify-center">
+                                    <AlertTriangle className="w-6 h-6 text-red-600" />
+                                </div>
+                                <div>
+                                    <h3 className="text-lg font-semibold text-gray-900">
+                                        Confirmar Exclusão
+                                    </h3>
+                                    <p className="text-sm text-gray-600">
+                                        Esta ação não pode ser desfeita
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="mb-6">
+                                <p className="text-gray-700">
+                                    Tem certeza que deseja deletar o material{' '}
+                                    <span className="font-semibold">{deleteConfirm.sku}</span>
+                                    {' - '}
+                                    <span className="font-semibold">{deleteConfirm.nome}</span>?
+                                </p>
+                            </div>
+                            <div className="flex gap-3 justify-end">
+                                <button
+                                    onClick={cancelDelete}
+                                    className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    onClick={() => handleDelete(deleteConfirm.sku)}
+                                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors flex items-center gap-2"
+                                >
+                                    <Trash2 className="w-4 h-4" />
+                                    Deletar Material
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
         </ErrorBoundary>
     )

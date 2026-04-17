@@ -106,10 +106,10 @@ const KanbanPage = () => {
 
     const getColumnColor = (status) => {
         const colorMap = {
-            'Pendente': 'yellow',
+            'Comercial': 'yellow',
             'PCP': 'blue',
-            'Produção': 'purple',
-            'Expedição': 'orange',
+            'Produção/Embalagem': 'purple',
+            'Expedição/Faturamento': 'lightblue',
             'Concluído': 'green'
         }
         return colorMap[status] || 'gray'

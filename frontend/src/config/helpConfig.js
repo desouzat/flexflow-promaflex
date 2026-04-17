@@ -4,8 +4,31 @@
  */
 
 export const HELP_CONFIG = {
-    Pendente: {
-        title: "Pendente - Aguardando Processamento",
+    Staging: {
+        title: "Mesa de Conferência - Área de Staging",
+        description: "Validação e preparação de dados importados antes da confirmação.",
+        rules: [
+            "Anexos são obrigatórios apenas para Clientes Novos em pedidos Personalizados",
+            "Descrição da customização é obrigatória para qualquer pedido Personalizado",
+            "Limite de arquivo: 5MB (Otimização de infraestrutura)",
+            "Formatos aceitos: PDF, JPG, PNG",
+            "Todos os erros devem ser corrigidos antes de confirmar o PO"
+        ],
+        nextSteps: [
+            "Revisar cada item importado",
+            "Marcar itens personalizados e clientes novos",
+            "Adicionar descrições e anexos conforme necessário",
+            "Confirmar PO quando todos os erros forem resolvidos"
+        ],
+        icon: "📋",
+        requiredFields: [
+            "Descrição da customização (se Personalizado)",
+            "Anexo (se Personalizado + Cliente Novo)"
+        ]
+    },
+
+    Comercial: {
+        title: "Comercial - Aguardando Processamento",
         description: "Pedidos recém-criados aguardando análise inicial.",
         rules: [
             "Pedidos são criados através da importação de planilhas Excel",
@@ -43,8 +66,8 @@ export const HELP_CONFIG = {
         ]
     },
 
-    Produção: {
-        title: "Produção - Fabricação e Controle de Qualidade",
+    "Produção/Embalagem": {
+        title: "Produção/Embalagem - Fabricação e Controle de Qualidade",
         description: "Execução da produção e registro de quantidades.",
         rules: [
             "OBRIGATÓRIO: Registrar quantidade final produzida",
@@ -65,8 +88,8 @@ export const HELP_CONFIG = {
         ]
     },
 
-    Expedição: {
-        title: "Expedição - Preparação e Envio",
+    "Expedição/Faturamento": {
+        title: "Expedição/Faturamento - Preparação e Envio",
         description: "Embalagem final e preparação para envio ao cliente.",
         rules: [
             "Verificar tipo de embalagem definido no PCP",
