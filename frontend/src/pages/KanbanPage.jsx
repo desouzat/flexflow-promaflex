@@ -32,6 +32,10 @@ const KanbanPage = () => {
         foto_canhoto_path: null
     })
     const [uploadingEvidence, setUploadingEvidence] = useState(false)
+    const [showReturnModal, setShowReturnModal] = useState(false)
+    const [returnReason, setReturnReason] = useState('')
+    const [showPartitionModal, setShowPartitionModal] = useState(false)
+    const [partitionReason, setPartitionReason] = useState('')
     const { refreshNotifications } = useNotifications()
     const { user } = useAuth()
 
@@ -220,6 +224,114 @@ const KanbanPage = () => {
         }
     }
 
+    const handleAdvanceStatus = async () => {
+        if (!selectedPO) return
+
+        try {
+            const response = await api.post('/kanban/advance-status', null, {
+                params: { po_id: selectedPO.id }
+            })
+            showSuccess(response.data.message)
+            fetchBoard()
+            handleCloseModal()
+        } catch (err) {
+            const errorMsg = err.response?.data?.detail?.message || err.response?.data?.detail || 'Falha ao avançar status'
+            const errors = err.response?.data?.detail?.errors
+            if (errors && Array.isArray(errors)) {
+                showError(`${errorMsg}: ${errors.join(', ')}`)
+            } else {
+                showError(errorMsg)
+            }
+            console.error('Error advancing status:', err)
+        }
+    }
+
+    const handleReturnStatus = async () => {
+        if (!returnReason || returnReason.trim().length < 10) {
+            showError('Motivo da devolução deve ter pelo menos 10 caracteres')
+            return
+        }
+
+        try {
+            const response = await api.post('/kanban/return-status', null, {
+                params: {
+                    po_id: selectedPO.id,
+                    reason: returnReason
+                }
+            })
+            showSuccess(response.data.message)
+            setShowReturnModal(false)
+            setReturnReason('')
+            fetchBoard()
+            handleCloseModal()
+        } catch (err) {
+            const errorMsg = err.response?.data?.detail || 'Falha ao devolver status'
+            showError(errorMsg)
+            console.error('Error returning status:', err)
+        }
+    }
+
+    const handleSuggestPartition = async () => {
+        if (!partitionReason || partitionReason.trim().length < 10) {
+            showError('Motivo da sugestão de partição deve ter pelo menos 10 caracteres')
+            return
+        }
+
+        try {
+            const response = await api.post('/kanban/suggest-partition', null, {
+                params: {
+                    po_id: selectedPO.id,
+                    reason: partitionReason
+                }
+            })
+            showSuccess(response.data.message)
+            setShowPartitionModal(false)
+            setPartitionReason('')
+            fetchBoard()
+            handleCloseModal()
+        } catch (err) {
+            const errorMsg = err.response?.data?.detail || 'Falha ao sugerir partição'
+            showError(errorMsg)
+            console.error('Error suggesting partition:', err)
+        }
+    }
+
+    const getNextStatus = (currentStatus) => {
+        const statusFlow = {
+            'Comercial': 'PCP',
+            'PCP': 'Produção/Embalagem',
+            'Produção/Embalagem': 'Expedição/Faturamento',
+            'Expedição/Faturamento': 'Concluído',
+            'Aguardando Partição': 'PCP'
+        }
+        return statusFlow[currentStatus] || null
+    }
+
+    const getPreviousStatus = (currentStatus) => {
+        const statusFlow = {
+            'PCP': 'Comercial',
+            'Produção/Embalagem': 'PCP',
+            'Expedição/Faturamento': 'Produção/Embalagem',
+            'Concluído': 'Expedição/Faturamento'
+        }
+        return statusFlow[currentStatus] || null
+    }
+
+    const canAdvance = (po) => {
+        if (!po) return false
+        return getNextStatus(po.status) !== null
+    }
+
+    const canReturn = (po) => {
+        if (!po) return false
+        return getPreviousStatus(po.status) !== null
+    }
+
+    const canSuggestPartition = (po) => {
+        if (!po) return false
+        return po.status === 'PCP'
+    }
+
     const filterPOs = (pos) => {
         if (!pos || !Array.isArray(pos)) return []
         if (!searchTerm) return pos
@@ -402,7 +514,7 @@ const KanbanPage = () => {
                                         Pedido #{selectedPO.po_number}
                                     </h2>
                                     <p className="text-sm text-gray-600 mt-1">
-                                        {selectedPO.supplier_name || selectedPO.client_name || 'Cliente não especificado'}
+                                        {selectedPO.client_name || 'Cliente não especificado'}
                                     </p>
                                 </div>
                                 <button
@@ -664,8 +776,8 @@ const KanbanPage = () => {
                                             <button
                                                 disabled={!isDispatchReady()}
                                                 className={`w-full flex items-center justify-center gap-2 px-6 py-3 rounded-lg font-semibold transition-colors ${isDispatchReady()
-                                                        ? 'bg-green-600 text-white hover:bg-green-700'
-                                                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                                    ? 'bg-green-600 text-white hover:bg-green-700'
+                                                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
                                                     }`}
                                             >
                                                 <Truck className="w-5 h-5" />
@@ -760,13 +872,138 @@ const KanbanPage = () => {
                             </div>
 
                             {/* Modal Footer */}
-                            <div className="flex items-center justify-end gap-3 p-6 border-t border-gray-200 bg-gray-50">
-                                <button
-                                    onClick={handleCloseModal}
-                                    className="btn-secondary"
-                                >
-                                    Fechar
-                                </button>
+                            <div className="flex items-center justify-between gap-3 p-6 border-t border-gray-200 bg-gray-50">
+                                <div className="flex items-center gap-3">
+                                    {/* Return Button - visible for PCP and subsequent stages */}
+                                    {canReturn(selectedPO) && (
+                                        <button
+                                            onClick={() => setShowReturnModal(true)}
+                                            className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors"
+                                        >
+                                            <RefreshCw className="w-4 h-4" />
+                                            Devolver para {getPreviousStatus(selectedPO.status)}
+                                        </button>
+                                    )}
+
+                                    {/* PCP Partition Suggestion Button */}
+                                    {canSuggestPartition(selectedPO) && (
+                                        <button
+                                            onClick={() => setShowPartitionModal(true)}
+                                            className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                                        >
+                                            <Package className="w-4 h-4" />
+                                            Sugerir Partição
+                                        </button>
+                                    )}
+                                </div>
+
+                                <div className="flex items-center gap-3">
+                                    {/* Advance Button - enabled only if mandatory fields are filled */}
+                                    {canAdvance(selectedPO) && (
+                                        <button
+                                            onClick={handleAdvanceStatus}
+                                            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                                        >
+                                            Avançar para {getNextStatus(selectedPO.status)}
+                                            <Zap className="w-4 h-4" />
+                                        </button>
+                                    )}
+
+                                    <button
+                                        onClick={handleCloseModal}
+                                        className="btn-secondary"
+                                    >
+                                        Fechar
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Return Status Modal */}
+                {showReturnModal && (
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                        <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+                            <div className="p-6">
+                                <h3 className="text-xl font-bold text-gray-900 mb-4">
+                                    Devolver para {getPreviousStatus(selectedPO?.status)}
+                                </h3>
+                                <p className="text-sm text-gray-600 mb-4">
+                                    Informe o motivo da devolução (mínimo 10 caracteres):
+                                </p>
+                                <textarea
+                                    value={returnReason}
+                                    onChange={(e) => setReturnReason(e.target.value)}
+                                    placeholder="Ex: Falta informação de prazo de entrega..."
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                    rows="4"
+                                />
+                                <div className="flex items-center justify-end gap-3 mt-6">
+                                    <button
+                                        onClick={() => {
+                                            setShowReturnModal(false)
+                                            setReturnReason('')
+                                        }}
+                                        className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors"
+                                    >
+                                        Cancelar
+                                    </button>
+                                    <button
+                                        onClick={handleReturnStatus}
+                                        disabled={!returnReason || returnReason.trim().length < 10}
+                                        className={`px-4 py-2 rounded-lg transition-colors ${returnReason && returnReason.trim().length >= 10
+                                                ? 'bg-orange-600 text-white hover:bg-orange-700'
+                                                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                            }`}
+                                    >
+                                        Devolver
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Partition Suggestion Modal */}
+                {showPartitionModal && (
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                        <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+                            <div className="p-6">
+                                <h3 className="text-xl font-bold text-gray-900 mb-4">
+                                    Sugerir Partição do Pedido
+                                </h3>
+                                <p className="text-sm text-gray-600 mb-4">
+                                    Informe o motivo da sugestão de partição (mínimo 10 caracteres):
+                                </p>
+                                <textarea
+                                    value={partitionReason}
+                                    onChange={(e) => setPartitionReason(e.target.value)}
+                                    placeholder="Ex: Pedido muito grande, sugerir divisão em 2 entregas..."
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                    rows="4"
+                                />
+                                <div className="flex items-center justify-end gap-3 mt-6">
+                                    <button
+                                        onClick={() => {
+                                            setShowPartitionModal(false)
+                                            setPartitionReason('')
+                                        }}
+                                        className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors"
+                                    >
+                                        Cancelar
+                                    </button>
+                                    <button
+                                        onClick={handleSuggestPartition}
+                                        disabled={!partitionReason || partitionReason.trim().length < 10}
+                                        className={`px-4 py-2 rounded-lg transition-colors ${partitionReason && partitionReason.trim().length >= 10
+                                                ? 'bg-purple-600 text-white hover:bg-purple-700'
+                                                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                            }`}
+                                    >
+                                        Sugerir Partição
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>

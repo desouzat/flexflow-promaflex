@@ -36,13 +36,23 @@ STATUS_DISPLAY_MAP = {
     "SUBMITTED": "PCP",
     "WAITING_COMMERCIAL_PARTITION": "Aguardando Partição",
     "APPROVED": "Produção/Embalagem",
-    "IN_PROGRESS": "Expedição/Faturamento",
+    "WAITING_DISPATCH": "Expedição/Faturamento",
     "COMPLETED": "Concluído",
     "CANCELLED": "Cancelado"
 }
 
 # Reverse mapping for API compatibility
 DISPLAY_TO_DB_STATUS = {v: k for k, v in STATUS_DISPLAY_MAP.items()}
+
+# Status flow for bidirectional movement
+STATUS_FLOW = {
+    "DRAFT": {"next": "SUBMITTED", "prev": None},
+    "SUBMITTED": {"next": "APPROVED", "prev": "DRAFT"},
+    "APPROVED": {"next": "WAITING_DISPATCH", "prev": "SUBMITTED"},
+    "WAITING_DISPATCH": {"next": "COMPLETED", "prev": "APPROVED"},
+    "COMPLETED": {"next": None, "prev": "WAITING_DISPATCH"},
+    "WAITING_COMMERCIAL_PARTITION": {"next": "SUBMITTED", "prev": None}
+}
 
 
 def calculate_po_metrics(po: PurchaseOrder) -> dict:
@@ -85,13 +95,13 @@ async def get_kanban_board(
         PurchaseOrder.tenant_id == current_user.tenant_id
     ).all()
     
-    # Define status columns (in Portuguese)
+    # Define status columns (in Portuguese) - Updated with new naming
     status_columns = [
         ("DRAFT", "Comercial"),
         ("SUBMITTED", "PCP"),
         ("WAITING_COMMERCIAL_PARTITION", "Aguardando Partição"),
         ("APPROVED", "Produção/Embalagem"),
-        ("IN_PROGRESS", "Expedição/Faturamento"),
+        ("WAITING_DISPATCH", "Expedição/Faturamento"),
         ("COMPLETED", "Concluído")
     ]
     
@@ -443,14 +453,15 @@ async def move_po_status(
     # Convert display name to DB status if needed
     to_status_db = DISPLAY_TO_DB_STATUS.get(request.to_status, request.to_status)
     
-    # Define valid transitions
+    # Define valid transitions (bidirectional support)
     valid_transitions = {
         "DRAFT": ["SUBMITTED"],
-        "SUBMITTED": ["APPROVED", "DRAFT"],
-        "APPROVED": ["IN_PROGRESS"],
-        "IN_PROGRESS": ["COMPLETED"],
-        "COMPLETED": [],
-        "CANCELLED": []
+        "SUBMITTED": ["APPROVED", "DRAFT", "WAITING_COMMERCIAL_PARTITION"],
+        "APPROVED": ["WAITING_DISPATCH", "SUBMITTED"],
+        "WAITING_DISPATCH": ["COMPLETED", "APPROVED"],
+        "COMPLETED": ["WAITING_DISPATCH"],  # Allow return for corrections
+        "CANCELLED": [],
+        "WAITING_COMMERCIAL_PARTITION": ["SUBMITTED"]
     }
     
     is_exception = False
@@ -865,4 +876,268 @@ async def get_logistics_checklist(
         "checklist_complete": checklist_complete,
         "evidence_complete": evidence_complete,
         "can_dispatch": can_dispatch
+    }
+
+
+@router.post("/advance-status")
+async def advance_po_status(
+    po_id: str,
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Advance PO to the next status in the workflow.
+    Validates mandatory fields before advancing.
+    """
+    po = db.query(PurchaseOrder).filter(
+        PurchaseOrder.id == po_id,
+        PurchaseOrder.tenant_id == current_user.tenant_id
+    ).first()
+    
+    if not po:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Pedido {po_id} não encontrado"
+        )
+    
+    current_status = po.status_macro
+    next_status = STATUS_FLOW.get(current_status, {}).get("next")
+    
+    if not next_status:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Não há próxima etapa após {STATUS_DISPLAY_MAP.get(current_status, current_status)}"
+        )
+    
+    # Validate mandatory fields based on current status
+    validation_errors = []
+    
+    if current_status == "DRAFT":
+        # Comercial must have client_name and items
+        if not getattr(po, 'client_name', None):
+            validation_errors.append("Nome do cliente é obrigatório")
+        if not po.items or len(po.items) == 0:
+            validation_errors.append("Pedido deve ter pelo menos um item")
+    
+    elif current_status == "SUBMITTED":
+        # PCP must validate items
+        if not po.items or len(po.items) == 0:
+            validation_errors.append("Pedido deve ter itens validados")
+    
+    elif current_status == "APPROVED":
+        # Production must have items processed
+        pass  # Add production-specific validations if needed
+    
+    elif current_status == "WAITING_DISPATCH":
+        # Dispatch must have logistics checklist complete
+        if po.partition_metadata and "logistics_checklist" in po.partition_metadata:
+            checklist = po.partition_metadata["logistics_checklist"]
+            if not all([
+                checklist.get("endereco_conferido"),
+                checklist.get("peso_validado"),
+                checklist.get("etiquetas_impressas"),
+                checklist.get("foto_carga_path"),
+                checklist.get("foto_canhoto_path")
+            ]):
+                validation_errors.append("Checklist de logística deve estar completo")
+        else:
+            validation_errors.append("Checklist de logística não encontrado")
+    
+    if validation_errors:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"message": "Validação falhou", "errors": validation_errors}
+        )
+    
+    # Update status
+    po.status_macro = next_status
+    po.updated_at = datetime.utcnow()
+    db.commit()
+    
+    return {
+        "success": True,
+        "message": f"Pedido avançado para {STATUS_DISPLAY_MAP.get(next_status, next_status)}",
+        "po_id": po_id,
+        "from_status": STATUS_DISPLAY_MAP.get(current_status, current_status),
+        "to_status": STATUS_DISPLAY_MAP.get(next_status, next_status)
+    }
+
+
+@router.post("/return-status")
+async def return_po_status(
+    po_id: str,
+    reason: str,
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Return PO to the previous status in the workflow.
+    Requires a mandatory reason (min 10 chars) and logs in AuditLog.
+    """
+    if not reason or len(reason.strip()) < 10:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Motivo da devolução deve ter pelo menos 10 caracteres"
+        )
+    
+    po = db.query(PurchaseOrder).filter(
+        PurchaseOrder.id == po_id,
+        PurchaseOrder.tenant_id == current_user.tenant_id
+    ).first()
+    
+    if not po:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Pedido {po_id} não encontrado"
+        )
+    
+    current_status = po.status_macro
+    prev_status = STATUS_FLOW.get(current_status, {}).get("prev")
+    
+    if not prev_status:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Não é possível devolver de {STATUS_DISPLAY_MAP.get(current_status, current_status)}"
+        )
+    
+    # Update status
+    from_status = current_status
+    po.status_macro = prev_status
+    po.updated_at = datetime.utcnow()
+    
+    # Create audit log for return
+    from backend.models import AuditLog
+    
+    for item in po.items:
+        # Get previous hash for blockchain
+        from backend.models import get_last_audit_hash
+        previous_hash = get_last_audit_hash(db, item.id)
+        
+        # Calculate new hash
+        audit_hash = AuditLog.calculate_hash(
+            item_id=item.id,
+            from_status=from_status,
+            to_status=prev_status,
+            timestamp=datetime.utcnow(),
+            previous_hash=previous_hash,
+            changed_by=current_user.user_id
+        )
+        
+        # Create audit log entry
+        audit_entry = AuditLog(
+            item_id=item.id,
+            from_status=from_status,
+            to_status=prev_status,
+            hash=audit_hash,
+            previous_hash=previous_hash,
+            is_exception=False,
+            justification=f"DEVOLUÇÃO: {reason}",
+            changed_by=current_user.user_id,
+            extra_data={
+                "po_id": str(po.id),
+                "po_number": po.po_number,
+                "user_role": current_user.role,
+                "return_reason": reason,
+                "action_type": "RETURN"
+            }
+        )
+        db.add(audit_entry)
+    
+    db.commit()
+    
+    return {
+        "success": True,
+        "message": f"Pedido devolvido para {STATUS_DISPLAY_MAP.get(prev_status, prev_status)}",
+        "po_id": po_id,
+        "from_status": STATUS_DISPLAY_MAP.get(from_status, from_status),
+        "to_status": STATUS_DISPLAY_MAP.get(prev_status, prev_status),
+        "reason": reason
+    }
+
+
+@router.post("/suggest-partition")
+async def suggest_partition(
+    po_id: str,
+    reason: str,
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    PCP-specific action: Suggest partition and move PO back to Comercial
+    with WAITING_COMMERCIAL_PARTITION status.
+    """
+    if not reason or len(reason.strip()) < 10:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Motivo da sugestão de partição deve ter pelo menos 10 caracteres"
+        )
+    
+    po = db.query(PurchaseOrder).filter(
+        PurchaseOrder.id == po_id,
+        PurchaseOrder.tenant_id == current_user.tenant_id
+    ).first()
+    
+    if not po:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Pedido {po_id} não encontrado"
+        )
+    
+    # Verify PO is in PCP stage
+    if po.status_macro != "SUBMITTED":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Sugestão de partição só pode ser feita no estágio PCP"
+        )
+    
+    # Update status to WAITING_COMMERCIAL_PARTITION
+    from_status = po.status_macro
+    po.status_macro = "WAITING_COMMERCIAL_PARTITION"
+    po.partition_reason = reason
+    po.updated_at = datetime.utcnow()
+    
+    # Create audit log
+    from backend.models import AuditLog
+    
+    for item in po.items:
+        from backend.models import get_last_audit_hash
+        previous_hash = get_last_audit_hash(db, item.id)
+        
+        audit_hash = AuditLog.calculate_hash(
+            item_id=item.id,
+            from_status=from_status,
+            to_status="WAITING_COMMERCIAL_PARTITION",
+            timestamp=datetime.utcnow(),
+            previous_hash=previous_hash,
+            changed_by=current_user.user_id
+        )
+        
+        audit_entry = AuditLog(
+            item_id=item.id,
+            from_status=from_status,
+            to_status="WAITING_COMMERCIAL_PARTITION",
+            hash=audit_hash,
+            previous_hash=previous_hash,
+            is_exception=False,
+            justification=f"SUGESTÃO DE PARTIÇÃO: {reason}",
+            changed_by=current_user.user_id,
+            extra_data={
+                "po_id": str(po.id),
+                "po_number": po.po_number,
+                "user_role": current_user.role,
+                "partition_reason": reason,
+                "action_type": "SUGGEST_PARTITION"
+            }
+        )
+        db.add(audit_entry)
+    
+    db.commit()
+    
+    return {
+        "success": True,
+        "message": "Sugestão de partição enviada para Comercial",
+        "po_id": po_id,
+        "from_status": STATUS_DISPLAY_MAP.get(from_status, from_status),
+        "to_status": STATUS_DISPLAY_MAP.get("WAITING_COMMERCIAL_PARTITION", "Aguardando Partição"),
+        "reason": reason
     }
