@@ -21,7 +21,6 @@ const LoginPage = () => {
             return
         }
 
-        console.log('[LoginPage] Starting login process for:', username)
         setIsSubmitting(true)
 
         try {
@@ -33,18 +32,10 @@ const LoginPage = () => {
                 setLocalError(errorMsg)
                 showError(errorMsg)
             } else {
-                console.log('[LoginPage] Login successful!')
-                showSuccess('Login successful! Welcome back.')
-
-                // Double-check that token is in localStorage
-                const tokenCheck = localStorage.getItem('token')
-                const userCheck = localStorage.getItem('user')
-                console.log('[LoginPage] Post-login verification - Token:', !!tokenCheck, 'User:', !!userCheck)
+                showSuccess('Login realizado com sucesso! Bem-vindo.')
 
                 // Wait a bit for state to fully propagate
                 await new Promise(resolve => setTimeout(resolve, 100))
-
-                console.log('[LoginPage] Attempting navigation to /kanban')
 
                 // Try React Router navigation first
                 navigate('/kanban', { replace: true })
@@ -52,19 +43,14 @@ const LoginPage = () => {
                 // Fallback: If navigation doesn't work within 500ms, force a hard redirect
                 setTimeout(() => {
                     const currentPath = window.location.pathname
-                    console.log('[LoginPage] Current path after navigate:', currentPath)
-
                     if (currentPath !== '/kanban') {
-                        console.warn('[LoginPage] React Router navigation failed, forcing hard redirect')
                         window.location.href = '/kanban'
-                    } else {
-                        console.log('[LoginPage] Navigation successful via React Router')
                     }
                 }, 500)
             }
         } catch (err) {
             console.error('[LoginPage] Unexpected error during login:', err)
-            const errorMsg = 'An unexpected error occurred'
+            const errorMsg = 'Ocorreu um erro inesperado'
             setLocalError(errorMsg)
             showError(errorMsg)
         } finally {

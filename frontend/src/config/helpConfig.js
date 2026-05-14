@@ -29,82 +29,115 @@ export const HELP_CONFIG = {
 
     Comercial: {
         title: "Comercial - Aguardando Processamento",
-        description: "Pedidos recém-criados aguardando análise inicial.",
+        description: "Pedidos recém-criados aguardando análise inicial e validação comercial.",
         rules: [
-            "Pedidos são criados através da importação de planilhas Excel",
-            "Verificar se todos os dados obrigatórios estão preenchidos",
-            "Pedidos de reposição têm SLA reduzido (50% do tempo normal)",
-            "Pedidos de exportação e primeira ordem têm prioridade visual"
+            "📊 IMPORTAÇÃO: A planilha Excel deve conter exatamente 19 campos obrigatórios (PO Number, Customer, SKU, Quantity, Unit Price, Delivery Date, etc.)",
+            "📝 NOTAS OBRIGATÓRIAS: Itens personalizados DEVEM ter descrição da customização preenchida",
+            "🌍 FLAG EXPORTAÇÃO: Pedidos de exportação são marcados automaticamente e têm prioridade visual no Kanban",
+            "⭐ FLAG PRIMEIRA ORDEM: Primeira ordem do cliente recebe atenção especial para garantir qualidade",
+            "🔄 FLAG REPOSIÇÃO: Pedidos de reposição têm SLA reduzido em 50% (Ex: 10 dias → 5 dias)",
+            "🔒 BLOQUEIO DE CRÉDITO: Sistema verifica automaticamente o limite de crédito do cliente. Se excedido, o pedido é bloqueado até liberação manual",
+            "✅ Todos os campos obrigatórios devem estar preenchidos antes de avançar para PCP"
         ],
         nextSteps: [
-            "Revisar dados do pedido",
-            "Mover para PCP quando pronto para análise"
+            "Revisar dados importados e validar os 19 campos obrigatórios",
+            "Verificar se há bloqueio de crédito ativo",
+            "Confirmar flags estratégicas (Exportação, Primeira Ordem, Reposição)",
+            "Adicionar notas de customização para itens personalizados",
+            "Mover para PCP quando validação comercial estiver completa"
         ],
-        icon: "📋"
+        icon: "📋",
+        requiredFields: [
+            "19 campos da planilha Excel",
+            "Descrição de customização (se item personalizado)",
+            "Liberação de crédito (se bloqueado)"
+        ]
     },
 
     PCP: {
         title: "PCP - Planejamento e Controle de Produção",
-        description: "Análise técnica e vinculação de custos de material.",
+        description: "Análise técnica, mapeamento de SKUs e vinculação de custos de matéria-prima.",
         rules: [
-            "OBRIGATÓRIO: Vincular custo de matéria-prima para cada SKU",
-            "Utilizar o sistema 'De-Para' (Alias) para mapear SKUs similares",
-            "Definir tipo de embalagem: Caixa, Saco, Pallet, Granel, Outro",
-            "Registrar impedimentos de produção se houver",
-            "Calcular margem de contribuição baseada nos custos"
+            "🔗 MAPEAMENTO DE-PARA: Use o sistema de Alias para mapear SKUs similares (Ex: 'SKU-A' → 'SKU-MASTER'). Isso permite reutilizar custos e especificações técnicas",
+            "💰 CUSTO OBRIGATÓRIO: Cada SKU DEVE ter custo de matéria-prima vinculado (R$/kg) antes de avançar para Produção",
+            "📎 VALIDAÇÃO DE ANEXOS: Para itens personalizados de clientes novos, verificar se os anexos técnicos foram carregados corretamente",
+            "🆘 BOTÃO 'SUGERIR PARTIÇÃO': Se houver falta de matéria-prima, use este botão para dividir o pedido em lotes menores baseado no estoque disponível",
+            "📦 TIPO DE EMBALAGEM: Definir obrigatoriamente: Caixa, Saco, Pallet, Granel ou Outro",
+            "⚠️ IMPEDIMENTOS: Registrar qualquer impedimento de produção (falta de MP, equipamento quebrado, etc.)",
+            "📊 MARGEM: O sistema calcula automaticamente a margem de contribuição baseada nos custos vinculados"
         ],
         nextSteps: [
-            "Acessar a página de Custos para vincular matéria-prima",
-            "Preencher metadados de produção",
-            "Mover para Produção quando custos estiverem vinculados"
+            "Acessar a página de Custos para vincular matéria-prima a cada SKU",
+            "Usar o sistema De-Para (Alias) para SKUs similares",
+            "Se houver falta de MP, clicar em 'Sugerir Partição' para dividir o pedido",
+            "Validar anexos técnicos para itens personalizados",
+            "Preencher metadados de produção (tipo de embalagem, rendimento)",
+            "Mover para Produção/Embalagem quando todos os custos estiverem vinculados"
         ],
         icon: "📊",
         requiredFields: [
-            "Custo de matéria-prima (custo_mp_kg)",
+            "Custo de matéria-prima (custo_mp_kg) para cada SKU",
             "Rendimento (kg por unidade)",
-            "Tipo de embalagem"
+            "Tipo de embalagem",
+            "Mapeamento De-Para (se aplicável)"
         ]
     },
 
     "Produção/Embalagem": {
         title: "Produção/Embalagem - Fabricação e Controle de Qualidade",
-        description: "Execução da produção e registro de quantidades.",
+        description: "Execução da produção, registro de quantidades reais e rastreamento automático de SLA.",
         rules: [
-            "OBRIGATÓRIO: Registrar quantidade final produzida",
-            "Registrar perdas e refugos se houver",
-            "Documentar problemas de qualidade",
-            "Atualizar status de impedimentos",
-            "Validar conformidade com especificações"
+            "📊 QUANTIDADE REAL PRODUZIDA: Campo OBRIGATÓRIO - Registrar a quantidade efetivamente produzida (pode diferir da quantidade pedida)",
+            "⏱️ RASTREAMENTO AUTOMÁTICO DE SLA: O sistema monitora automaticamente o tempo de produção e alerta quando o SLA está próximo do vencimento",
+            "🔄 PEDIDOS DE REPOSIÇÃO: Lembrar que têm SLA reduzido em 50% - priorizar na fila de produção",
+            "📉 PERDAS E REFUGOS: Registrar perdas de material e refugos para análise de eficiência",
+            "⚠️ PROBLEMAS DE QUALIDADE: Documentar não-conformidades e problemas técnicos",
+            "🔧 IMPEDIMENTOS: Atualizar status de impedimentos (equipamento, falta de insumo, etc.)",
+            "✅ VALIDAÇÃO: Confirmar conformidade com especificações técnicas antes de avançar"
         ],
         nextSteps: [
-            "Registrar quantidade produzida no sistema",
-            "Documentar não-conformidades",
-            "Mover para Expedição quando produção estiver completa"
+            "Registrar a quantidade real produzida no campo específico",
+            "Documentar perdas, refugos e não-conformidades (se houver)",
+            "Atualizar impedimentos de produção",
+            "Validar qualidade e conformidade com especificações",
+            "Mover para Expedição/Faturamento quando produção estiver completa e aprovada"
         ],
         icon: "🏭",
         requiredFields: [
-            "Quantidade final produzida",
-            "Status de qualidade"
+            "Quantidade real produzida (actual_produced_quantity)",
+            "Status de qualidade",
+            "Registro de perdas/refugos (se aplicável)"
         ]
     },
 
     "Expedição/Faturamento": {
         title: "Expedição/Faturamento - Preparação e Envio",
-        description: "Embalagem final e preparação para envio ao cliente.",
+        description: "Embalagem final, sincronismo de despacho e preparação para envio ao cliente.",
         rules: [
-            "Verificar tipo de embalagem definido no PCP",
-            "Confirmar endereço de entrega",
-            "Gerar documentação de transporte",
-            "Registrar data e hora de saída",
-            "Atualizar tracking de entrega"
+            "🔄 SINCRONISMO DE DESPACHO: Sistema EXIGE dois documentos obrigatórios antes de finalizar:",
+            "   • PDF da Nota Fiscal (NF) - Upload obrigatório",
+            "   • Foto da Carga - Registro fotográfico do produto embalado e pronto para envio",
+            "📋 CHECKLIST LOGÍSTICO:",
+            "   ✓ Verificar tipo de embalagem definido no PCP",
+            "   ✓ Confirmar endereço de entrega do cliente",
+            "   ✓ Gerar documentação de transporte (NF, DANFE, etc.)",
+            "   ✓ Registrar data e hora de saída",
+            "   ✓ Atualizar código de rastreamento da transportadora",
+            "🌍 EXPORTAÇÃO: Para pedidos de exportação, verificar documentação alfandegária adicional",
+            "📦 EMBALAGEM: Seguir rigorosamente o tipo de embalagem definido pelo PCP"
         ],
         nextSteps: [
-            "Embalar conforme especificações",
-            "Gerar nota fiscal e documentos",
-            "Mover para Concluído quando enviado"
+            "Embalar produto conforme especificações do PCP",
+            "Gerar Nota Fiscal e fazer upload do PDF no sistema",
+            "Tirar foto da carga embalada e fazer upload",
+            "Registrar transportadora e código de rastreamento",
+            "Confirmar endereço de entrega",
+            "Mover para Concluído quando sincronismo de despacho estiver completo (NF + Foto)"
         ],
         icon: "📦",
         requiredFields: [
+            "PDF da Nota Fiscal (upload obrigatório)",
+            "Foto da Carga (upload obrigatório)",
             "Data de envio",
             "Transportadora",
             "Código de rastreamento"
@@ -113,19 +146,33 @@ export const HELP_CONFIG = {
 
     Concluído: {
         title: "Concluído - Pedido Finalizado",
-        description: "Pedido entregue e finalizado com sucesso.",
+        description: "Pedido entregue e finalizado com sucesso. Auditoria completa disponível.",
         rules: [
-            "Pedido foi entregue ao cliente",
-            "Todos os documentos foram gerados",
-            "Métricas de performance foram registradas",
-            "Feedback do cliente pode ser coletado"
+            "✅ PEDIDO ENTREGUE: Produto foi enviado ao cliente com sucesso",
+            "📄 DOCUMENTAÇÃO COMPLETA: Todos os documentos foram gerados e arquivados (NF, fotos, anexos técnicos)",
+            "🔗 BLOCKCHAIN AUDIT LOG: Cada transição de status foi registrada de forma imutável com:",
+            "   • Timestamp exato da mudança",
+            "   • Usuário responsável pela ação",
+            "   • Status anterior e novo status",
+            "   • Metadados adicionais (comentários, anexos, etc.)",
+            "📊 MÉTRICAS REGISTRADAS: Performance de SLA, tempo de produção, perdas e eficiência foram capturadas",
+            "🗄️ POLÍTICA DE ARMAZENAMENTO: Todos os dados são mantidos por 24 meses para auditoria e análise histórica",
+            "📈 ANÁLISE DISPONÍVEL: Dados podem ser usados para relatórios gerenciais e melhoria contínua"
         ],
         nextSteps: [
-            "Arquivar documentação",
-            "Analisar métricas de performance",
-            "Coletar feedback do cliente"
+            "Arquivar documentação física (se aplicável)",
+            "Analisar métricas de performance e SLA",
+            "Coletar feedback do cliente",
+            "Revisar Audit Log para auditoria interna",
+            "Usar dados históricos para planejamento futuro"
         ],
-        icon: "✅"
+        icon: "✅",
+        auditFeatures: [
+            "Blockchain Audit Log completo",
+            "Armazenamento de 24 meses",
+            "Rastreabilidade total de mudanças",
+            "Análise histórica disponível"
+        ]
     }
 };
 

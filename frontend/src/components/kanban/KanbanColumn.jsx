@@ -60,7 +60,7 @@ const KanbanColumn = ({ title, status, pos, onCardClick, onMoveCard, color = 'gr
                 <div className="space-y-3">
                     {pos.length === 0 ? (
                         <div className="text-center py-8 text-gray-500 text-sm">
-                            No items in this column
+                            Nenhum item nesta coluna
                         </div>
                     ) : (
                         pos.map((po) => (

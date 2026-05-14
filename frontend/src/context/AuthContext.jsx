@@ -18,17 +18,12 @@ export const AuthProvider = ({ children }) => {
 
     useEffect(() => {
         // Check if user is already logged in
-        console.log('[AuthContext] Initializing - checking localStorage')
         const token = localStorage.getItem('token')
         const savedUser = localStorage.getItem('user')
-
-        console.log('[AuthContext] Token exists:', !!token)
-        console.log('[AuthContext] Saved user exists:', !!savedUser)
 
         if (token && savedUser) {
             try {
                 const parsedUser = JSON.parse(savedUser)
-                console.log('[AuthContext] Restoring user session:', parsedUser.email)
                 setUser(parsedUser)
             } catch (err) {
                 console.error('[AuthContext] Error parsing saved user:', err)
@@ -37,12 +32,10 @@ export const AuthProvider = ({ children }) => {
             }
         }
         setLoading(false)
-        console.log('[AuthContext] Initialization complete')
     }, [])
 
     const login = async (username, password) => {
         try {
-            console.log('[AuthContext] Login attempt for:', username)
             setError(null)
             setLoading(true)
 
@@ -86,7 +79,6 @@ export const AuthProvider = ({ children }) => {
     }
 
     const logout = () => {
-        console.log('[AuthContext] Logging out user')
         localStorage.removeItem('token')
         localStorage.removeItem('user')
         setUser(null)

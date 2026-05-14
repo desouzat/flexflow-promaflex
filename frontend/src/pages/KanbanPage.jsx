@@ -61,7 +61,6 @@ const KanbanPage = () => {
     }, [])
 
     const handleCardClick = async (po) => {
-        console.log('PO clicked:', po)
         setSelectedPO(po)
         setShowDetailsModal(true)
 
@@ -953,8 +952,8 @@ const KanbanPage = () => {
                                         onClick={handleReturnStatus}
                                         disabled={!returnReason || returnReason.trim().length < 10}
                                         className={`px-4 py-2 rounded-lg transition-colors ${returnReason && returnReason.trim().length >= 10
-                                                ? 'bg-orange-600 text-white hover:bg-orange-700'
-                                                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                            ? 'bg-orange-600 text-white hover:bg-orange-700'
+                                            : 'bg-gray-300 text-gray-500 cursor-not-allowed'
                                             }`}
                                     >
                                         Devolver
@@ -997,8 +996,8 @@ const KanbanPage = () => {
                                         onClick={handleSuggestPartition}
                                         disabled={!partitionReason || partitionReason.trim().length < 10}
                                         className={`px-4 py-2 rounded-lg transition-colors ${partitionReason && partitionReason.trim().length >= 10
-                                                ? 'bg-purple-600 text-white hover:bg-purple-700'
-                                                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                            ? 'bg-purple-600 text-white hover:bg-purple-700'
+                                            : 'bg-gray-300 text-gray-500 cursor-not-allowed'
                                             }`}
                                     >
                                         Sugerir Partição

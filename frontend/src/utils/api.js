@@ -15,14 +15,9 @@ api.interceptors.request.use(
     (config) => {
         // CRITICAL: Fetch token dynamically on each request, not once at module load
         const token = localStorage.getItem('token')
-        console.log('[API Interceptor] Request to:', config.url)
-        console.log('[API Interceptor] Token exists:', !!token)
 
         if (token) {
             config.headers.Authorization = `Bearer ${token}`
-            console.log('[API Interceptor] Authorization header set')
-        } else {
-            console.log('[API Interceptor] No token found in localStorage')
         }
         return config
     },
@@ -35,7 +30,6 @@ api.interceptors.request.use(
 // Response interceptor to handle errors
 api.interceptors.response.use(
     (response) => {
-        console.log('[API Interceptor] Response:', response.status, response.config.url)
         return response
     },
     (error) => {
