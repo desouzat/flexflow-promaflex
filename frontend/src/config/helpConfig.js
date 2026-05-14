@@ -28,8 +28,8 @@ export const HELP_CONFIG = {
     },
 
     Comercial: {
-        title: "Comercial - Aguardando Processamento",
-        description: "Pedidos recém-criados aguardando análise inicial e validação comercial.",
+        title: "Comercial - Validação e Processamento Inicial",
+        description: "Pedidos aguardando análise comercial. Inclui pedidos SUBMITTED e aqueles aguardando decisão de partição (WAITING_COMMERCIAL_PARTITION).",
         rules: [
             "📊 IMPORTAÇÃO: A planilha Excel deve conter exatamente 19 campos obrigatórios (PO Number, Customer, SKU, Quantity, Unit Price, Delivery Date, etc.)",
             "📝 NOTAS OBRIGATÓRIAS: Itens personalizados DEVEM ter descrição da customização preenchida",
@@ -37,13 +37,15 @@ export const HELP_CONFIG = {
             "⭐ FLAG PRIMEIRA ORDEM: Primeira ordem do cliente recebe atenção especial para garantir qualidade",
             "🔄 FLAG REPOSIÇÃO: Pedidos de reposição têm SLA reduzido em 50% (Ex: 10 dias → 5 dias)",
             "🔒 BLOQUEIO DE CRÉDITO: Sistema verifica automaticamente o limite de crédito do cliente. Se excedido, o pedido é bloqueado até liberação manual",
-            "✅ Todos os campos obrigatórios devem estar preenchidos antes de avançar para PCP"
+            "✅ Todos os campos obrigatórios devem estar preenchidos antes de avançar para PCP",
+            "🟣 AGUARDANDO PARTIÇÃO: Pedidos com badge roxo 'Aguardando Decisão de Partição' foram sugeridos para divisão pelo PCP e aguardam decisão comercial"
         ],
         nextSteps: [
             "Revisar dados importados e validar os 19 campos obrigatórios",
             "Verificar se há bloqueio de crédito ativo",
             "Confirmar flags estratégicas (Exportação, Primeira Ordem, Reposição)",
             "Adicionar notas de customização para itens personalizados",
+            "Para pedidos com badge roxo: Decidir sobre partição sugerida pelo PCP",
             "Mover para PCP quando validação comercial estiver completa"
         ],
         icon: "📋",
@@ -110,9 +112,9 @@ export const HELP_CONFIG = {
         ]
     },
 
-    "Expedição/Faturamento": {
-        title: "Expedição/Faturamento - Preparação e Envio",
-        description: "Embalagem final, sincronismo de despacho e preparação para envio ao cliente.",
+    "Faturamento/Expedição": {
+        title: "Faturamento/Expedição - Preparação e Envio",
+        description: "Embalagem final, sincronismo de despacho e preparação para envio ao cliente. Após conclusão, pedido avança para Financeiro.",
         rules: [
             "🔄 SINCRONISMO DE DESPACHO: Sistema EXIGE dois documentos obrigatórios antes de finalizar:",
             "   • PDF da Nota Fiscal (NF) - Upload obrigatório",
@@ -132,7 +134,7 @@ export const HELP_CONFIG = {
             "Tirar foto da carga embalada e fazer upload",
             "Registrar transportadora e código de rastreamento",
             "Confirmar endereço de entrega",
-            "Mover para Concluído quando sincronismo de despacho estiver completo (NF + Foto)"
+            "Mover para Financeiro quando sincronismo de despacho estiver completo (NF + Foto)"
         ],
         icon: "📦",
         requiredFields: [
@@ -144,12 +146,13 @@ export const HELP_CONFIG = {
         ]
     },
 
-    Concluído: {
-        title: "Concluído - Pedido Finalizado",
-        description: "Pedido entregue e finalizado com sucesso. Auditoria completa disponível.",
+    Financeiro: {
+        title: "Financeiro - Auditoria e Conclusão",
+        description: "Pedidos despachados aguardando auditoria financeira final e conclusão. Inclui pedidos em AUDIT_PENDING e COMPLETED.",
         rules: [
-            "✅ PEDIDO ENTREGUE: Produto foi enviado ao cliente com sucesso",
-            "📄 DOCUMENTAÇÃO COMPLETA: Todos os documentos foram gerados e arquivados (NF, fotos, anexos técnicos)",
+            "💰 AUDITORIA FINANCEIRA: Revisão final de valores, comissões e margens",
+            "📄 DOCUMENTAÇÃO COMPLETA: Validação de todos os documentos (NF, fotos, anexos técnicos)",
+            "✅ PEDIDO DESPACHADO: Produto foi enviado ao cliente com sucesso",
             "🔗 BLOCKCHAIN AUDIT LOG: Cada transição de status foi registrada de forma imutável com:",
             "   • Timestamp exato da mudança",
             "   • Usuário responsável pela ação",
@@ -160,14 +163,17 @@ export const HELP_CONFIG = {
             "📈 ANÁLISE DISPONÍVEL: Dados podem ser usados para relatórios gerenciais e melhoria contínua"
         ],
         nextSteps: [
-            "Arquivar documentação física (se aplicável)",
+            "Realizar auditoria financeira final",
+            "Validar comissões e margens calculadas",
+            "Confirmar recebimento de pagamento (se aplicável)",
+            "Arquivar documentação física e digital",
             "Analisar métricas de performance e SLA",
-            "Coletar feedback do cliente",
             "Revisar Audit Log para auditoria interna",
-            "Usar dados históricos para planejamento futuro"
+            "Marcar como COMPLETED após auditoria aprovada"
         ],
-        icon: "✅",
+        icon: "💰",
         auditFeatures: [
+            "Auditoria financeira obrigatória",
             "Blockchain Audit Log completo",
             "Armazenamento de 24 meses",
             "Rastreabilidade total de mudanças",

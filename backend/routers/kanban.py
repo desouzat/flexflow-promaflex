@@ -31,27 +31,32 @@ router = APIRouter(prefix="/api/kanban", tags=["Kanban"])
 
 
 # Status mapping: Database status -> Display name (Portuguese)
+# Official Process Blueprint V2.0 - 5 Column Structure
 STATUS_DISPLAY_MAP = {
     "DRAFT": "Comercial",
-    "SUBMITTED": "PCP",
-    "WAITING_COMMERCIAL_PARTITION": "Aguardando Partição",
-    "APPROVED": "Produção/Embalagem",
-    "WAITING_DISPATCH": "Expedição/Faturamento",
-    "COMPLETED": "Concluído",
+    "SUBMITTED": "Comercial",  # SUBMITTED now shows in Comercial
+    "WAITING_COMMERCIAL_PARTITION": "Comercial",  # Shows in Comercial with purple badge
+    "APPROVED": "PCP",
+    "IN_PROGRESS": "Produção/Embalagem",
+    "WAITING_DISPATCH": "Faturamento/Expedição",
+    "AUDIT_PENDING": "Financeiro",
+    "COMPLETED": "Financeiro",
     "CANCELLED": "Cancelado"
 }
 
 # Reverse mapping for API compatibility
 DISPLAY_TO_DB_STATUS = {v: k for k, v in STATUS_DISPLAY_MAP.items()}
 
-# Status flow for bidirectional movement
+# Status flow for bidirectional movement - Official Process Blueprint V2.0
 STATUS_FLOW = {
     "DRAFT": {"next": "SUBMITTED", "prev": None},
     "SUBMITTED": {"next": "APPROVED", "prev": "DRAFT"},
-    "APPROVED": {"next": "WAITING_DISPATCH", "prev": "SUBMITTED"},
-    "WAITING_DISPATCH": {"next": "COMPLETED", "prev": "APPROVED"},
-    "COMPLETED": {"next": None, "prev": "WAITING_DISPATCH"},
-    "WAITING_COMMERCIAL_PARTITION": {"next": "SUBMITTED", "prev": None}
+    "WAITING_COMMERCIAL_PARTITION": {"next": "APPROVED", "prev": None},
+    "APPROVED": {"next": "IN_PROGRESS", "prev": "SUBMITTED"},
+    "IN_PROGRESS": {"next": "WAITING_DISPATCH", "prev": "APPROVED"},
+    "WAITING_DISPATCH": {"next": "AUDIT_PENDING", "prev": "IN_PROGRESS"},
+    "AUDIT_PENDING": {"next": "COMPLETED", "prev": "WAITING_DISPATCH"},
+    "COMPLETED": {"next": None, "prev": "AUDIT_PENDING"}
 }
 
 
@@ -95,21 +100,25 @@ async def get_kanban_board(
         PurchaseOrder.tenant_id == current_user.tenant_id
     ).all()
     
-    # Define status columns (in Portuguese) - Updated with new naming
+    # Define status columns - Official Process Blueprint V2.0 (5 Columns)
+    # Comercial: SUBMITTED or WAITING_COMMERCIAL_PARTITION
+    # PCP: APPROVED
+    # Produção/Embalagem: IN_PROGRESS
+    # Faturamento/Expedição: WAITING_DISPATCH
+    # Financeiro: AUDIT_PENDING or COMPLETED
     status_columns = [
-        ("DRAFT", "Comercial"),
-        ("SUBMITTED", "PCP"),
-        ("WAITING_COMMERCIAL_PARTITION", "Aguardando Partição"),
-        ("APPROVED", "Produção/Embalagem"),
-        ("WAITING_DISPATCH", "Expedição/Faturamento"),
-        ("COMPLETED", "Concluído")
+        ("Comercial", ["SUBMITTED", "WAITING_COMMERCIAL_PARTITION"]),
+        ("PCP", ["APPROVED"]),
+        ("Produção/Embalagem", ["IN_PROGRESS"]),
+        ("Faturamento/Expedição", ["WAITING_DISPATCH"]),
+        ("Financeiro", ["AUDIT_PENDING", "COMPLETED"])
     ]
     
     # Group POs by status
     columns = []
-    for db_status, display_name in status_columns:
-        # Filter POs for this status
-        status_pos = [po for po in pos if po.status_macro == db_status]
+    for display_name, db_statuses in status_columns:
+        # Filter POs for this column (may include multiple statuses)
+        status_pos = [po for po in pos if po.status_macro in db_statuses]
         
         # Convert to response models
         po_responses = []

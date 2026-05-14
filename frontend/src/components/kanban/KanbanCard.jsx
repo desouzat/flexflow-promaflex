@@ -9,7 +9,8 @@ import {
     Globe,
     Star,
     RefreshCw,
-    Zap
+    Zap,
+    Split
 } from 'lucide-react'
 import { STRATEGIC_INDICATORS } from '../../config/helpConfig'
 
@@ -134,6 +135,11 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
     const strategicIndicators = getStrategicIndicators()
     const slaStatus = getSLAStatus()
 
+    // Check if this PO is waiting for partition decision
+    const isWaitingPartition = safepo.extra_metadata?.waiting_partition ||
+        safepo.status_macro === 'WAITING_COMMERCIAL_PARTITION' ||
+        safepo.partition_reason
+
     if (compactView) {
         return (
             <div
@@ -166,6 +172,16 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
             onClick={() => onCardClick?.(safepo)}
             className={`bg-white rounded-lg shadow-sm border border-gray-200 border-l-4 ${getSLABorderColor(slaStatus)} p-4 hover:shadow-md transition-shadow cursor-pointer`}
         >
+            {/* Purple Badge for Partition Decision */}
+            {isWaitingPartition && (
+                <div className="mb-3 px-3 py-2 bg-purple-100 border border-purple-300 rounded-lg flex items-center gap-2">
+                    <Split className="w-4 h-4 text-purple-700" />
+                    <span className="text-xs font-semibold text-purple-700">
+                        Aguardando Decisão de Partição
+                    </span>
+                </div>
+            )}
+
             {/* Header */}
             <div className="flex items-start justify-between mb-3">
                 <div className="flex-1">

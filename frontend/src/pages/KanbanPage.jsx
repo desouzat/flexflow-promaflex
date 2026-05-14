@@ -319,9 +319,9 @@ const KanbanPage = () => {
         const statusFlow = {
             'Comercial': 'PCP',
             'PCP': 'Produção/Embalagem',
-            'Produção/Embalagem': 'Expedição/Faturamento',
-            'Expedição/Faturamento': 'Concluído',
-            'Aguardando Partição': 'PCP'
+            'Produção/Embalagem': 'Faturamento/Expedição',
+            'Faturamento/Expedição': 'Financeiro',
+            'Financeiro': null
         }
         return statusFlow[currentStatus] || null
     }
@@ -330,8 +330,8 @@ const KanbanPage = () => {
         const statusFlow = {
             'PCP': 'Comercial',
             'Produção/Embalagem': 'PCP',
-            'Expedição/Faturamento': 'Produção/Embalagem',
-            'Concluído': 'Expedição/Faturamento'
+            'Faturamento/Expedição': 'Produção/Embalagem',
+            'Financeiro': 'Faturamento/Expedição'
         }
         return statusFlow[currentStatus] || null
     }
@@ -368,8 +368,8 @@ const KanbanPage = () => {
             'Comercial': 'yellow',
             'PCP': 'blue',
             'Produção/Embalagem': 'purple',
-            'Expedição/Faturamento': 'lightblue',
-            'Concluído': 'green'
+            'Faturamento/Expedição': 'lightblue',
+            'Financeiro': 'green'
         }
         return colorMap[status] || 'gray'
     }
@@ -680,8 +680,8 @@ const KanbanPage = () => {
                                     )}
                                 </div>
 
-                                {/* Logistics Checklist - Only for Expedição/Faturamento */}
-                                {selectedPO.status === 'Expedição/Faturamento' && (
+                                {/* Logistics Checklist - Only for Faturamento/Expedição */}
+                                {selectedPO.status === 'Faturamento/Expedição' && (
                                     <div className="mb-6 p-4 bg-cyan-50 border border-cyan-200 rounded-lg">
                                         <div className="flex items-center gap-2 mb-4">
                                             <Truck className="w-5 h-5 text-cyan-700" />
