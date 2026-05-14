@@ -16,9 +16,16 @@ api.interceptors.request.use(
         // CRITICAL: Fetch token dynamically on each request, not once at module load
         const token = localStorage.getItem('token')
 
+        console.log('[API Interceptor] Request:', config.method?.toUpperCase(), config.url)
+        console.log('[API Interceptor] Token in localStorage:', token ? `YES (${token.substring(0, 20)}...)` : 'NO')
+
         if (token) {
             config.headers.Authorization = `Bearer ${token}`
+            console.log('[API Interceptor] Authorization header added')
+        } else {
+            console.warn('[API Interceptor] NO TOKEN - Request will be sent without Authorization header')
         }
+
         return config
     },
     (error) => {

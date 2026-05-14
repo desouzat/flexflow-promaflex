@@ -60,6 +60,26 @@ const KanbanPage = () => {
         fetchBoard()
     }, [])
 
+    // Add escape key handler for modals
+    useEffect(() => {
+        const handleEscape = (e) => {
+            if (e.key === 'Escape') {
+                if (showDetailsModal) {
+                    handleCloseModal();
+                } else if (showReturnModal) {
+                    setShowReturnModal(false);
+                    setReturnReason('');
+                } else if (showPartitionModal) {
+                    setShowPartitionModal(false);
+                    setPartitionReason('');
+                }
+            }
+        };
+
+        document.addEventListener('keydown', handleEscape);
+        return () => document.removeEventListener('keydown', handleEscape);
+    }, [showDetailsModal, showReturnModal, showPartitionModal]);
+
     const handleCardClick = async (po) => {
         setSelectedPO(po)
         setShowDetailsModal(true)
@@ -504,7 +524,14 @@ const KanbanPage = () => {
 
                 {/* Details Modal/Drawer */}
                 {showDetailsModal && selectedPO && (
-                    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+                    <div
+                        className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4"
+                        onClick={(e) => {
+                            if (e.target === e.currentTarget) {
+                                handleCloseModal();
+                            }
+                        }}
+                    >
                         <div className="bg-white rounded-lg shadow-xl max-w-5xl w-full max-h-[90vh] overflow-hidden flex flex-col">
                             {/* Modal Header */}
                             <div className="flex items-center justify-between p-6 border-b border-gray-200 bg-gray-50">
@@ -922,7 +949,15 @@ const KanbanPage = () => {
 
                 {/* Return Status Modal */}
                 {showReturnModal && (
-                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div
+                        className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+                        onClick={(e) => {
+                            if (e.target === e.currentTarget) {
+                                setShowReturnModal(false);
+                                setReturnReason('');
+                            }
+                        }}
+                    >
                         <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
                             <div className="p-6">
                                 <h3 className="text-xl font-bold text-gray-900 mb-4">
@@ -966,7 +1001,15 @@ const KanbanPage = () => {
 
                 {/* Partition Suggestion Modal */}
                 {showPartitionModal && (
-                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div
+                        className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+                        onClick={(e) => {
+                            if (e.target === e.currentTarget) {
+                                setShowPartitionModal(false);
+                                setPartitionReason('');
+                            }
+                        }}
+                    >
                         <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
                             <div className="p-6">
                                 <h3 className="text-xl font-bold text-gray-900 mb-4">

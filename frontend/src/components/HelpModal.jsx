@@ -3,17 +3,40 @@
  * Modal de ajuda contextual "The Compass" para cada etapa do Kanban
  */
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { X, HelpCircle, CheckCircle, ArrowRight } from 'lucide-react';
 import { getHelpForStatus } from '../config/helpConfig';
 
 const HelpModal = ({ isOpen, onClose, status }) => {
+    // Add escape key handler
+    useEffect(() => {
+        if (!isOpen) return;
+
+        const handleEscape = (e) => {
+            if (e.key === 'Escape') {
+                onClose();
+            }
+        };
+
+        document.addEventListener('keydown', handleEscape);
+        return () => document.removeEventListener('keydown', handleEscape);
+    }, [isOpen, onClose]);
+
     if (!isOpen) return null;
 
     const helpConfig = getHelpForStatus(status);
 
+    const handleBackdropClick = (e) => {
+        if (e.target === e.currentTarget) {
+            onClose();
+        }
+    };
+
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+        <div
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-black bg-opacity-50 p-4"
+            onClick={handleBackdropClick}
+        >
             <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
                 {/* Header */}
                 <div className="flex items-center justify-between p-6 border-b border-gray-200">

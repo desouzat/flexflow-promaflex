@@ -20,7 +20,8 @@ export const NotificationProvider = ({ children }) => {
 
     const fetchNotifications = async () => {
         try {
-            // Fetch pending POs count for kanban badge
+            // FIXED: Remove /api prefix - api.js baseURL already includes /api
+            // So /kanban/pos becomes http://localhost:8000/api/kanban/pos
             const kanbanResponse = await api.get('/kanban/pos')
             const pendingCount = kanbanResponse.data.filter(
                 po => po.status === 'pending'

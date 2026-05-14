@@ -104,6 +104,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         "/",
         "/api/auth/login",  # Login endpoint must be public
         "/api/auth/me",     # Me endpoint must be public to avoid redirect loops
+        "/api/ping",        # Public connectivity test endpoint
     ]
     
     def __init__(self, app: ASGIApp, exclude_paths: Optional[list[str]] = None):
@@ -300,11 +301,11 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             tenant_id_str = str(token_payload.tenant_id)
             user_id_str = str(token_payload.user_id)
             
-            print("\n" + "🔄"*40)
+            print("\n" + "="*80)
             print("[STRING CONVERSION] Forcing types to string:")
             print(f"  - tenant_id: {tenant_id_str} (type: {type(tenant_id_str)})")
             print(f"  - user_id: {user_id_str} (type: {type(user_id_str)})")
-            print("🔄"*40 + "\n")
+            print("="*80 + "\n")
             
             # Create request context with string-converted IDs
             context = RequestContext(

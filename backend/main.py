@@ -90,9 +90,18 @@ app = FastAPI(
 # ============================================================================
 
 # CORS Middleware (must be first)
+# CRITICAL: Cannot use allow_origins=["*"] with allow_credentials=True
+# Must specify explicit origins when using credentials
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for development
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://localhost:3002",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+        "http://127.0.0.1:3002"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -100,10 +109,10 @@ app.add_middleware(
 
 # Authentication Middleware (validates JWT and injects context)
 # MUST come BEFORE TenantIsolationMiddleware
-# Excludes /api/auth/login, /api/auth/me and other public paths
+# Excludes /api/auth/login, /api/auth/me, /api/ping and other public paths
 app.add_middleware(
     AuthenticationMiddleware,
-    exclude_paths=["/api/auth/login", "/api/auth/me"]
+    exclude_paths=["/api/auth/login", "/api/auth/me", "/api/ping"]
 )
 
 # Tenant Isolation Middleware (checks tenant_id in context)
@@ -217,6 +226,18 @@ async def health_check():
     """
     return {
         "status": "healthy",
+        "timestamp": time.time()
+    }
+
+
+@app.get("/api/ping", tags=["Root"])
+async def ping():
+    """
+    Public connectivity test endpoint - no authentication required
+    """
+    return {
+        "status": "ok",
+        "message": "FlexFlow API is reachable",
         "timestamp": time.time()
     }
 
