@@ -16,7 +16,11 @@ from backend.schemas.kanban_schema import (
     POItemResponse,
     MoveStatusRequest,
     MoveStatusResponse,
-    POFilterParams
+    POFilterParams,
+    UpdateCommissionRequest,
+    UpdateCommissionResponse,
+    UpdateLogisticsChecklistRequest,
+    UpdateLogisticsChecklistResponse
 )
 from backend.schemas.auth_schema import UserInfo
 from backend.database import get_db
@@ -113,11 +117,37 @@ async def get_kanban_board(
                     status_item=item.status_item,
                     margin_item=Decimal("0.00"),  # Calculate if needed
                     total_cost=Decimal("0.00"),  # Calculate if needed
+                    manual_commission_rate=Decimal(str(item.extra_metadata.get("manual_commission_rate"))) if item.extra_metadata and "manual_commission_rate" in item.extra_metadata else None,
+                    extra_metadata=item.extra_metadata,
                     created_at=item.created_at,
                     updated_at=item.updated_at
                 )
                 for item in po.items
             ]
+            
+            # Get commission rate from metadata or calculate
+            commission_rate = None
+            commission_value = Decimal("0.00")
+            if po.partition_metadata and "manual_commission_rate" in po.partition_metadata:
+                commission_rate = Decimal(str(po.partition_metadata["manual_commission_rate"]))
+            else:
+                # Use default commission calculation
+                from backend.services.financial_service import FinancialService
+                commission_rate, _, _ = FinancialService.get_commission_rate(
+                    metrics["margin_percentage"],
+                    client_code=None,
+                    manual_override=None
+                )
+            
+            commission_value = FinancialService.calculate_commission_value(
+                metrics["total_value"],
+                commission_rate
+            )
+            
+            # Get logistics checklist
+            logistics_checklist = None
+            if po.partition_metadata and "logistics_checklist" in po.partition_metadata:
+                logistics_checklist = po.partition_metadata["logistics_checklist"]
             
             po_response = POResponse(
                 id=str(po.id),
@@ -131,8 +161,13 @@ async def get_kanban_board(
                 total_value=metrics["total_value"],
                 margin_global=metrics["margin_global"],
                 margin_percentage=metrics["margin_percentage"],
+                commission_rate=commission_rate,
+                commission_value=commission_value,
+                shipping_cost=Decimal(str(po.shipping_cost)),
                 expected_delivery_date=getattr(po, 'expected_delivery_date', None),
                 priority=getattr(po, 'priority', 'normal'),
+                extra_metadata=po.partition_metadata,
+                logistics_checklist=logistics_checklist,
                 created_at=po.created_at,
                 updated_at=po.updated_at,
                 created_by=str(po.created_by) if po.created_by else None
@@ -208,11 +243,35 @@ async def list_purchase_orders(
                 status_item=item.status_item,
                 margin_item=Decimal("0.00"),
                 total_cost=Decimal("0.00"),
+                manual_commission_rate=Decimal(str(item.extra_metadata.get("manual_commission_rate"))) if item.extra_metadata and "manual_commission_rate" in item.extra_metadata else None,
+                extra_metadata=item.extra_metadata,
                 created_at=item.created_at,
                 updated_at=item.updated_at
             )
             for item in po.items
         ]
+        
+        # Get commission rate
+        commission_rate = None
+        commission_value = Decimal("0.00")
+        if po.partition_metadata and "manual_commission_rate" in po.partition_metadata:
+            commission_rate = Decimal(str(po.partition_metadata["manual_commission_rate"]))
+        else:
+            from backend.services.financial_service import FinancialService
+            commission_rate, _, _ = FinancialService.get_commission_rate(
+                metrics["margin_percentage"],
+                client_code=None,
+                manual_override=None
+            )
+        
+        commission_value = FinancialService.calculate_commission_value(
+            metrics["total_value"],
+            commission_rate
+        )
+        
+        logistics_checklist = None
+        if po.partition_metadata and "logistics_checklist" in po.partition_metadata:
+            logistics_checklist = po.partition_metadata["logistics_checklist"]
         
         po_response = POResponse(
             id=str(po.id),
@@ -226,8 +285,13 @@ async def list_purchase_orders(
             total_value=metrics["total_value"],
             margin_global=metrics["margin_global"],
             margin_percentage=metrics["margin_percentage"],
+            commission_rate=commission_rate,
+            commission_value=commission_value,
+            shipping_cost=Decimal(str(po.shipping_cost)),
             expected_delivery_date=getattr(po, 'expected_delivery_date', None),
             priority=getattr(po, 'priority', 'normal'),
+            extra_metadata=po.partition_metadata,
+            logistics_checklist=logistics_checklist,
             created_at=po.created_at,
             updated_at=po.updated_at,
             created_by=str(po.created_by) if po.created_by else None
@@ -278,11 +342,35 @@ async def get_purchase_order(
             status_item=item.status_item,
             margin_item=Decimal("0.00"),
             total_cost=Decimal("0.00"),
+            manual_commission_rate=Decimal(str(item.extra_metadata.get("manual_commission_rate"))) if item.extra_metadata and "manual_commission_rate" in item.extra_metadata else None,
+            extra_metadata=item.extra_metadata,
             created_at=item.created_at,
             updated_at=item.updated_at
         )
         for item in po.items
     ]
+    
+    # Get commission rate
+    commission_rate = None
+    commission_value = Decimal("0.00")
+    if po.partition_metadata and "manual_commission_rate" in po.partition_metadata:
+        commission_rate = Decimal(str(po.partition_metadata["manual_commission_rate"]))
+    else:
+        from backend.services.financial_service import FinancialService
+        commission_rate, _, _ = FinancialService.get_commission_rate(
+            metrics["margin_percentage"],
+            client_code=None,
+            manual_override=None
+        )
+    
+    commission_value = FinancialService.calculate_commission_value(
+        metrics["total_value"],
+        commission_rate
+    )
+    
+    logistics_checklist = None
+    if po.partition_metadata and "logistics_checklist" in po.partition_metadata:
+        logistics_checklist = po.partition_metadata["logistics_checklist"]
     
     return POResponse(
         id=str(po.id),
@@ -296,8 +384,13 @@ async def get_purchase_order(
         total_value=metrics["total_value"],
         margin_global=metrics["margin_global"],
         margin_percentage=metrics["margin_percentage"],
+        commission_rate=commission_rate,
+        commission_value=commission_value,
+        shipping_cost=Decimal(str(po.shipping_cost)),
         expected_delivery_date=getattr(po, 'expected_delivery_date', None),
         priority=getattr(po, 'priority', 'normal'),
+        extra_metadata=po.partition_metadata,
+        logistics_checklist=logistics_checklist,
         created_at=po.created_at,
         updated_at=po.updated_at,
         created_by=str(po.created_by) if po.created_by else None
@@ -514,4 +607,262 @@ async def list_items(
         "total": total,
         "skip": skip,
         "limit": limit
+    }
+
+
+@router.put("/pos/{po_id}/commission", response_model=UpdateCommissionResponse)
+async def update_manual_commission(
+    po_id: str,
+    request: UpdateCommissionRequest,
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Update manual commission rate for a PO (MASTER/ADMIN only).
+    
+    This endpoint allows MASTER or ADMIN users to override the automatic
+    commission calculation with a manual rate.
+    
+    **Authorization:**
+    - Only users with MASTER or ADMIN role can update commission
+    
+    **Parameters:**
+    - **po_id**: Purchase Order ID
+    - **manual_commission_rate**: New commission rate (0-100%)
+    - **justification**: Reason for manual override (min 10 characters)
+    
+    **Returns:**
+    - Updated commission details and recalculated margin
+    """
+    
+    # Check authorization
+    if current_user.role not in ["MASTER", "ADMIN"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Apenas usuários MASTER ou ADMIN podem alterar a comissão manualmente"
+        )
+    
+    # Query PO
+    po = db.query(PurchaseOrder).filter(
+        PurchaseOrder.id == po_id,
+        PurchaseOrder.tenant_id == current_user.tenant_id
+    ).first()
+    
+    if not po:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Pedido {po_id} não encontrado"
+        )
+    
+    # Update commission rate in PO metadata
+    if not po.partition_metadata:
+        po.partition_metadata = {}
+    
+    po.partition_metadata["manual_commission_rate"] = float(request.manual_commission_rate)
+    po.partition_metadata["commission_justification"] = request.justification
+    po.partition_metadata["commission_updated_by"] = str(current_user.user_id)
+    po.partition_metadata["commission_updated_at"] = datetime.utcnow().isoformat()
+    
+    # If updating specific item
+    if request.item_id:
+        item = db.query(OrderItem).filter(
+            OrderItem.id == request.item_id,
+            OrderItem.po_id == po_id,
+            OrderItem.tenant_id == current_user.tenant_id
+        ).first()
+        
+        if not item:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Item {request.item_id} não encontrado"
+            )
+        
+        # Update item's manual commission rate
+        if not item.extra_metadata:
+            item.extra_metadata = {}
+        
+        item.extra_metadata["manual_commission_rate"] = float(request.manual_commission_rate)
+        item.extra_metadata["commission_justification"] = request.justification
+        item.extra_metadata["commission_updated_by"] = str(current_user.user_id)
+        item.extra_metadata["commission_updated_at"] = datetime.utcnow().isoformat()
+    
+    po.updated_at = datetime.utcnow()
+    db.commit()
+    
+    # Recalculate metrics with new commission
+    from backend.services.financial_service import FinancialService
+    
+    metrics = calculate_po_metrics(po)
+    
+    # Calculate commission with manual override
+    commission_value = FinancialService.calculate_commission_value(
+        metrics["total_value"],
+        request.manual_commission_rate
+    )
+    
+    return UpdateCommissionResponse(
+        success=True,
+        message=f"Comissão atualizada para {request.manual_commission_rate}% com sucesso",
+        po_id=po_id,
+        new_commission_rate=request.manual_commission_rate,
+        new_margin=metrics["margin_percentage"],
+        updated_by=current_user.username
+    )
+
+
+@router.put("/pos/{po_id}/logistics-checklist", response_model=UpdateLogisticsChecklistResponse)
+async def update_logistics_checklist(
+    po_id: str,
+    request: UpdateLogisticsChecklistRequest,
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Update logistics checklist for a PO in Expedição/Faturamento stage.
+    
+    This endpoint manages the logistics checklist with 3 mandatory items:
+    - Endereço Conferido
+    - Peso Validado
+    - Etiquetas Impressas
+    
+    And 2 evidence uploads:
+    - Foto da Carga
+    - Foto do Canhoto/NF
+    
+    **Parameters:**
+    - **po_id**: Purchase Order ID
+    - **endereco_conferido**: Address verified checkbox
+    - **peso_validado**: Weight validated checkbox
+    - **etiquetas_impressas**: Labels printed checkbox
+    - **foto_carga_path**: Path to cargo photo
+    - **foto_canhoto_path**: Path to delivery receipt/invoice photo
+    
+    **Returns:**
+    - Updated checklist status and dispatch readiness
+    """
+    
+    # Query PO
+    po = db.query(PurchaseOrder).filter(
+        PurchaseOrder.id == po_id,
+        PurchaseOrder.tenant_id == current_user.tenant_id
+    ).first()
+    
+    if not po:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Pedido {po_id} não encontrado"
+        )
+    
+    # Update logistics checklist in metadata
+    if not po.partition_metadata:
+        po.partition_metadata = {}
+    
+    logistics_checklist = {
+        "endereco_conferido": request.endereco_conferido,
+        "peso_validado": request.peso_validado,
+        "etiquetas_impressas": request.etiquetas_impressas,
+        "foto_carga_path": request.foto_carga_path,
+        "foto_canhoto_path": request.foto_canhoto_path,
+        "updated_by": str(current_user.user_id),
+        "updated_at": datetime.utcnow().isoformat()
+    }
+    
+    po.partition_metadata["logistics_checklist"] = logistics_checklist
+    po.updated_at = datetime.utcnow()
+    
+    # Check if all requirements are met
+    checklist_complete = (
+        request.endereco_conferido and
+        request.peso_validado and
+        request.etiquetas_impressas
+    )
+    
+    evidence_complete = (
+        request.foto_carga_path is not None and
+        request.foto_canhoto_path is not None
+    )
+    
+    can_dispatch = checklist_complete and evidence_complete
+    
+    db.commit()
+    
+    message = "Checklist de logística atualizado com sucesso"
+    if can_dispatch:
+        message += " - Pronto para despacho!"
+    elif not checklist_complete:
+        message += " - Pendente: completar todos os itens do checklist"
+    elif not evidence_complete:
+        message += " - Pendente: enviar todas as evidências fotográficas"
+    
+    return UpdateLogisticsChecklistResponse(
+        success=True,
+        message=message,
+        po_id=po_id,
+        checklist_complete=checklist_complete,
+        can_dispatch=can_dispatch
+    )
+
+
+@router.get("/pos/{po_id}/logistics-checklist")
+async def get_logistics_checklist(
+    po_id: str,
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get logistics checklist status for a PO.
+    
+    **Parameters:**
+    - **po_id**: Purchase Order ID
+    
+    **Returns:**
+    - Current checklist status and evidence paths
+    """
+    
+    # Query PO
+    po = db.query(PurchaseOrder).filter(
+        PurchaseOrder.id == po_id,
+        PurchaseOrder.tenant_id == current_user.tenant_id
+    ).first()
+    
+    if not po:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Pedido {po_id} não encontrado"
+        )
+    
+    # Get logistics checklist from metadata
+    logistics_checklist = {}
+    if po.partition_metadata and "logistics_checklist" in po.partition_metadata:
+        logistics_checklist = po.partition_metadata["logistics_checklist"]
+    else:
+        # Return default empty checklist
+        logistics_checklist = {
+            "endereco_conferido": False,
+            "peso_validado": False,
+            "etiquetas_impressas": False,
+            "foto_carga_path": None,
+            "foto_canhoto_path": None
+        }
+    
+    # Check completion status
+    checklist_complete = (
+        logistics_checklist.get("endereco_conferido", False) and
+        logistics_checklist.get("peso_validado", False) and
+        logistics_checklist.get("etiquetas_impressas", False)
+    )
+    
+    evidence_complete = (
+        logistics_checklist.get("foto_carga_path") is not None and
+        logistics_checklist.get("foto_canhoto_path") is not None
+    )
+    
+    can_dispatch = checklist_complete and evidence_complete
+    
+    return {
+        "po_id": po_id,
+        "checklist": logistics_checklist,
+        "checklist_complete": checklist_complete,
+        "evidence_complete": evidence_complete,
+        "can_dispatch": can_dispatch
     }

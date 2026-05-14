@@ -5,10 +5,12 @@ import MetadataVisualizer from '../components/MetadataVisualizer'
 import api from '../utils/api'
 import { showSuccess, showError } from '../utils/toast'
 import { useNotifications } from '../context/NotificationContext'
+import { useAuth } from '../context/AuthContext'
 import {
     RefreshCw, Filter, Search, Maximize2, Minimize2, X,
     Package, DollarSign, Calendar, User, FileText, Globe,
-    Star, RefreshCw as RefreshIcon, Zap, AlertCircle
+    Star, RefreshCw as RefreshIcon, Zap, AlertCircle, Upload,
+    CheckCircle, Edit2, Save, XCircle, Truck
 } from 'lucide-react'
 
 const KanbanPage = () => {
@@ -19,7 +21,19 @@ const KanbanPage = () => {
     const [compactView, setCompactView] = useState(false)
     const [selectedPO, setSelectedPO] = useState(null)
     const [showDetailsModal, setShowDetailsModal] = useState(false)
+    const [editingCommission, setEditingCommission] = useState(false)
+    const [commissionValue, setCommissionValue] = useState('')
+    const [commissionJustification, setCommissionJustification] = useState('')
+    const [logisticsChecklist, setLogisticsChecklist] = useState({
+        endereco_conferido: false,
+        peso_validado: false,
+        etiquetas_impressas: false,
+        foto_carga_path: null,
+        foto_canhoto_path: null
+    })
+    const [uploadingEvidence, setUploadingEvidence] = useState(false)
     const { refreshNotifications } = useNotifications()
+    const { user } = useAuth()
 
     const fetchBoard = async () => {
         try {
@@ -42,15 +56,35 @@ const KanbanPage = () => {
         fetchBoard()
     }, [])
 
-    const handleCardClick = (po) => {
+    const handleCardClick = async (po) => {
         console.log('PO clicked:', po)
         setSelectedPO(po)
         setShowDetailsModal(true)
+
+        // Load logistics checklist if in Expedição/Faturamento
+        if (po.status === 'Expedição/Faturamento') {
+            try {
+                const response = await api.get(`/kanban/pos/${po.id}/logistics-checklist`)
+                setLogisticsChecklist(response.data.checklist)
+            } catch (err) {
+                console.error('Error loading logistics checklist:', err)
+            }
+        }
     }
 
     const handleCloseModal = () => {
         setShowDetailsModal(false)
         setSelectedPO(null)
+        setEditingCommission(false)
+        setCommissionValue('')
+        setCommissionJustification('')
+        setLogisticsChecklist({
+            endereco_conferido: false,
+            peso_validado: false,
+            etiquetas_impressas: false,
+            foto_carga_path: null,
+            foto_canhoto_path: null
+        })
     }
 
     const handleMoveCard = async (poId, newStatus) => {
@@ -72,12 +106,9 @@ const KanbanPage = () => {
         try {
             await api.put(`/kanban/items/${itemId}/metadata`, newMetadata)
             showSuccess('Metadata atualizada com sucesso')
-            // Refresh the selected PO data
             fetchBoard()
-            // Update the selected PO in the modal
             if (selectedPO) {
                 const updatedPO = { ...selectedPO }
-                // Update the metadata in the items array
                 if (updatedPO.items) {
                     updatedPO.items = updatedPO.items.map(item =>
                         item.id === itemId ? { ...item, extra_metadata: newMetadata } : item
@@ -89,6 +120,103 @@ const KanbanPage = () => {
             const errorMsg = err.response?.data?.detail || 'Falha ao atualizar metadata'
             showError(errorMsg)
             console.error('Error updating metadata:', err)
+        }
+    }
+
+    const handleSaveCommission = async () => {
+        if (!commissionValue || !commissionJustification) {
+            showError('Preencha a taxa de comissão e a justificativa')
+            return
+        }
+
+        if (commissionJustification.length < 10) {
+            showError('A justificativa deve ter pelo menos 10 caracteres')
+            return
+        }
+
+        try {
+            const response = await api.put(`/kanban/pos/${selectedPO.id}/commission`, {
+                po_id: selectedPO.id,
+                manual_commission_rate: parseFloat(commissionValue),
+                justification: commissionJustification
+            })
+
+            showSuccess(response.data.message)
+            setEditingCommission(false)
+            setCommissionValue('')
+            setCommissionJustification('')
+
+            // Refresh PO data
+            fetchBoard()
+
+            // Update selected PO
+            const updatedPO = { ...selectedPO }
+            updatedPO.commission_rate = response.data.new_commission_rate
+            updatedPO.margin_percentage = response.data.new_margin
+            setSelectedPO(updatedPO)
+        } catch (err) {
+            const errorMsg = err.response?.data?.detail || 'Falha ao atualizar comissão'
+            showError(errorMsg)
+            console.error('Error updating commission:', err)
+        }
+    }
+
+    const handleChecklistChange = async (field, value) => {
+        const updatedChecklist = { ...logisticsChecklist, [field]: value }
+        setLogisticsChecklist(updatedChecklist)
+
+        try {
+            const response = await api.put(`/kanban/pos/${selectedPO.id}/logistics-checklist`, {
+                po_id: selectedPO.id,
+                ...updatedChecklist
+            })
+
+            if (response.data.can_dispatch) {
+                showSuccess('✅ Checklist completo! Pronto para despacho.')
+            }
+        } catch (err) {
+            const errorMsg = err.response?.data?.detail || 'Falha ao atualizar checklist'
+            showError(errorMsg)
+            console.error('Error updating checklist:', err)
+        }
+    }
+
+    const handleEvidenceUpload = async (field, file) => {
+        if (!file) return
+
+        setUploadingEvidence(true)
+        const formData = new FormData()
+        formData.append('file', file)
+        formData.append('po_id', selectedPO.id)
+
+        try {
+            // Upload file
+            const uploadResponse = await api.post('/upload', formData, {
+                headers: { 'Content-Type': 'multipart/form-data' }
+            })
+
+            const filePath = uploadResponse.data.file_path
+
+            // Update checklist with file path
+            const updatedChecklist = { ...logisticsChecklist, [field]: filePath }
+            setLogisticsChecklist(updatedChecklist)
+
+            const response = await api.put(`/kanban/pos/${selectedPO.id}/logistics-checklist`, {
+                po_id: selectedPO.id,
+                ...updatedChecklist
+            })
+
+            showSuccess(`${field === 'foto_carga_path' ? 'Foto da Carga' : 'Foto do Canhoto/NF'} enviada com sucesso`)
+
+            if (response.data.can_dispatch) {
+                showSuccess('✅ Todas as evidências enviadas! Pronto para despacho.')
+            }
+        } catch (err) {
+            const errorMsg = err.response?.data?.detail || 'Falha ao enviar evidência'
+            showError(errorMsg)
+            console.error('Error uploading evidence:', err)
+        } finally {
+            setUploadingEvidence(false)
         }
     }
 
@@ -145,6 +273,20 @@ const KanbanPage = () => {
         }
 
         return indicators
+    }
+
+    const canEditCommission = () => {
+        return user && (user.role === 'MASTER' || user.role === 'ADMIN')
+    }
+
+    const isDispatchReady = () => {
+        return (
+            logisticsChecklist.endereco_conferido &&
+            logisticsChecklist.peso_validado &&
+            logisticsChecklist.etiquetas_impressas &&
+            logisticsChecklist.foto_carga_path &&
+            logisticsChecklist.foto_canhoto_path
+        )
     }
 
     if (loading) {
@@ -252,7 +394,7 @@ const KanbanPage = () => {
                 {/* Details Modal/Drawer */}
                 {showDetailsModal && selectedPO && (
                     <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-                        <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+                        <div className="bg-white rounded-lg shadow-xl max-w-5xl w-full max-h-[90vh] overflow-hidden flex flex-col">
                             {/* Modal Header */}
                             <div className="flex items-center justify-between p-6 border-b border-gray-200 bg-gray-50">
                                 <div>
@@ -312,6 +454,226 @@ const KanbanPage = () => {
                                         </p>
                                     </div>
                                 </div>
+
+                                {/* Financial Section - Editable Commission */}
+                                <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                                    <div className="flex items-center justify-between mb-3">
+                                        <h3 className="text-lg font-semibold text-gray-900">Dados Financeiros</h3>
+                                        {canEditCommission() && !editingCommission && (
+                                            <button
+                                                onClick={() => setEditingCommission(true)}
+                                                className="flex items-center gap-2 px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
+                                            >
+                                                <Edit2 className="w-4 h-4" />
+                                                Editar Comissão
+                                            </button>
+                                        )}
+                                    </div>
+
+                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                                        <div>
+                                            <span className="text-xs text-gray-600">Margem (CM)</span>
+                                            <p className="text-lg font-bold text-gray-900">
+                                                {selectedPO.margin_percentage ? `${parseFloat(selectedPO.margin_percentage).toFixed(2)}%` : 'N/A'}
+                                            </p>
+                                        </div>
+                                        <div>
+                                            <span className="text-xs text-gray-600">Comissão</span>
+                                            {editingCommission ? (
+                                                <input
+                                                    type="number"
+                                                    step="0.01"
+                                                    min="0"
+                                                    max="100"
+                                                    value={commissionValue}
+                                                    onChange={(e) => setCommissionValue(e.target.value)}
+                                                    placeholder="Taxa %"
+                                                    className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                                                />
+                                            ) : (
+                                                <p className="text-lg font-bold text-gray-900">
+                                                    {selectedPO.commission_rate ? `${parseFloat(selectedPO.commission_rate).toFixed(2)}%` : 'N/A'}
+                                                </p>
+                                            )}
+                                        </div>
+                                        <div>
+                                            <span className="text-xs text-gray-600">Valor Comissão</span>
+                                            <p className="text-lg font-bold text-gray-900">
+                                                {formatCurrency(selectedPO.commission_value || 0)}
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    {editingCommission && (
+                                        <div className="mt-4 space-y-3">
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                                    Justificativa (mínimo 10 caracteres)
+                                                </label>
+                                                <textarea
+                                                    value={commissionJustification}
+                                                    onChange={(e) => setCommissionJustification(e.target.value)}
+                                                    placeholder="Explique o motivo da alteração manual da comissão..."
+                                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                                    rows="3"
+                                                />
+                                            </div>
+                                            <div className="flex gap-2">
+                                                <button
+                                                    onClick={handleSaveCommission}
+                                                    className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
+                                                >
+                                                    <Save className="w-4 h-4" />
+                                                    Salvar
+                                                </button>
+                                                <button
+                                                    onClick={() => {
+                                                        setEditingCommission(false)
+                                                        setCommissionValue('')
+                                                        setCommissionJustification('')
+                                                    }}
+                                                    className="flex items-center gap-2 px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors text-sm"
+                                                >
+                                                    <XCircle className="w-4 h-4" />
+                                                    Cancelar
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Logistics Checklist - Only for Expedição/Faturamento */}
+                                {selectedPO.status === 'Expedição/Faturamento' && (
+                                    <div className="mb-6 p-4 bg-cyan-50 border border-cyan-200 rounded-lg">
+                                        <div className="flex items-center gap-2 mb-4">
+                                            <Truck className="w-5 h-5 text-cyan-700" />
+                                            <h3 className="text-lg font-semibold text-gray-900">Checklist de Saída</h3>
+                                        </div>
+
+                                        <div className="space-y-3 mb-4">
+                                            <label className="flex items-center gap-3 cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={logisticsChecklist.endereco_conferido}
+                                                    onChange={(e) => handleChecklistChange('endereco_conferido', e.target.checked)}
+                                                    className="w-5 h-5 text-cyan-600 rounded focus:ring-cyan-500"
+                                                />
+                                                <span className="text-gray-700 font-medium">Endereço Conferido</span>
+                                                {logisticsChecklist.endereco_conferido && (
+                                                    <CheckCircle className="w-5 h-5 text-green-600" />
+                                                )}
+                                            </label>
+
+                                            <label className="flex items-center gap-3 cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={logisticsChecklist.peso_validado}
+                                                    onChange={(e) => handleChecklistChange('peso_validado', e.target.checked)}
+                                                    className="w-5 h-5 text-cyan-600 rounded focus:ring-cyan-500"
+                                                />
+                                                <span className="text-gray-700 font-medium">Peso Validado</span>
+                                                {logisticsChecklist.peso_validado && (
+                                                    <CheckCircle className="w-5 h-5 text-green-600" />
+                                                )}
+                                            </label>
+
+                                            <label className="flex items-center gap-3 cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={logisticsChecklist.etiquetas_impressas}
+                                                    onChange={(e) => handleChecklistChange('etiquetas_impressas', e.target.checked)}
+                                                    className="w-5 h-5 text-cyan-600 rounded focus:ring-cyan-500"
+                                                />
+                                                <span className="text-gray-700 font-medium">Etiquetas Impressas</span>
+                                                {logisticsChecklist.etiquetas_impressas && (
+                                                    <CheckCircle className="w-5 h-5 text-green-600" />
+                                                )}
+                                            </label>
+                                        </div>
+
+                                        <div className="border-t border-cyan-200 pt-4 mt-4">
+                                            <h4 className="text-md font-semibold text-gray-900 mb-3">Evidências Fotográficas</h4>
+
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                {/* Foto da Carga */}
+                                                <div className="border-2 border-dashed border-gray-300 rounded-lg p-4">
+                                                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                        Foto da Carga
+                                                    </label>
+                                                    {logisticsChecklist.foto_carga_path ? (
+                                                        <div className="flex items-center gap-2 text-green-600">
+                                                            <CheckCircle className="w-5 h-5" />
+                                                            <span className="text-sm">Enviada</span>
+                                                        </div>
+                                                    ) : (
+                                                        <div>
+                                                            <input
+                                                                type="file"
+                                                                accept="image/*"
+                                                                onChange={(e) => handleEvidenceUpload('foto_carga_path', e.target.files[0])}
+                                                                className="hidden"
+                                                                id="foto-carga-upload"
+                                                                disabled={uploadingEvidence}
+                                                            />
+                                                            <label
+                                                                htmlFor="foto-carga-upload"
+                                                                className="flex items-center justify-center gap-2 px-4 py-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 cursor-pointer transition-colors"
+                                                            >
+                                                                <Upload className="w-4 h-4" />
+                                                                {uploadingEvidence ? 'Enviando...' : 'Enviar Foto'}
+                                                            </label>
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                {/* Foto do Canhoto/NF */}
+                                                <div className="border-2 border-dashed border-gray-300 rounded-lg p-4">
+                                                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                        Foto do Canhoto/NF
+                                                    </label>
+                                                    {logisticsChecklist.foto_canhoto_path ? (
+                                                        <div className="flex items-center gap-2 text-green-600">
+                                                            <CheckCircle className="w-5 h-5" />
+                                                            <span className="text-sm">Enviada</span>
+                                                        </div>
+                                                    ) : (
+                                                        <div>
+                                                            <input
+                                                                type="file"
+                                                                accept="image/*"
+                                                                onChange={(e) => handleEvidenceUpload('foto_canhoto_path', e.target.files[0])}
+                                                                className="hidden"
+                                                                id="foto-canhoto-upload"
+                                                                disabled={uploadingEvidence}
+                                                            />
+                                                            <label
+                                                                htmlFor="foto-canhoto-upload"
+                                                                className="flex items-center justify-center gap-2 px-4 py-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 cursor-pointer transition-colors"
+                                                            >
+                                                                <Upload className="w-4 h-4" />
+                                                                {uploadingEvidence ? 'Enviando...' : 'Enviar Foto'}
+                                                            </label>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Dispatch Button */}
+                                        <div className="mt-4 pt-4 border-t border-cyan-200">
+                                            <button
+                                                disabled={!isDispatchReady()}
+                                                className={`w-full flex items-center justify-center gap-2 px-6 py-3 rounded-lg font-semibold transition-colors ${isDispatchReady()
+                                                        ? 'bg-green-600 text-white hover:bg-green-700'
+                                                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                                    }`}
+                                            >
+                                                <Truck className="w-5 h-5" />
+                                                {isDispatchReady() ? 'Concluir Despacho' : 'Complete o Checklist e Evidências'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
 
                                 {/* Strategic Indicators */}
                                 {selectedPO.extra_metadata && Object.keys(selectedPO.extra_metadata).length > 0 && (

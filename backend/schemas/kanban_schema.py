@@ -18,6 +18,8 @@ class POItemResponse(BaseModel):
     status_item: str = Field(..., description="Item status")
     margin_item: Optional[Decimal] = Field(None, description="Item margin")
     total_cost: Optional[Decimal] = Field(None, description="Total cost per unit")
+    manual_commission_rate: Optional[Decimal] = Field(None, description="Manual commission rate override (MASTER only)")
+    extra_metadata: Optional[dict] = Field(None, description="Extra metadata for item")
     created_at: datetime = Field(..., description="Creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
 
@@ -35,8 +37,13 @@ class POResponse(BaseModel):
     total_value: Optional[Decimal] = Field(None, description="Total PO value")
     margin_global: Optional[Decimal] = Field(None, description="Global margin")
     margin_percentage: Optional[Decimal] = Field(None, description="Margin percentage")
+    commission_rate: Optional[Decimal] = Field(None, description="Commission rate percentage")
+    commission_value: Optional[Decimal] = Field(None, description="Commission value in currency")
+    shipping_cost: Optional[Decimal] = Field(None, description="Shipping cost")
     expected_delivery_date: Optional[datetime] = Field(None, description="Expected delivery date")
     priority: Optional[str] = Field("normal", description="Priority level (normal, high)")
+    extra_metadata: Optional[dict] = Field(None, description="Extra metadata for PO")
+    logistics_checklist: Optional[dict] = Field(None, description="Logistics checklist data")
     created_at: datetime = Field(..., description="Creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
     created_by: Optional[str] = Field(None, description="Creator user ID")
@@ -101,3 +108,40 @@ class POFilterParams(BaseModel):
     created_before: Optional[date] = Field(None, description="Filter by creation date (before)")
     skip: int = Field(0, ge=0, description="Number of records to skip")
     limit: int = Field(100, ge=1, le=1000, description="Maximum number of records to return")
+
+
+class UpdateCommissionRequest(BaseModel):
+    """Request to update manual commission rate"""
+    po_id: str = Field(..., description="Purchase Order ID")
+    item_id: Optional[str] = Field(None, description="Item ID (if updating specific item)")
+    manual_commission_rate: Decimal = Field(..., description="Manual commission rate percentage", ge=0, le=100)
+    justification: str = Field(..., description="Justification for manual override", min_length=10)
+
+
+class UpdateCommissionResponse(BaseModel):
+    """Response after updating commission"""
+    success: bool = Field(..., description="Whether update succeeded")
+    message: str = Field(..., description="Result message")
+    po_id: str = Field(..., description="Purchase Order ID")
+    new_commission_rate: Decimal = Field(..., description="New commission rate")
+    new_margin: Decimal = Field(..., description="Recalculated margin")
+    updated_by: str = Field(..., description="User who made the update")
+
+
+class UpdateLogisticsChecklistRequest(BaseModel):
+    """Request to update logistics checklist"""
+    po_id: str = Field(..., description="Purchase Order ID")
+    endereco_conferido: bool = Field(False, description="Endereço Conferido")
+    peso_validado: bool = Field(False, description="Peso Validado")
+    etiquetas_impressas: bool = Field(False, description="Etiquetas Impressas")
+    foto_carga_path: Optional[str] = Field(None, description="Path to Foto da Carga")
+    foto_canhoto_path: Optional[str] = Field(None, description="Path to Foto do Canhoto/NF")
+
+
+class UpdateLogisticsChecklistResponse(BaseModel):
+    """Response after updating logistics checklist"""
+    success: bool = Field(..., description="Whether update succeeded")
+    message: str = Field(..., description="Result message")
+    po_id: str = Field(..., description="Purchase Order ID")
+    checklist_complete: bool = Field(..., description="Whether all checklist items are complete")
+    can_dispatch: bool = Field(..., description="Whether dispatch can be completed")
