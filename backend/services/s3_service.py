@@ -15,7 +15,7 @@ from botocore.exceptions import ClientError, NoCredentialsError
 from sqlalchemy.orm import Session
 
 from backend.services.import_service import ImportService
-from backend.schemas.import_schema import ImportMapping, ImportFieldMapping, ImportFieldType, ImportRequest
+from backend.schemas.import_schema import ImportMapping, ColumnMapping, ImportFieldType, ImportRequest
 
 logger = logging.getLogger(__name__)
 
@@ -208,24 +208,40 @@ class S3Service:
     
     def get_default_mapping(self) -> ImportMapping:
         """
-        Get default column mapping for ONET files.
+        Get default column mapping for ONET files (19-field structure).
         
-        This assumes a standard ONET format. Adjust mappings as needed.
+        This mapping covers the complete ONET format with all 19 fields:
+        Pedido, Cliente, SKU, Descrição, Qtd, Unidade, Largura, Comprimento,
+        Lead Time, Data Entrega, Data Faturamento, % ICMS, Bloqueio, Saldo,
+        Atraso, Condição Pagamento, Frete, Vendedor, IPI
         
         Returns:
-            ImportMapping with default field mappings
+            ImportMapping with default field mappings for 19-field ONET structure
         """
         return ImportMapping(
             mappings=[
-                ImportFieldMapping(column_name="PO", field_type=ImportFieldType.PO_NUMBER),
-                ImportFieldMapping(column_name="Cliente", field_type=ImportFieldType.CLIENT_NAME),
-                ImportFieldMapping(column_name="SKU", field_type=ImportFieldType.SKU),
-                ImportFieldMapping(column_name="Quantidade", field_type=ImportFieldType.QUANTITY),
-                ImportFieldMapping(column_name="Preço Unitário", field_type=ImportFieldType.PRICE_UNIT),
-                ImportFieldMapping(column_name="Custo MP", field_type=ImportFieldType.COST_MP),
-                ImportFieldMapping(column_name="Custo MO", field_type=ImportFieldType.COST_MO),
-                ImportFieldMapping(column_name="Custo Energia", field_type=ImportFieldType.COST_ENERGY),
-                ImportFieldMapping(column_name="Custo Gás", field_type=ImportFieldType.COST_GAS),
+                # Core identification fields (required)
+                ColumnMapping(column_name="Pedido", field_type=ImportFieldType.PO_NUMBER),
+                ColumnMapping(column_name="Cliente", field_type=ImportFieldType.CLIENT_NAME),
+                ColumnMapping(column_name="SKU", field_type=ImportFieldType.SKU),
+                ColumnMapping(column_name="Qtd", field_type=ImportFieldType.QUANTITY),
+                
+                # Optional ONET fields
+                ColumnMapping(column_name="Descrição", field_type=ImportFieldType.DESCRIPTION),
+                ColumnMapping(column_name="Unidade", field_type=ImportFieldType.UNIT),
+                ColumnMapping(column_name="Largura", field_type=ImportFieldType.WIDTH),
+                ColumnMapping(column_name="Comprimento", field_type=ImportFieldType.LENGTH),
+                ColumnMapping(column_name="Lead Time", field_type=ImportFieldType.LEAD_TIME),
+                ColumnMapping(column_name="Data Entrega", field_type=ImportFieldType.DELIVERY_DATE),
+                ColumnMapping(column_name="Data Faturamento", field_type=ImportFieldType.BILLING_DATE),
+                ColumnMapping(column_name="% ICMS", field_type=ImportFieldType.ICMS_PERCENT),
+                ColumnMapping(column_name="Bloqueio", field_type=ImportFieldType.BLOCK_STATUS),
+                ColumnMapping(column_name="Saldo", field_type=ImportFieldType.BALANCE),
+                ColumnMapping(column_name="Atraso", field_type=ImportFieldType.DELAY),
+                ColumnMapping(column_name="Condição Pagamento", field_type=ImportFieldType.PAYMENT_TERMS),
+                ColumnMapping(column_name="Frete", field_type=ImportFieldType.FREIGHT),
+                ColumnMapping(column_name="Vendedor", field_type=ImportFieldType.SALESPERSON),
+                ColumnMapping(column_name="IPI", field_type=ImportFieldType.IPI),
             ]
         )
     

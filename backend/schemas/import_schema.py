@@ -10,11 +10,39 @@ from enum import Enum
 
 
 class ImportFieldType(str, Enum):
-    """Types of fields that can be imported"""
-    PO_NUMBER = "po_number"
-    CLIENT_NAME = "client_name"
-    SKU = "sku"
-    QUANTITY = "quantity"
+    """Types of fields that can be imported - 19-field ONET structure"""
+    # Core identification fields
+    PO_NUMBER = "po_number"  # Pedido
+    CLIENT_NAME = "client_name"  # Cliente
+    SKU = "sku"  # SKU
+    DESCRIPTION = "description"  # Descrição
+    
+    # Quantity and unit fields
+    QUANTITY = "quantity"  # Qtd
+    UNIT = "unit"  # Unidade
+    
+    # Dimensional fields
+    WIDTH = "width"  # Largura
+    LENGTH = "length"  # Comprimento
+    
+    # Timeline fields
+    LEAD_TIME = "lead_time"  # Lead Time
+    DELIVERY_DATE = "delivery_date"  # Data Entrega
+    BILLING_DATE = "billing_date"  # Data Faturamento
+    
+    # Financial/Tax fields
+    ICMS_PERCENT = "icms_percent"  # % ICMS
+    IPI = "ipi"  # IPI
+    FREIGHT = "freight"  # Frete
+    PAYMENT_TERMS = "payment_terms"  # Condição Pagamento
+    
+    # Status/Control fields
+    BLOCK_STATUS = "block_status"  # Bloqueio
+    BALANCE = "balance"  # Saldo
+    DELAY = "delay"  # Atraso
+    SALESPERSON = "salesperson"  # Vendedor
+    
+    # Legacy cost fields (kept for backward compatibility)
     PRICE_UNIT = "price_unit"
     COST_MP = "cost_mp"  # Matéria Prima
     COST_MO = "cost_mo"  # Mão de Obra
@@ -49,17 +77,21 @@ class ImportMapping(BaseModel):
     
     @model_validator(mode='after')
     def validate_required_fields(self):
-        """Ensure all required fields are mapped"""
+        """
+        Ensure minimum required fields are mapped.
+        
+        For the 19-field ONET structure, only core fields are mandatory:
+        - PO Number, Client Name, SKU, Quantity
+        
+        All other fields (description, dimensions, dates, taxes, costs) are optional
+        to support flexible import scenarios.
+        """
+        # Minimum required fields for any import
         required_fields = {
             ImportFieldType.PO_NUMBER,
             ImportFieldType.CLIENT_NAME,
             ImportFieldType.SKU,
             ImportFieldType.QUANTITY,
-            ImportFieldType.PRICE_UNIT,
-            ImportFieldType.COST_MP,
-            ImportFieldType.COST_MO,
-            ImportFieldType.COST_ENERGY,
-            ImportFieldType.COST_GAS
         }
         
         mapped_fields = {mapping.field_type for mapping in self.mappings}
@@ -90,15 +122,43 @@ class ImportMapping(BaseModel):
 class ImportItemData(BaseModel):
     """
     Validated data for a single item in the import.
-    All costs and prices are validated as positive numbers.
+    Supports the full 19-field ONET structure with optional fields.
     """
+    # Core required fields
     sku: str = Field(..., min_length=1, max_length=100)
     quantity: int = Field(..., gt=0, description="Quantity must be positive")
-    price_unit: Decimal = Field(..., ge=0, description="Unit price must be non-negative")
-    cost_mp: Decimal = Field(..., ge=0, description="Material cost must be non-negative")
-    cost_mo: Decimal = Field(..., ge=0, description="Labor cost must be non-negative")
-    cost_energy: Decimal = Field(..., ge=0, description="Energy cost must be non-negative")
-    cost_gas: Decimal = Field(..., ge=0, description="Gas cost must be non-negative")
+    
+    # Optional ONET fields
+    description: Optional[str] = Field(None, max_length=500, description="Product description")
+    unit: Optional[str] = Field(None, max_length=10, description="Unit of measure (UN, KG, etc)")
+    
+    # Dimensional fields
+    width: Optional[Decimal] = Field(None, ge=0, description="Width in mm")
+    length: Optional[Decimal] = Field(None, ge=0, description="Length in mm")
+    
+    # Timeline fields
+    lead_time: Optional[int] = Field(None, ge=0, description="Lead time in days")
+    delivery_date: Optional[str] = Field(None, description="Delivery date (DD/MM/YYYY)")
+    billing_date: Optional[str] = Field(None, description="Billing date (DD/MM/YYYY)")
+    
+    # Financial/Tax fields
+    icms_percent: Optional[Decimal] = Field(None, ge=0, le=100, description="ICMS percentage")
+    ipi: Optional[Decimal] = Field(None, ge=0, description="IPI value")
+    freight: Optional[Decimal] = Field(None, ge=0, description="Freight cost")
+    payment_terms: Optional[str] = Field(None, max_length=100, description="Payment terms")
+    
+    # Status/Control fields
+    block_status: Optional[str] = Field(None, max_length=50, description="Block/Hold status")
+    balance: Optional[Decimal] = Field(None, description="Balance amount")
+    delay: Optional[int] = Field(None, description="Delay in days")
+    salesperson: Optional[str] = Field(None, max_length=100, description="Salesperson name")
+    
+    # Legacy cost fields (optional for backward compatibility)
+    price_unit: Optional[Decimal] = Field(None, ge=0, description="Unit price")
+    cost_mp: Optional[Decimal] = Field(None, ge=0, description="Material cost")
+    cost_mo: Optional[Decimal] = Field(None, ge=0, description="Labor cost")
+    cost_energy: Optional[Decimal] = Field(None, ge=0, description="Energy cost")
+    cost_gas: Optional[Decimal] = Field(None, ge=0, description="Gas cost")
     
     # Staging Area / Customization fields
     is_personalized: bool = Field(default=False, description="Whether item is personalized")
@@ -123,9 +183,16 @@ class ImportItemData(BaseModel):
     
     @model_validator(mode='after')
     def calculate_margins(self):
-        """Calculate item margin and total cost"""
-        self.total_cost = self.cost_mp + self.cost_mo + self.cost_energy + self.cost_gas
-        self.margin_item = self.price_unit - self.total_cost
+        """Calculate item margin and total cost if cost fields are provided"""
+        # Only calculate if we have cost data
+        if all([self.cost_mp is not None, self.cost_mo is not None,
+                self.cost_energy is not None, self.cost_gas is not None]):
+            self.total_cost = self.cost_mp + self.cost_mo + self.cost_energy + self.cost_gas
+            
+            # Calculate margin if we also have price
+            if self.price_unit is not None:
+                self.margin_item = self.price_unit - self.total_cost
+        
         return self
 
 

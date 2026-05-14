@@ -122,9 +122,8 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         """
         
         # PROTOCOL STEP 1: Print ALL headers for every request
-        print("\n" + "🔍"*40)
-        print(f"[HEADERS] Path: {request.url.path}")
-        print(f"[HEADERS] Method: {request.method}")
+        print("\n" + "="*80)
+        print(f"[AUTH MIDDLEWARE] Request received: {request.method} {request.url.path}")
         print("[HEADERS] All Headers:")
         for header_name, header_value in request.headers.items():
             if header_name.lower() == "authorization":
@@ -135,7 +134,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
                     print(f"  - {header_name}: {header_value}")
             else:
                 print(f"  - {header_name}: {header_value}")
-        print("🔍"*40 + "\n")
+        print("="*80 + "\n")
         
         # Skip authentication for public paths
         if self._is_public_path(request.url.path):
@@ -252,14 +251,14 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             token_payload = SimpleTokenPayload(payload)
             
             # PROTOCOL STEP 2: Type comparison debug - tenant_id
-            print("\n" + "🔬"*40)
+            print("\n" + "="*80)
             print("[TYPE CHECK] Analyzing tenant_id from token:")
             print(f"  - Raw tenant_id from payload: {payload.get('tenant_id')}")
             print(f"  - Type: {type(payload.get('tenant_id'))}")
             print(f"  - token_payload.tenant_id: {token_payload.tenant_id}")
             print(f"  - Type: {type(token_payload.tenant_id)}")
             print(f"  - Converted to string: '{str(token_payload.tenant_id)}'")
-            print("🔬"*40 + "\n")
+            print("="*80 + "\n")
             
             # Validate required fields
             if not token_payload.user_id:
@@ -322,16 +321,16 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             
             # Log authentication success
             logger.info(
-                f"[AUTH] ✓ Authenticated: user={context.user_id}, "
+                f"[AUTH] Authenticated: user={context.user_id}, "
                 f"tenant={context.tenant_id}, path={request.url.path}"
             )
             
-            print("\n" + "✅"*40)
+            print("\n" + "="*80)
             print("[AUTH SUCCESS] Context injected successfully:")
             print(f"  - tenant_id: {context.tenant_id}")
             print(f"  - user_id: {context.user_id}")
             print(f"  - Proceeding to next middleware/handler...")
-            print("✅"*40 + "\n")
+            print("="*80 + "\n")
             
             # Continue to route handler
             response = await call_next(request)
@@ -357,14 +356,14 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             )
         except Exception as e:
             # PROTOCOL STEP 3: Detailed exception handling with traceback
-            print("\n" + "💥"*40)
+            print("\n" + "="*80)
             print("[EXCEPTION] Unexpected error in AuthenticationMiddleware:")
             print(f"  - Error type: {type(e).__name__}")
             print(f"  - Error message: {str(e)}")
             print(f"  - Path: {request.url.path}")
             print("\n[TRACEBACK]:")
             print(traceback.format_exc())
-            print("💥"*40 + "\n")
+            print("="*80 + "\n")
             
             logger.error(
                 f"[AUTH] Unexpected error in authentication middleware: {str(e)}",
@@ -448,7 +447,7 @@ class TenantIsolationMiddleware(BaseHTTPMiddleware):
             
             # Verify context was injected by AuthenticationMiddleware
             if not hasattr(request.state, "context"):
-                print(f"  - ❌ MISSING CONTEXT - AuthenticationMiddleware did not inject context!")
+                print(f"  - [ERROR] MISSING CONTEXT - AuthenticationMiddleware did not inject context!")
                 print("="*80 + "\n")
                 logger.error(
                     f"Tenant isolation check failed: missing context, path={request.url.path}"
@@ -463,10 +462,10 @@ class TenantIsolationMiddleware(BaseHTTPMiddleware):
             
             context: RequestContext = request.state.context
             
-            print(f"  - ✓ Context exists")
-            print(f"  - tenant_id: {context.tenant_id if context.tenant_id else '❌ EMPTY'}")
+            print(f"  - [OK] Context exists")
+            print(f"  - tenant_id: {context.tenant_id if context.tenant_id else '[EMPTY]'}")
             print(f"  - tenant_id type: {type(context.tenant_id)}")
-            print(f"  - user_id: {context.user_id if context.user_id else '❌ EMPTY'}")
+            print(f"  - user_id: {context.user_id if context.user_id else '[EMPTY]'}")
             print(f"  - user_id type: {type(context.user_id)}")
             print("="*80 + "\n")
             
@@ -489,23 +488,23 @@ class TenantIsolationMiddleware(BaseHTTPMiddleware):
                 f"user={context.user_id}, path={request.url.path}"
             )
             
-            print("\n" + "🚀"*40)
+            print("\n" + "="*80)
             print("[TENANT ISOLATION] All checks passed, proceeding to handler...")
-            print("🚀"*40 + "\n")
+            print("="*80 + "\n")
             
             # Continue to route handler
             return await call_next(request)
             
         except Exception as e:
             # PROTOCOL STEP 3: Detailed exception handling with traceback
-            print("\n" + "💥"*40)
+            print("\n" + "="*80)
             print("[EXCEPTION] Unexpected error in TenantIsolationMiddleware:")
             print(f"  - Error type: {type(e).__name__}")
             print(f"  - Error message: {str(e)}")
             print(f"  - Path: {request.url.path}")
             print("\n[TRACEBACK]:")
             print(traceback.format_exc())
-            print("💥"*40 + "\n")
+            print("="*80 + "\n")
             
             logger.error(
                 f"[TENANT] Unexpected error in tenant isolation middleware: {str(e)}",

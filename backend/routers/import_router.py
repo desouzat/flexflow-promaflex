@@ -191,15 +191,16 @@ async def get_available_field_types(
     """
     
     field_types = [
+        # Core required fields
         {
             "value": ImportFieldType.PO_NUMBER,
-            "label": "PO Number",
+            "label": "Pedido (PO Number)",
             "description": "Purchase Order number",
             "required": True
         },
         {
             "value": ImportFieldType.CLIENT_NAME,
-            "label": "Client Name",
+            "label": "Cliente (Client Name)",
             "description": "Customer/Client name",
             "required": True
         },
@@ -211,39 +212,133 @@ async def get_available_field_types(
         },
         {
             "value": ImportFieldType.QUANTITY,
-            "label": "Quantity",
+            "label": "Qtd (Quantity)",
             "description": "Item quantity (must be positive integer)",
             "required": True
         },
+        
+        # Optional ONET fields
+        {
+            "value": ImportFieldType.DESCRIPTION,
+            "label": "Descrição (Description)",
+            "description": "Product description",
+            "required": False
+        },
+        {
+            "value": ImportFieldType.UNIT,
+            "label": "Unidade (Unit)",
+            "description": "Unit of measure (UN, KG, etc)",
+            "required": False
+        },
+        {
+            "value": ImportFieldType.WIDTH,
+            "label": "Largura (Width)",
+            "description": "Width in mm",
+            "required": False
+        },
+        {
+            "value": ImportFieldType.LENGTH,
+            "label": "Comprimento (Length)",
+            "description": "Length in mm",
+            "required": False
+        },
+        {
+            "value": ImportFieldType.LEAD_TIME,
+            "label": "Lead Time",
+            "description": "Production lead time in days",
+            "required": False
+        },
+        {
+            "value": ImportFieldType.DELIVERY_DATE,
+            "label": "Data Entrega (Delivery Date)",
+            "description": "Delivery date (DD/MM/YYYY)",
+            "required": False
+        },
+        {
+            "value": ImportFieldType.BILLING_DATE,
+            "label": "Data Faturamento (Billing Date)",
+            "description": "Billing date (DD/MM/YYYY)",
+            "required": False
+        },
+        {
+            "value": ImportFieldType.ICMS_PERCENT,
+            "label": "% ICMS",
+            "description": "ICMS tax percentage",
+            "required": False
+        },
+        {
+            "value": ImportFieldType.IPI,
+            "label": "IPI",
+            "description": "IPI tax value",
+            "required": False
+        },
+        {
+            "value": ImportFieldType.FREIGHT,
+            "label": "Frete (Freight)",
+            "description": "Freight/shipping cost",
+            "required": False
+        },
+        {
+            "value": ImportFieldType.PAYMENT_TERMS,
+            "label": "Condição Pagamento (Payment Terms)",
+            "description": "Payment terms/conditions",
+            "required": False
+        },
+        {
+            "value": ImportFieldType.BLOCK_STATUS,
+            "label": "Bloqueio (Block Status)",
+            "description": "Block/Hold status",
+            "required": False
+        },
+        {
+            "value": ImportFieldType.BALANCE,
+            "label": "Saldo (Balance)",
+            "description": "Balance amount",
+            "required": False
+        },
+        {
+            "value": ImportFieldType.DELAY,
+            "label": "Atraso (Delay)",
+            "description": "Delay in days",
+            "required": False
+        },
+        {
+            "value": ImportFieldType.SALESPERSON,
+            "label": "Vendedor (Salesperson)",
+            "description": "Salesperson name",
+            "required": False
+        },
+        
+        # Legacy cost fields (optional)
         {
             "value": ImportFieldType.PRICE_UNIT,
             "label": "Unit Price",
             "description": "Price per unit (must be non-negative)",
-            "required": True
+            "required": False
         },
         {
             "value": ImportFieldType.COST_MP,
             "label": "Material Cost",
             "description": "Cost of raw materials (Matéria Prima)",
-            "required": True
+            "required": False
         },
         {
             "value": ImportFieldType.COST_MO,
             "label": "Labor Cost",
             "description": "Cost of labor (Mão de Obra)",
-            "required": True
+            "required": False
         },
         {
             "value": ImportFieldType.COST_ENERGY,
             "label": "Energy Cost",
             "description": "Energy/electricity cost",
-            "required": True
+            "required": False
         },
         {
             "value": ImportFieldType.COST_GAS,
             "label": "Gas Cost",
             "description": "Gas cost",
-            "required": True
+            "required": False
         }
     ]
     

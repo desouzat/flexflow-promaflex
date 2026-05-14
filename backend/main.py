@@ -52,17 +52,25 @@ async def lifespan(app: FastAPI):
     # Create database tables (in production, use Alembic migrations)
     # Base.metadata.create_all(bind=engine)
     
-    # Start background worker for S3 sync
+    # Start background worker for S3 sync (non-blocking)
     from backend.services.background_worker import start_background_worker, stop_background_worker
-    await start_background_worker()
+    try:
+        await start_background_worker()
+        print("Background worker started successfully")
+    except Exception as e:
+        print(f"[WARNING] Background worker failed to start: {e}")
+        print("[WARNING] S3 sync will not be available, but API will continue to work")
     
     print("FlexFlow API started successfully")
     
     yield
     
     # Shutdown
-    print("👋 Shutting down FlexFlow API...")
-    await stop_background_worker()
+    print("Shutting down FlexFlow API...")
+    try:
+        await stop_background_worker()
+    except Exception as e:
+        print(f"[WARNING] Error stopping background worker: {e}")
 
 
 # Create FastAPI application

@@ -60,30 +60,36 @@ class BackgroundWorker:
                     else:
                         logger.info("Running scheduled S3 sync...")
                         
-                        # Check for new files
-                        result = s3_service.check_for_new_files(
-                            tenant_id=self.system_tenant_id,
-                            user_id=self.system_user_id
-                        )
-                        
-                        # Log results
-                        if result['success']:
-                            if result['files_processed'] > 0:
-                                logger.info(
-                                    f"S3 sync completed: {result['files_processed']} files processed, "
-                                    f"{result['files_failed']} failed. "
-                                    f"POs imported: {', '.join(result['pos_imported'])}"
-                                )
+                        try:
+                            # Check for new files (wrapped to prevent blocking)
+                            result = s3_service.check_for_new_files(
+                                tenant_id=self.system_tenant_id,
+                                user_id=self.system_user_id
+                            )
+                            
+                            # Log results
+                            if result['success']:
+                                if result['files_processed'] > 0:
+                                    logger.info(
+                                        f"S3 sync completed: {result['files_processed']} files processed, "
+                                        f"{result['files_failed']} failed. "
+                                        f"POs imported: {', '.join(result['pos_imported'])}"
+                                    )
+                                else:
+                                    logger.info("S3 sync completed: No new files found")
                             else:
-                                logger.info("S3 sync completed: No new files found")
-                        else:
-                            logger.error(f"S3 sync failed: {'; '.join(result['errors'])}")
+                                logger.error(f"S3 sync failed: {'; '.join(result['errors'])}")
+                        except Exception as s3_error:
+                            # Log S3 errors but don't crash the worker
+                            logger.error(f"S3 sync error (non-blocking): {str(s3_error)}")
+                            print(f"[WARNING] S3 sync error: {str(s3_error)}")
                 
                 finally:
                     db.close()
             
             except Exception as e:
                 logger.error(f"Error in S3 sync task: {str(e)}", exc_info=True)
+                print(f"[WARNING] Background worker error: {str(e)}")
             
             # Wait for next interval
             await asyncio.sleep(self.sync_interval)
