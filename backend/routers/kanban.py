@@ -30,6 +30,7 @@ router = APIRouter(prefix="/api/kanban", tags=["Kanban"])
 STATUS_DISPLAY_MAP = {
     "DRAFT": "Comercial",
     "SUBMITTED": "PCP",
+    "WAITING_COMMERCIAL_PARTITION": "Aguardando Partição",
     "APPROVED": "Produção/Embalagem",
     "IN_PROGRESS": "Expedição/Faturamento",
     "COMPLETED": "Concluído",
@@ -84,6 +85,7 @@ async def get_kanban_board(
     status_columns = [
         ("DRAFT", "Comercial"),
         ("SUBMITTED", "PCP"),
+        ("WAITING_COMMERCIAL_PARTITION", "Aguardando Partição"),
         ("APPROVED", "Produção/Embalagem"),
         ("IN_PROGRESS", "Expedição/Faturamento"),
         ("COMPLETED", "Concluído")

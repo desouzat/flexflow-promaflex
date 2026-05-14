@@ -10,7 +10,7 @@ from fastapi.exceptions import RequestValidationError
 from contextlib import asynccontextmanager
 import time
 
-from backend.routers import auth, import_router, kanban, dashboard, costs, workshop
+from backend.routers import auth, import_router, kanban, dashboard, costs, workshop, partition
 from backend.database import engine, Base
 from backend.middleware import AuthenticationMiddleware, TenantIsolationMiddleware
 
@@ -168,6 +168,7 @@ app.include_router(import_router.router)
 app.include_router(kanban.router)
 app.include_router(dashboard.router)
 app.include_router(costs.router)
+app.include_router(partition.router)
 
 
 # ============================================================================
@@ -190,7 +191,8 @@ async def root():
             "import": "/api/import",
             "kanban": "/api/kanban",
             "dashboard": "/api/dashboard",
-            "costs": "/api/costs"
+            "costs": "/api/costs",
+            "partition": "/api/partition"
         }
     }
 
@@ -251,6 +253,13 @@ async def api_info():
                 "update_material": "PUT /api/costs/materials/{sku}",
                 "delete_material": "DELETE /api/costs/materials/{sku}",
                 "settings": "GET /api/costs/settings"
+            },
+            "partition": {
+                "suggest": "POST /api/partition/suggest",
+                "execute": "POST /api/partition/execute",
+                "pending": "GET /api/partition/pending",
+                "history": "GET /api/partition/history/{po_id}",
+                "preview": "GET /api/partition/preview/{po_id}"
             }
         }
     }

@@ -17,7 +17,10 @@ from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from sqlalchemy.sql import func
 
-from backend.database import Base
+try:
+    from backend.database import Base
+except ModuleNotFoundError:
+    from database import Base
 
 
 # ============================================================================
@@ -185,10 +188,12 @@ class PurchaseOrder(Base):
     STATUS_IN_PROGRESS = "IN_PROGRESS"
     STATUS_COMPLETED = "COMPLETED"
     STATUS_CANCELLED = "CANCELLED"
+    STATUS_WAITING_COMMERCIAL_PARTITION = "WAITING_COMMERCIAL_PARTITION"
     
     VALID_STATUSES = [
         STATUS_DRAFT, STATUS_SUBMITTED, STATUS_APPROVED,
-        STATUS_IN_PROGRESS, STATUS_COMPLETED, STATUS_CANCELLED
+        STATUS_IN_PROGRESS, STATUS_COMPLETED, STATUS_CANCELLED,
+        STATUS_WAITING_COMMERCIAL_PARTITION
     ]
     
     # Colunas
@@ -219,6 +224,36 @@ class PurchaseOrder(Base):
         nullable=True
     )
     
+    # Partition fields
+    parent_po_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("purchase_orders.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Reference to parent PO if this is a child from partition"
+    )
+    partition_reason: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Reason for partition suggested by PCP"
+    )
+    shipping_cost: Mapped[float] = mapped_column(
+        Numeric(10, 2),
+        default=0.00,
+        nullable=False,
+        comment="Shipping cost for this PO (used in partition recalculation)"
+    )
+    is_partitioned: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        comment="Flag indicating if this PO has been partitioned"
+    )
+    partition_metadata: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="Metadata about partition: original_items, split_date, freight_strategy, etc."
+    )
+    
     # Relacionamentos
     tenant: Mapped["Tenant"] = relationship("Tenant", back_populates="purchase_orders")
     creator: Mapped[Optional["User"]] = relationship(
@@ -231,6 +266,12 @@ class PurchaseOrder(Base):
         back_populates="purchase_order",
         cascade="all, delete-orphan"
     )
+    parent_po: Mapped[Optional["PurchaseOrder"]] = relationship(
+        "PurchaseOrder",
+        remote_side="PurchaseOrder.id",
+        foreign_keys=[parent_po_id],
+        backref="child_pos"
+    )
     
     # Índices e Constraints
     __table_args__ = (
@@ -238,6 +279,8 @@ class PurchaseOrder(Base):
         Index('idx_po_tenant_po_number', 'tenant_id', 'po_number', unique=True),
         Index('idx_po_status_macro', 'status_macro'),
         Index('idx_po_created_by', 'created_by'),
+        Index('idx_po_parent_po_id', 'parent_po_id'),
+        Index('idx_po_is_partitioned', 'is_partitioned'),
         CheckConstraint(
             f"status_macro IN {tuple(VALID_STATUSES)}",
             name='check_po_status_macro'
@@ -300,6 +343,20 @@ class OrderItem(Base):
     is_new_client: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     customization_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     attachment_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    
+    # Partition tracking fields
+    partition_group: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+        comment="Partition group identifier (e.g., 'SHIP_NOW', 'SHIP_LATER')"
+    )
+    original_item_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("order_items.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Reference to original item if this is from a partition"
+    )
+    
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now()
