@@ -449,3 +449,73 @@ async def validate_staging_item(
         "is_personalized": is_personalized,
         "is_new_client": is_new_client
     }
+
+
+@router.post("/sync-s3")
+async def sync_s3_bucket(
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Manually trigger S3 bucket synchronization.
+    
+    Checks the configured S3 bucket for new CSV/XLSX files and imports them.
+    
+    **Returns:**
+    - Sync results with number of files processed and POs imported
+    
+    **Requires:**
+    - S3 credentials configured in .env file
+    """
+    from backend.services.s3_service import S3Service
+    
+    try:
+        # Create S3 service
+        s3_service = S3Service(db)
+        
+        # Check if S3 is configured
+        if not s3_service.is_configured():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="S3 service not configured. Please check environment variables (S3_ACCESS_KEY, S3_SECRET_KEY, S3_BUCKET_NAME)."
+            )
+        
+        # Trigger sync
+        result = s3_service.check_for_new_files(
+            tenant_id=str(current_user.tenant_id),
+            user_id=str(current_user.user_id)
+        )
+        
+        # Format response
+        if result['success']:
+            message = f"Sincronização concluída: {result['files_processed']} arquivo(s) processado(s)"
+            if result['files_failed'] > 0:
+                message += f", {result['files_failed']} falhou(s)"
+            
+            return {
+                "success": True,
+                "message": message,
+                "files_found": result['files_found'],
+                "files_processed": result['files_processed'],
+                "files_failed": result['files_failed'],
+                "pos_imported": result['pos_imported'],
+                "errors": result['errors']
+            }
+        else:
+            return {
+                "success": False,
+                "message": "Sincronização falhou: " + "; ".join(result['errors']),
+                "files_found": result['files_found'],
+                "files_processed": result['files_processed'],
+                "files_failed": result['files_failed'],
+                "pos_imported": result['pos_imported'],
+                "errors": result['errors']
+            }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao sincronizar com S3: {str(e)}"
+        )

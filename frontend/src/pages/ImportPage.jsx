@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react'
-import { Upload, FileSpreadsheet, AlertCircle, CheckCircle, X, HelpCircle, Paperclip, Trash2 } from 'lucide-react'
+import { Upload, FileSpreadsheet, AlertCircle, CheckCircle, X, HelpCircle, Paperclip, Trash2, Cloud } from 'lucide-react'
 import api from '../utils/api'
 import { showSuccess, showError, showLoading, dismissToast } from '../utils/toast'
 import { useNotifications } from '../context/NotificationContext'
@@ -11,6 +11,7 @@ const ImportPage = () => {
     const [uploading, setUploading] = useState(false)
     const [stagingData, setStagingData] = useState(null)
     const [showHelp, setShowHelp] = useState(false)
+    const [syncing, setSyncing] = useState(false)
     const fileInputRef = useRef(null)
     const { refreshNotifications } = useNotifications()
 
@@ -238,6 +239,46 @@ const ImportPage = () => {
         }
     }
 
+    const handleSyncS3 = async () => {
+        setSyncing(true)
+        const toastId = showLoading('Sincronizando com ONET (Nuvem)...')
+
+        try {
+            const response = await api.post('/import/sync-s3')
+
+            dismissToast(toastId)
+
+            if (response.data.success) {
+                const { files_processed, pos_imported } = response.data
+
+                if (files_processed > 0) {
+                    showSuccess(
+                        `✅ ${files_processed} arquivo(s) processado(s)! ` +
+                        `POs importados: ${pos_imported.join(', ')}`
+                    )
+                    refreshNotifications()
+                } else {
+                    showSuccess('✅ Sincronização concluída. Nenhum arquivo novo encontrado.')
+                }
+            } else {
+                showError(response.data.message || 'Falha na sincronização')
+            }
+        } catch (error) {
+            dismissToast(toastId)
+            console.error('S3 sync error:', error)
+
+            if (error.response?.status === 503) {
+                showError('Serviço S3 não configurado. Contate o administrador.')
+            } else {
+                showError(
+                    error.response?.data?.detail || 'Erro ao sincronizar com ONET. Tente novamente.'
+                )
+            }
+        } finally {
+            setSyncing(false)
+        }
+    }
+
     const handleDragOver = (e) => {
         e.preventDefault()
         e.stopPropagation()
@@ -271,13 +312,32 @@ const ImportPage = () => {
                             Importar e validar pedidos de compra
                         </p>
                     </div>
-                    <button
-                        onClick={() => setShowHelp(true)}
-                        className="flex items-center gap-2 px-4 py-2 text-primary-600 hover:bg-primary-50 rounded-lg transition-colors"
-                    >
-                        <HelpCircle className="w-5 h-5" />
-                        <span className="font-medium">Ajuda</span>
-                    </button>
+                    <div className="flex items-center gap-3">
+                        <button
+                            onClick={handleSyncS3}
+                            disabled={syncing}
+                            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {syncing ? (
+                                <>
+                                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                    <span className="font-medium">Sincronizando...</span>
+                                </>
+                            ) : (
+                                <>
+                                    <Cloud className="w-5 h-5" />
+                                    <span className="font-medium">Sincronizar com ONET (Nuvem)</span>
+                                </>
+                            )}
+                        </button>
+                        <button
+                            onClick={() => setShowHelp(true)}
+                            className="flex items-center gap-2 px-4 py-2 text-primary-600 hover:bg-primary-50 rounded-lg transition-colors"
+                        >
+                            <HelpCircle className="w-5 h-5" />
+                            <span className="font-medium">Ajuda</span>
+                        </button>
+                    </div>
                 </div>
             </div>
 
