@@ -32,7 +32,7 @@ import_configs_storage = {}
 @router.post("/upload", response_model=ImportResponse)
 async def upload_and_import_file(
     file: UploadFile = File(..., description="Excel or CSV file to import"),
-    mapping_json: str = File(..., description="JSON string of column mapping"),
+    mapping_json: str = Form(..., description="JSON string of column mapping"),
     current_user: UserInfo = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):

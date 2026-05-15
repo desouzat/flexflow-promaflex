@@ -11,10 +11,11 @@ const ITEMS_PER_PAGE = 10
 const ImportPage = () => {
     const [selectedFile, setSelectedFile] = useState(null)
     const [uploading, setUploading] = useState(false)
-    const [stagingData, setStagingData] = useState(null)
+    const [stagingData, setStagingData] = useState(null) // Can be single PO or multi-PO
     const [showHelp, setShowHelp] = useState(false)
     const [syncing, setSyncing] = useState(false)
     const [currentPage, setCurrentPage] = useState(1)
+    const [selectedPOIndex, setSelectedPOIndex] = useState(0) // For multi-PO navigation
     const fileInputRef = useRef(null)
     const { refreshNotifications } = useNotifications()
 
@@ -94,25 +95,68 @@ const ImportPage = () => {
 
             dismissToast(toastId)
 
-            // CRITICAL: Replace state completely with backend response
-            if (response.data.success && response.data.items) {
-                setStagingData({
-                    po_number: response.data.po_number,
-                    client_name: response.data.client_name,
-                    items: response.data.items.map((item, index) => ({
-                        id: index + 1,
-                        sku: item.sku,
-                        quantity: item.quantity,
-                        price_unit: item.price_unit || 0,
-                        is_personalized: false,
-                        is_new_client: false,
-                        customization_notes: '',
-                        attachment_path: null,
-                        needs_mapping: false
+            // Handle both single PO and multi-PO responses
+            if (response.data.success) {
+                // Check if multi-PO (po_list exists and has multiple POs)
+                if (response.data.po_list && response.data.po_list.length > 0) {
+                    // Multi-PO support
+                    const poList = response.data.po_list.map(po => ({
+                        po_number: po.po_number,
+                        client_name: po.client_name,
+                        items: po.items.map((item, index) => ({
+                            id: `${po.po_number}-${index + 1}`,
+                            sku: item.sku,
+                            quantity: item.quantity,
+                            price_unit: item.price_unit || 0,
+                            is_personalized: false,
+                            is_new_client: false,
+                            customization_notes: '',
+                            attachment_path: null,
+                            needs_mapping: false
+                        }))
                     }))
-                })
-                setCurrentPage(1)
-                showSuccess(`Arquivo processado! ${response.data.items.length} itens carregados.`)
+
+                    setStagingData({
+                        isMultiPO: poList.length > 1,
+                        po_list: poList,
+                        total_pos: poList.length
+                    })
+                    setSelectedPOIndex(0)
+                    setCurrentPage(1)
+
+                    const totalItems = poList.reduce((sum, po) => sum + po.items.length, 0)
+                    if (poList.length > 1) {
+                        showSuccess(`Arquivo processado! ${poList.length} POs encontrados com ${totalItems} itens no total.`)
+                    } else {
+                        showSuccess(`Arquivo processado! ${totalItems} itens carregados.`)
+                    }
+                } else if (response.data.items) {
+                    // Legacy single PO support
+                    setStagingData({
+                        isMultiPO: false,
+                        po_list: [{
+                            po_number: response.data.po_number,
+                            client_name: response.data.client_name,
+                            items: response.data.items.map((item, index) => ({
+                                id: index + 1,
+                                sku: item.sku,
+                                quantity: item.quantity,
+                                price_unit: item.price_unit || 0,
+                                is_personalized: false,
+                                is_new_client: false,
+                                customization_notes: '',
+                                attachment_path: null,
+                                needs_mapping: false
+                            }))
+                        }],
+                        total_pos: 1
+                    })
+                    setSelectedPOIndex(0)
+                    setCurrentPage(1)
+                    showSuccess(`Arquivo processado! ${response.data.items.length} itens carregados.`)
+                } else {
+                    throw new Error('Resposta inválida do servidor')
+                }
             } else {
                 throw new Error('Resposta inválida do servidor')
             }
@@ -329,15 +373,22 @@ const ImportPage = () => {
         }
     }
 
-    // Pagination logic
+    // Pagination logic for current PO
     const getPaginatedItems = () => {
-        if (!stagingData || !stagingData.items) return []
+        if (!stagingData || !stagingData.po_list || !stagingData.po_list[selectedPOIndex]) return []
+        const currentPO = stagingData.po_list[selectedPOIndex]
         const startIndex = (currentPage - 1) * ITEMS_PER_PAGE
         const endIndex = startIndex + ITEMS_PER_PAGE
-        return stagingData.items.slice(startIndex, endIndex)
+        return currentPO.items.slice(startIndex, endIndex)
     }
 
-    const totalPages = stagingData ? Math.ceil(stagingData.items.length / ITEMS_PER_PAGE) : 0
+    const getCurrentPO = () => {
+        if (!stagingData || !stagingData.po_list) return null
+        return stagingData.po_list[selectedPOIndex]
+    }
+
+    const currentPO = getCurrentPO()
+    const totalPages = currentPO ? Math.ceil(currentPO.items.length / ITEMS_PER_PAGE) : 0
 
     const handlePreviousPage = () => {
         setCurrentPage(prev => Math.max(1, prev - 1))
@@ -345,6 +396,18 @@ const ImportPage = () => {
 
     const handleNextPage = () => {
         setCurrentPage(prev => Math.min(totalPages, prev + 1))
+    }
+
+    const handlePreviousPO = () => {
+        setSelectedPOIndex(prev => Math.max(0, prev - 1))
+        setCurrentPage(1) // Reset to first page when switching POs
+    }
+
+    const handleNextPO = () => {
+        if (stagingData && stagingData.po_list) {
+            setSelectedPOIndex(prev => Math.min(stagingData.po_list.length - 1, prev + 1))
+            setCurrentPage(1) // Reset to first page when switching POs
+        }
     }
 
     const helpContent = getHelpForStatus('Staging')
@@ -470,21 +533,58 @@ const ImportPage = () => {
                     )}
 
                     {/* Staging Area Grid with Pagination */}
-                    {stagingData && (
+                    {stagingData && currentPO && (
                         <div className="space-y-6">
+                            {/* Multi-PO Navigation */}
+                            {stagingData.isMultiPO && (
+                                <div className="card bg-blue-50 border-blue-200">
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <h3 className="text-lg font-semibold text-blue-900 mb-1">
+                                                📦 Múltiplos Pedidos Detectados
+                                            </h3>
+                                            <p className="text-sm text-blue-700">
+                                                {stagingData.total_pos} POs encontrados no arquivo. Navegue entre eles abaixo.
+                                            </p>
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                            <button
+                                                onClick={handlePreviousPO}
+                                                disabled={selectedPOIndex === 0}
+                                                className="p-2 border border-blue-300 rounded-lg hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                title="PO Anterior"
+                                            >
+                                                <ChevronLeft className="w-5 h-5 text-blue-700" />
+                                            </button>
+                                            <span className="text-sm font-medium text-blue-900">
+                                                PO {selectedPOIndex + 1} de {stagingData.total_pos}
+                                            </span>
+                                            <button
+                                                onClick={handleNextPO}
+                                                disabled={selectedPOIndex === stagingData.total_pos - 1}
+                                                className="p-2 border border-blue-300 rounded-lg hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                title="Próximo PO"
+                                            >
+                                                <ChevronRight className="w-5 h-5 text-blue-700" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
                             {/* PO Header */}
                             <div className="card">
                                 <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                                    Informações do Pedido
+                                    Informações do Pedido {stagingData.isMultiPO ? `(${selectedPOIndex + 1}/${stagingData.total_pos})` : ''}
                                 </h3>
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
                                         <label className="text-sm font-medium text-gray-700">Número PO</label>
-                                        <p className="text-lg font-semibold text-gray-900">{stagingData.po_number}</p>
+                                        <p className="text-lg font-semibold text-gray-900">{currentPO.po_number}</p>
                                     </div>
                                     <div>
                                         <label className="text-sm font-medium text-gray-700">Cliente</label>
-                                        <p className="text-lg font-semibold text-gray-900">{stagingData.client_name}</p>
+                                        <p className="text-lg font-semibold text-gray-900">{currentPO.client_name}</p>
                                     </div>
                                 </div>
                             </div>
@@ -493,7 +593,7 @@ const ImportPage = () => {
                             <div className="card">
                                 <div className="flex items-center justify-between mb-4">
                                     <h3 className="text-lg font-semibold text-gray-900">
-                                        Itens do Pedido ({stagingData.items.length} total)
+                                        Itens do Pedido ({currentPO.items.length} total)
                                     </h3>
                                     {hasErrors() && (
                                         <div className="flex items-center gap-2 text-red-600">

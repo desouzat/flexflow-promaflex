@@ -139,6 +139,15 @@ async def log_request_body(request: Request, call_next):
     """Log full JSON body of POST requests for debugging"""
     if request.method == "POST":
         try:
+            # Check content-type header
+            content_type = request.headers.get("content-type", "")
+            
+            # Skip body reading for multipart/form-data (file uploads)
+            if "multipart/form-data" in content_type.lower():
+                print(f"\n[LOG] File Upload Request - Skipping body print for {request.url.path}")
+                response = await call_next(request)
+                return response
+            
             # Read the body
             body = await request.body()
             

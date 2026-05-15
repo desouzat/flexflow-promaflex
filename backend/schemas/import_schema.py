@@ -286,9 +286,11 @@ class ImportValidationResult(BaseModel):
     """
     Result of validating import data.
     Contains either validated data or detailed error information.
+    Supports multiple POs in a single file.
     """
     success: bool = Field(..., description="Whether validation succeeded")
-    po_data: Optional[ImportPOData] = Field(None, description="Validated PO data if successful")
+    po_data: Optional[ImportPOData] = Field(None, description="Validated PO data if successful (single PO - legacy)")
+    po_data_list: Optional[List[ImportPOData]] = Field(None, description="List of validated PO data (multi-PO support)")
     errors: List[ImportRowError] = Field(default_factory=list, description="List of validation errors")
     total_rows_processed: int = Field(..., description="Total number of rows processed")
     valid_rows: int = Field(0, description="Number of valid rows")
@@ -297,8 +299,8 @@ class ImportValidationResult(BaseModel):
     @model_validator(mode='after')
     def validate_consistency(self):
         """Ensure result is consistent"""
-        if self.success and not self.po_data:
-            raise ValueError("Success must have po_data")
+        if self.success and not self.po_data and not self.po_data_list:
+            raise ValueError("Success must have po_data or po_data_list")
         if not self.success and not self.errors:
             raise ValueError("Failure must have errors")
         return self
@@ -335,14 +337,24 @@ class ImportResponse(BaseModel):
     """
     Response after attempting to import data.
     Contains success status and details about the import.
+    Supports multiple POs in a single file.
     """
     success: bool = Field(..., description="Whether import succeeded")
     message: str = Field(..., description="Human-readable message")
-    po_id: Optional[str] = Field(None, description="ID of created PO if successful")
-    po_number: Optional[str] = Field(None, description="PO number if successful")
+    
+    # Single PO fields (legacy support)
+    po_id: Optional[str] = Field(None, description="ID of created PO if successful (single PO)")
+    po_number: Optional[str] = Field(None, description="PO number if successful (single PO)")
+    client_name: Optional[str] = Field(None, description="Client name (single PO)")
+    items: Optional[List[ImportItemData]] = Field(None, description="Items list (single PO)")
+    
+    # Multi-PO fields
+    po_list: Optional[List[Dict]] = Field(None, description="List of POs with their items (multi-PO support)")
+    total_pos: int = Field(0, description="Total number of POs found")
+    
     items_imported: int = Field(0, description="Number of items imported")
     validation_result: Optional[ImportValidationResult] = Field(
-        None, 
+        None,
         description="Detailed validation results"
     )
     
