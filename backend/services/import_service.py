@@ -259,13 +259,16 @@ class ImportService:
         return str_value, None
     
     def parse_row(
-        self, 
-        row: pd.Series, 
-        row_number: int, 
+        self,
+        row: pd.Series,
+        row_number: int,
         mapping_dict: Dict[str, ImportFieldType]
     ) -> Tuple[Optional[Dict[str, Any]], List[ImportRowError]]:
         """
         Parse a single row from the DataFrame.
+        
+        Supports both legacy cost-based imports and new ONET 19-field imports.
+        Cost fields are optional - if not provided, they will be looked up from material_costs.
         
         Args:
             row: DataFrame row
@@ -281,78 +284,229 @@ class ImportService:
         # Reverse mapping: field_type -> column_name
         field_to_column = {v: k for k, v in mapping_dict.items()}
         
+        # ============================================================
+        # REQUIRED FIELDS (Must be present in all imports)
+        # ============================================================
+        
         # Parse PO number
-        po_col = field_to_column[ImportFieldType.PO_NUMBER]
-        po_number, error = self.parse_string(row[po_col], "PO Number", row_number)
-        if error:
-            errors.append(error)
+        if ImportFieldType.PO_NUMBER not in field_to_column:
+            errors.append(ImportRowError(
+                row_number=row_number,
+                error_message="PO Number field is required but not mapped"
+            ))
         else:
-            data['po_number'] = po_number
+            po_col = field_to_column[ImportFieldType.PO_NUMBER]
+            po_number, error = self.parse_string(row[po_col], "PO Number", row_number)
+            if error:
+                errors.append(error)
+            else:
+                data['po_number'] = po_number
         
         # Parse client name
-        client_col = field_to_column[ImportFieldType.CLIENT_NAME]
-        client_name, error = self.parse_string(row[client_col], "Client Name", row_number)
-        if error:
-            errors.append(error)
+        if ImportFieldType.CLIENT_NAME not in field_to_column:
+            errors.append(ImportRowError(
+                row_number=row_number,
+                error_message="Client Name field is required but not mapped"
+            ))
         else:
-            data['client_name'] = client_name
+            client_col = field_to_column[ImportFieldType.CLIENT_NAME]
+            client_name, error = self.parse_string(row[client_col], "Client Name", row_number)
+            if error:
+                errors.append(error)
+            else:
+                data['client_name'] = client_name
         
         # Parse SKU
-        sku_col = field_to_column[ImportFieldType.SKU]
-        sku, error = self.parse_string(row[sku_col], "SKU", row_number)
-        if error:
-            errors.append(error)
+        if ImportFieldType.SKU not in field_to_column:
+            errors.append(ImportRowError(
+                row_number=row_number,
+                error_message="SKU field is required but not mapped"
+            ))
         else:
-            data['sku'] = sku
+            sku_col = field_to_column[ImportFieldType.SKU]
+            sku, error = self.parse_string(row[sku_col], "SKU", row_number)
+            if error:
+                errors.append(error)
+            else:
+                data['sku'] = sku
         
         # Parse quantity
-        qty_col = field_to_column[ImportFieldType.QUANTITY]
-        quantity, error = self.parse_integer(row[qty_col], "Quantity", row_number)
-        if error:
-            errors.append(error)
+        if ImportFieldType.QUANTITY not in field_to_column:
+            errors.append(ImportRowError(
+                row_number=row_number,
+                error_message="Quantity field is required but not mapped"
+            ))
         else:
-            data['quantity'] = quantity
+            qty_col = field_to_column[ImportFieldType.QUANTITY]
+            quantity, error = self.parse_integer(row[qty_col], "Quantity", row_number)
+            if error:
+                errors.append(error)
+            else:
+                data['quantity'] = quantity
         
-        # Parse price_unit
-        price_col = field_to_column[ImportFieldType.PRICE_UNIT]
-        price_unit, error = self.parse_decimal(row[price_col], "Unit Price", row_number)
-        if error:
-            errors.append(error)
-        else:
-            data['price_unit'] = price_unit
+        # ============================================================
+        # OPTIONAL ONET FIELDS (19-field structure)
+        # ============================================================
         
-        # Parse cost_mp
-        cost_mp_col = field_to_column[ImportFieldType.COST_MP]
-        cost_mp, error = self.parse_decimal(row[cost_mp_col], "Material Cost", row_number)
-        if error:
-            errors.append(error)
-        else:
-            data['cost_mp'] = cost_mp
+        # Description
+        if ImportFieldType.DESCRIPTION in field_to_column:
+            desc_col = field_to_column[ImportFieldType.DESCRIPTION]
+            if not pd.isna(row[desc_col]):
+                data['description'] = str(row[desc_col]).strip()
         
-        # Parse cost_mo
-        cost_mo_col = field_to_column[ImportFieldType.COST_MO]
-        cost_mo, error = self.parse_decimal(row[cost_mo_col], "Labor Cost", row_number)
-        if error:
-            errors.append(error)
-        else:
-            data['cost_mo'] = cost_mo
+        # Unit
+        if ImportFieldType.UNIT in field_to_column:
+            unit_col = field_to_column[ImportFieldType.UNIT]
+            if not pd.isna(row[unit_col]):
+                data['unit'] = str(row[unit_col]).strip()
         
-        # Parse cost_energy
-        cost_energy_col = field_to_column[ImportFieldType.COST_ENERGY]
-        cost_energy, error = self.parse_decimal(row[cost_energy_col], "Energy Cost", row_number)
-        if error:
-            errors.append(error)
-        else:
-            data['cost_energy'] = cost_energy
+        # Width
+        if ImportFieldType.WIDTH in field_to_column:
+            width_col = field_to_column[ImportFieldType.WIDTH]
+            if not pd.isna(row[width_col]):
+                try:
+                    data['width'] = Decimal(str(row[width_col]))
+                except (InvalidOperation, ValueError):
+                    pass  # Skip invalid values
         
-        # Parse cost_gas
-        cost_gas_col = field_to_column[ImportFieldType.COST_GAS]
-        cost_gas, error = self.parse_decimal(row[cost_gas_col], "Gas Cost", row_number)
-        if error:
-            errors.append(error)
-        else:
-            data['cost_gas'] = cost_gas
+        # Length
+        if ImportFieldType.LENGTH in field_to_column:
+            length_col = field_to_column[ImportFieldType.LENGTH]
+            if not pd.isna(row[length_col]):
+                try:
+                    data['length'] = Decimal(str(row[length_col]))
+                except (InvalidOperation, ValueError):
+                    pass
         
+        # Lead Time
+        if ImportFieldType.LEAD_TIME in field_to_column:
+            lead_col = field_to_column[ImportFieldType.LEAD_TIME]
+            if not pd.isna(row[lead_col]):
+                try:
+                    data['lead_time'] = int(float(row[lead_col]))
+                except (ValueError, TypeError):
+                    pass
+        
+        # Delivery Date
+        if ImportFieldType.DELIVERY_DATE in field_to_column:
+            delivery_col = field_to_column[ImportFieldType.DELIVERY_DATE]
+            if not pd.isna(row[delivery_col]):
+                data['delivery_date'] = str(row[delivery_col]).strip()
+        
+        # Billing Date
+        if ImportFieldType.BILLING_DATE in field_to_column:
+            billing_col = field_to_column[ImportFieldType.BILLING_DATE]
+            if not pd.isna(row[billing_col]):
+                data['billing_date'] = str(row[billing_col]).strip()
+        
+        # ICMS Percent
+        if ImportFieldType.ICMS_PERCENT in field_to_column:
+            icms_col = field_to_column[ImportFieldType.ICMS_PERCENT]
+            if not pd.isna(row[icms_col]):
+                try:
+                    data['icms_percent'] = Decimal(str(row[icms_col]))
+                except (InvalidOperation, ValueError):
+                    pass
+        
+        # Block Status
+        if ImportFieldType.BLOCK_STATUS in field_to_column:
+            block_col = field_to_column[ImportFieldType.BLOCK_STATUS]
+            if not pd.isna(row[block_col]):
+                data['block_status'] = str(row[block_col]).strip()
+        
+        # Balance
+        if ImportFieldType.BALANCE in field_to_column:
+            balance_col = field_to_column[ImportFieldType.BALANCE]
+            if not pd.isna(row[balance_col]):
+                try:
+                    data['balance'] = Decimal(str(row[balance_col]))
+                except (InvalidOperation, ValueError):
+                    pass
+        
+        # Delay
+        if ImportFieldType.DELAY in field_to_column:
+            delay_col = field_to_column[ImportFieldType.DELAY]
+            if not pd.isna(row[delay_col]):
+                try:
+                    data['delay'] = int(float(row[delay_col]))
+                except (ValueError, TypeError):
+                    pass
+        
+        # Payment Terms
+        if ImportFieldType.PAYMENT_TERMS in field_to_column:
+            payment_col = field_to_column[ImportFieldType.PAYMENT_TERMS]
+            if not pd.isna(row[payment_col]):
+                data['payment_terms'] = str(row[payment_col]).strip()
+        
+        # Freight
+        if ImportFieldType.FREIGHT in field_to_column:
+            freight_col = field_to_column[ImportFieldType.FREIGHT]
+            if not pd.isna(row[freight_col]):
+                try:
+                    data['freight'] = Decimal(str(row[freight_col]))
+                except (InvalidOperation, ValueError):
+                    pass
+        
+        # Salesperson
+        if ImportFieldType.SALESPERSON in field_to_column:
+            sales_col = field_to_column[ImportFieldType.SALESPERSON]
+            if not pd.isna(row[sales_col]):
+                data['salesperson'] = str(row[sales_col]).strip()
+        
+        # IPI
+        if ImportFieldType.IPI in field_to_column:
+            ipi_col = field_to_column[ImportFieldType.IPI]
+            if not pd.isna(row[ipi_col]):
+                try:
+                    data['ipi'] = Decimal(str(row[ipi_col]))
+                except (InvalidOperation, ValueError):
+                    pass
+        
+        # ============================================================
+        # OPTIONAL COST FIELDS (Legacy support or explicit cost imports)
+        # ============================================================
+        
+        # Price Unit (optional - can be calculated from costs)
+        if ImportFieldType.PRICE_UNIT in field_to_column:
+            price_col = field_to_column[ImportFieldType.PRICE_UNIT]
+            if not pd.isna(row[price_col]):
+                price_unit, error = self.parse_decimal(row[price_col], "Unit Price", row_number)
+                if not error:
+                    data['price_unit'] = price_unit
+        
+        # Cost MP (optional - will be looked up from material_costs if not provided)
+        if ImportFieldType.COST_MP in field_to_column:
+            cost_mp_col = field_to_column[ImportFieldType.COST_MP]
+            if not pd.isna(row[cost_mp_col]):
+                cost_mp, error = self.parse_decimal(row[cost_mp_col], "Material Cost", row_number)
+                if not error:
+                    data['cost_mp'] = cost_mp
+        
+        # Cost MO (optional)
+        if ImportFieldType.COST_MO in field_to_column:
+            cost_mo_col = field_to_column[ImportFieldType.COST_MO]
+            if not pd.isna(row[cost_mo_col]):
+                cost_mo, error = self.parse_decimal(row[cost_mo_col], "Labor Cost", row_number)
+                if not error:
+                    data['cost_mo'] = cost_mo
+        
+        # Cost Energy (optional)
+        if ImportFieldType.COST_ENERGY in field_to_column:
+            cost_energy_col = field_to_column[ImportFieldType.COST_ENERGY]
+            if not pd.isna(row[cost_energy_col]):
+                cost_energy, error = self.parse_decimal(row[cost_energy_col], "Energy Cost", row_number)
+                if not error:
+                    data['cost_energy'] = cost_energy
+        
+        # Cost Gas (optional)
+        if ImportFieldType.COST_GAS in field_to_column:
+            cost_gas_col = field_to_column[ImportFieldType.COST_GAS]
+            if not pd.isna(row[cost_gas_col]):
+                cost_gas, error = self.parse_decimal(row[cost_gas_col], "Gas Cost", row_number)
+                if not error:
+                    data['cost_gas'] = cost_gas
+        
+        # If we have critical errors (missing required fields), return early
         if errors:
             return None, errors
         

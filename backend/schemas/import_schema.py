@@ -80,11 +80,21 @@ class ImportMapping(BaseModel):
         """
         Ensure minimum required fields are mapped.
         
-        For the 19-field ONET structure, only core fields are mandatory:
-        - PO Number, Client Name, SKU, Quantity
+        REQUIRED FIELDS (Must be present in all imports):
+        - PO Number (Pedido)
+        - Client Name (Cliente)
+        - SKU
+        - Quantity (Qtd)
         
-        All other fields (description, dimensions, dates, taxes, costs) are optional
-        to support flexible import scenarios.
+        OPTIONAL ONET FIELDS (19-field structure):
+        - Description, Unit, Width, Length, Lead Time, Delivery Date, Billing Date,
+          ICMS%, Block Status, Balance, Delay, Payment Terms, Freight, Salesperson, IPI
+        
+        OPTIONAL COST FIELDS (Legacy support):
+        - Price Unit, Cost MP, Cost MO, Cost Energy, Cost Gas
+        
+        Note: Cost fields are NOT required for ONET imports. If not provided,
+        they will be looked up from the material_costs table by SKU.
         """
         # Minimum required fields for any import
         required_fields = {
@@ -100,7 +110,8 @@ class ImportMapping(BaseModel):
         if missing_fields:
             missing_names = [field.value for field in missing_fields]
             raise ValueError(
-                f"Missing required field mappings: {', '.join(missing_names)}"
+                f"Missing required field mappings: {', '.join(missing_names)}. "
+                f"These 4 fields are mandatory for all imports."
             )
         
         return self
