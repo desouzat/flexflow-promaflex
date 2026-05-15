@@ -11,7 +11,7 @@ const ITEMS_PER_PAGE = 10
 const ImportPage = () => {
     const [selectedFile, setSelectedFile] = useState(null)
     const [uploading, setUploading] = useState(false)
-    const [stagingData, setStagingData] = useState(null) // Can be single PO or multi-PO
+    const [stagingData, setStagingData] = useState(null) // Can be single PO or multi-PO with po_list
     const [showHelp, setShowHelp] = useState(false)
     const [syncing, setSyncing] = useState(false)
     const [currentPage, setCurrentPage] = useState(1)
@@ -172,36 +172,57 @@ const ImportPage = () => {
     }
 
     const handleTogglePersonalized = (itemId) => {
-        setStagingData(prev => ({
-            ...prev,
-            items: prev.items.map(item =>
-                item.id === itemId
-                    ? { ...item, is_personalized: !item.is_personalized }
-                    : item
-            )
-        }))
+        setStagingData(prev => {
+            if (!prev || !prev.po_list || !Array.isArray(prev.po_list)) return prev
+
+            return {
+                ...prev,
+                po_list: prev.po_list.map(po => ({
+                    ...po,
+                    items: Array.isArray(po.items) ? po.items.map(item =>
+                        item.id === itemId
+                            ? { ...item, is_personalized: !item.is_personalized }
+                            : item
+                    ) : []
+                }))
+            }
+        })
     }
 
     const handleToggleNewClient = (itemId) => {
-        setStagingData(prev => ({
-            ...prev,
-            items: prev.items.map(item =>
-                item.id === itemId
-                    ? { ...item, is_new_client: !item.is_new_client }
-                    : item
-            )
-        }))
+        setStagingData(prev => {
+            if (!prev || !prev.po_list || !Array.isArray(prev.po_list)) return prev
+
+            return {
+                ...prev,
+                po_list: prev.po_list.map(po => ({
+                    ...po,
+                    items: Array.isArray(po.items) ? po.items.map(item =>
+                        item.id === itemId
+                            ? { ...item, is_new_client: !item.is_new_client }
+                            : item
+                    ) : []
+                }))
+            }
+        })
     }
 
     const handleNotesChange = (itemId, notes) => {
-        setStagingData(prev => ({
-            ...prev,
-            items: prev.items.map(item =>
-                item.id === itemId
-                    ? { ...item, customization_notes: notes }
-                    : item
-            )
-        }))
+        setStagingData(prev => {
+            if (!prev || !prev.po_list || !Array.isArray(prev.po_list)) return prev
+
+            return {
+                ...prev,
+                po_list: prev.po_list.map(po => ({
+                    ...po,
+                    items: Array.isArray(po.items) ? po.items.map(item =>
+                        item.id === itemId
+                            ? { ...item, customization_notes: notes }
+                            : item
+                    ) : []
+                }))
+            }
+        })
     }
 
     const handleFileUpload = async (itemId, file) => {
@@ -233,18 +254,25 @@ const ImportPage = () => {
             dismissToast(toastId)
 
             if (response.data.success) {
-                setStagingData(prev => ({
-                    ...prev,
-                    items: prev.items.map(item =>
-                        item.id === itemId
-                            ? {
-                                ...item,
-                                attachment_path: response.data.file_path,
-                                attachment_filename: response.data.original_filename
-                            }
-                            : item
-                    )
-                }))
+                setStagingData(prev => {
+                    if (!prev || !prev.po_list || !Array.isArray(prev.po_list)) return prev
+
+                    return {
+                        ...prev,
+                        po_list: prev.po_list.map(po => ({
+                            ...po,
+                            items: Array.isArray(po.items) ? po.items.map(item =>
+                                item.id === itemId
+                                    ? {
+                                        ...item,
+                                        attachment_path: response.data.file_path,
+                                        attachment_filename: response.data.original_filename
+                                    }
+                                    : item
+                            ) : []
+                        }))
+                    }
+                })
                 showSuccess('Arquivo enviado com sucesso!')
             }
         } catch (error) {
@@ -254,14 +282,21 @@ const ImportPage = () => {
     }
 
     const handleRemoveAttachment = (itemId) => {
-        setStagingData(prev => ({
-            ...prev,
-            items: prev.items.map(item =>
-                item.id === itemId
-                    ? { ...item, attachment_path: null, attachment_filename: null }
-                    : item
-            )
-        }))
+        setStagingData(prev => {
+            if (!prev || !prev.po_list || !Array.isArray(prev.po_list)) return prev
+
+            return {
+                ...prev,
+                po_list: prev.po_list.map(po => ({
+                    ...po,
+                    items: Array.isArray(po.items) ? po.items.map(item =>
+                        item.id === itemId
+                            ? { ...item, attachment_path: null, attachment_filename: null }
+                            : item
+                    ) : []
+                }))
+            }
+        })
     }
 
     const validateItem = (item) => {
@@ -281,8 +316,12 @@ const ImportPage = () => {
     }
 
     const hasErrors = () => {
-        if (!stagingData) return false
-        return stagingData.items.some(item => validateItem(item).length > 0)
+        if (!stagingData || !stagingData.po_list || !Array.isArray(stagingData.po_list)) return false
+
+        // Check all items across all POs
+        return stagingData.po_list.some(po =>
+            Array.isArray(po.items) && po.items.some(item => validateItem(item).length > 0)
+        )
     }
 
     const handleConfirmPO = async () => {
@@ -375,20 +414,24 @@ const ImportPage = () => {
 
     // Pagination logic for current PO
     const getPaginatedItems = () => {
-        if (!stagingData || !stagingData.po_list || !stagingData.po_list[selectedPOIndex]) return []
+        if (!stagingData || !stagingData.po_list || !Array.isArray(stagingData.po_list)) return []
+        if (!stagingData.po_list[selectedPOIndex]) return []
+
         const currentPO = stagingData.po_list[selectedPOIndex]
+        if (!currentPO.items || !Array.isArray(currentPO.items)) return []
+
         const startIndex = (currentPage - 1) * ITEMS_PER_PAGE
         const endIndex = startIndex + ITEMS_PER_PAGE
         return currentPO.items.slice(startIndex, endIndex)
     }
 
     const getCurrentPO = () => {
-        if (!stagingData || !stagingData.po_list) return null
-        return stagingData.po_list[selectedPOIndex]
+        if (!stagingData || !stagingData.po_list || !Array.isArray(stagingData.po_list)) return null
+        return stagingData.po_list[selectedPOIndex] || null
     }
 
     const currentPO = getCurrentPO()
-    const totalPages = currentPO ? Math.ceil(currentPO.items.length / ITEMS_PER_PAGE) : 0
+    const totalPages = currentPO && Array.isArray(currentPO.items) ? Math.ceil(currentPO.items.length / ITEMS_PER_PAGE) : 0
 
     const handlePreviousPage = () => {
         setCurrentPage(prev => Math.max(1, prev - 1))
@@ -404,7 +447,7 @@ const ImportPage = () => {
     }
 
     const handleNextPO = () => {
-        if (stagingData && stagingData.po_list) {
+        if (stagingData && stagingData.po_list && Array.isArray(stagingData.po_list)) {
             setSelectedPOIndex(prev => Math.min(stagingData.po_list.length - 1, prev + 1))
             setCurrentPage(1) // Reset to first page when switching POs
         }
@@ -593,7 +636,7 @@ const ImportPage = () => {
                             <div className="card">
                                 <div className="flex items-center justify-between mb-4">
                                     <h3 className="text-lg font-semibold text-gray-900">
-                                        Itens do Pedido ({currentPO.items.length} total)
+                                        Itens do Pedido ({currentPO && Array.isArray(currentPO.items) ? currentPO.items.length : 0} total)
                                     </h3>
                                     {hasErrors() && (
                                         <div className="flex items-center gap-2 text-red-600">
