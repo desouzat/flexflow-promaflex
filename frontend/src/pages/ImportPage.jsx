@@ -53,44 +53,53 @@ const ImportPage = () => {
         const toastId = showLoading('Processando arquivo...')
 
         try {
-            // For now, simulate staging data extraction
-            // In production, this would call an API endpoint to parse the Excel
-            // and return the data for staging
+            // Create FormData for file upload
+            const formData = new FormData()
+            formData.append('file', selectedFile)
 
-            // Simulated staging data
-            const mockStagingData = {
-                po_number: 'PO-2026-001',
-                client_name: 'Cliente Exemplo',
-                items: [
-                    {
-                        id: 1,
-                        sku: 'SKU-001',
-                        quantity: 100,
-                        price_unit: 25.50,
+            // For now, use a default mapping (in production, user would configure this)
+            const defaultMapping = {
+                mappings: [
+                    { column_name: 'Pedido', field_type: 'po_number' },
+                    { column_name: 'Cliente', field_type: 'client_name' },
+                    { column_name: 'SKU', field_type: 'sku' },
+                    { column_name: 'Qtd', field_type: 'quantity' },
+                    { column_name: 'Preço Unit.', field_type: 'price_unit' }
+                ]
+            }
+            formData.append('mapping_json', JSON.stringify(defaultMapping))
+
+            // Call the backend API
+            const response = await api.post('/import/upload', formData, {
+                headers: {
+                    'Content-Type': 'multipart/form-data',
+                },
+            })
+
+            dismissToast(toastId)
+
+            // CRITICAL: Replace state completely with backend response
+            if (response.data.success && response.data.items) {
+                setStagingData({
+                    po_number: response.data.po_number,
+                    client_name: response.data.client_name,
+                    items: response.data.items.map((item, index) => ({
+                        id: index + 1,
+                        sku: item.sku,
+                        quantity: item.quantity,
+                        price_unit: item.price_unit || 0,
                         is_personalized: false,
                         is_new_client: false,
                         customization_notes: '',
                         attachment_path: null,
                         needs_mapping: false
-                    },
-                    {
-                        id: 2,
-                        sku: 'SKU-002',
-                        quantity: 50,
-                        price_unit: 45.00,
-                        is_personalized: false,
-                        is_new_client: false,
-                        customization_notes: '',
-                        attachment_path: null,
-                        needs_mapping: true // SKU not found in material_costs
-                    }
-                ]
+                    }))
+                })
+                setCurrentPage(1)
+                showSuccess(`Arquivo processado! ${response.data.items.length} itens carregados.`)
+            } else {
+                throw new Error('Resposta inválida do servidor')
             }
-
-            dismissToast(toastId)
-            setStagingData(mockStagingData)
-            setCurrentPage(1)
-            showSuccess('Arquivo processado! Revise os dados abaixo.')
         } catch (error) {
             dismissToast(toastId)
             console.error('Upload error:', error)
@@ -332,7 +341,7 @@ const ImportPage = () => {
                     <div>
                         <h1 className="text-2xl font-bold text-gray-900">Mesa de Conferência</h1>
                         <p className="text-sm text-gray-600 mt-1">
-                            Importar e validar pedidos de compra (19 campos ONET)
+                            Importar e validar pedidos de compra (campos ONET)
                         </p>
                     </div>
                     <div className="flex items-center gap-3">
@@ -387,7 +396,7 @@ const ImportPage = () => {
                                     Arraste seu arquivo Excel aqui
                                 </h3>
                                 <p className="text-sm text-gray-600 mb-4">
-                                    ou clique para selecionar (19 campos ONET)
+                                    ou clique para selecionar (campos ONET)
                                 </p>
                                 <input
                                     ref={fileInputRef}
@@ -699,12 +708,12 @@ const ImportPage = () => {
                                 <FileSpreadsheet className="w-6 h-6 text-primary-600 flex-shrink-0" />
                                 <div>
                                     <h3 className="font-semibold text-gray-900 mb-2">
-                                        Requisitos do Arquivo (19 Campos ONET)
+                                        Requisitos do Arquivo (Campos ONET)
                                     </h3>
                                     <ul className="text-sm text-gray-600 space-y-1 list-disc list-inside">
                                         <li>Formato Excel (.xlsx, .xls)</li>
                                         <li>Tamanho máximo: 10MB</li>
-                                        <li>19 campos obrigatórios: Pedido, Cliente, SKU, Descrição, Qtd, Unidade, Largura, Comprimento, Lead Time, Data Entrega, Data Faturamento, % ICMS, Bloqueio, Saldo, Atraso, Condição Pagamento, Frete, Vendedor, IPI</li>
+                                        <li>Campos obrigatórios: Pedido, Cliente, SKU, Descrição, Qtd, Unidade, Largura, Comprimento, Lead Time, Data Entrega, Data Faturamento, % ICMS, Bloqueio, Saldo, Atraso, Condição Pagamento, Frete, Vendedor, IPI</li>
                                     </ul>
                                 </div>
                             </div>
