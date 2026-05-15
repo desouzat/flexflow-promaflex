@@ -24,6 +24,7 @@ class BackgroundWorker:
     - Runs S3 sync every 10 minutes
     - Graceful shutdown support
     - Error handling and logging
+    - Silent S3 error mode (only logs once per session)
     """
     
     def __init__(self):
@@ -36,6 +37,9 @@ class BackgroundWorker:
         # In production, this should be a real system user in the database
         self.system_user_id = "00000000-0000-0000-0000-000000000000"
         self.system_tenant_id = "00000000-0000-0000-0000-000000000000"
+        
+        # S3 error silencing flag (only log once per session)
+        self.s3_error_logged = False
     
     async def sync_s3_task(self):
         """
@@ -56,7 +60,10 @@ class BackgroundWorker:
                     
                     # Check if S3 is configured
                     if not s3_service.is_configured():
-                        logger.warning("S3 service not configured. Skipping sync.")
+                        # Only log once per session to avoid flooding
+                        if not self.s3_error_logged:
+                            logger.warning("S3 service not configured. Skipping sync (silenced for this session).")
+                            self.s3_error_logged = True
                     else:
                         logger.info("Running scheduled S3 sync...")
                         
@@ -78,11 +85,15 @@ class BackgroundWorker:
                                 else:
                                     logger.info("S3 sync completed: No new files found")
                             else:
-                                logger.error(f"S3 sync failed: {'; '.join(result['errors'])}")
+                                # Only log S3 errors once per session
+                                if not self.s3_error_logged:
+                                    logger.error(f"S3 sync failed: {'; '.join(result['errors'])} (silenced for this session)")
+                                    self.s3_error_logged = True
                         except Exception as s3_error:
-                            # Log S3 errors but don't crash the worker
-                            logger.error(f"S3 sync error (non-blocking): {str(s3_error)}")
-                            print(f"[WARNING] S3 sync error: {str(s3_error)}")
+                            # Log S3 errors but don't crash the worker - only once per session
+                            if not self.s3_error_logged:
+                                logger.error(f"S3 sync error (non-blocking, silenced for this session): {str(s3_error)}")
+                                self.s3_error_logged = True
                 
                 finally:
                     db.close()

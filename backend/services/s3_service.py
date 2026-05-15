@@ -122,7 +122,7 @@ class S3Service:
             return files
         
         except ClientError as e:
-            logger.error(f"S3 ClientError: {str(e)}")
+            # Don't log full error to avoid flooding - let caller handle it
             raise Exception(f"Failed to list files from S3: {str(e)}")
         except NoCredentialsError:
             logger.error("S3 credentials not found")
@@ -339,7 +339,7 @@ class S3Service:
             return result
         
         except Exception as e:
-            logger.error(f"Error in check_for_new_files: {str(e)}")
+            # Don't log here - let caller handle logging to avoid flooding
             result['success'] = False
             result['errors'].append(f"Sync error: {str(e)}")
             return result

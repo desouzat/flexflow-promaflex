@@ -57,14 +57,30 @@ const ImportPage = () => {
             const formData = new FormData()
             formData.append('file', selectedFile)
 
-            // For now, use a default mapping (in production, user would configure this)
+            // Default mapping for 19-field ONET structure
             const defaultMapping = {
                 mappings: [
+                    // Core required fields
                     { column_name: 'Pedido', field_type: 'po_number' },
                     { column_name: 'Cliente', field_type: 'client_name' },
                     { column_name: 'SKU', field_type: 'sku' },
                     { column_name: 'Qtd', field_type: 'quantity' },
-                    { column_name: 'Preço Unit.', field_type: 'price_unit' }
+                    // Optional ONET fields (19-field structure)
+                    { column_name: 'Descrição', field_type: 'description' },
+                    { column_name: 'Unidade', field_type: 'unit' },
+                    { column_name: 'Largura', field_type: 'width' },
+                    { column_name: 'Comprimento', field_type: 'length' },
+                    { column_name: 'Lead Time', field_type: 'lead_time' },
+                    { column_name: 'Data Entrega', field_type: 'delivery_date' },
+                    { column_name: 'Data Faturamento', field_type: 'billing_date' },
+                    { column_name: '% ICMS', field_type: 'icms_percent' },
+                    { column_name: 'Bloqueio', field_type: 'block_status' },
+                    { column_name: 'Saldo', field_type: 'balance' },
+                    { column_name: 'Atraso', field_type: 'delay' },
+                    { column_name: 'Condição Pagamento', field_type: 'payment_terms' },
+                    { column_name: 'Frete', field_type: 'freight' },
+                    { column_name: 'Vendedor', field_type: 'salesperson' },
+                    { column_name: 'IPI', field_type: 'ipi' }
                 ]
             }
             formData.append('mapping_json', JSON.stringify(defaultMapping))
