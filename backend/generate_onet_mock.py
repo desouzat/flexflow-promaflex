@@ -1,6 +1,6 @@
 """
-FlexFlow - Gerador de Arquivo ONET Mock para Testes
-Gera um arquivo Excel profissional com dados realistas para testar a Mesa de Conferência (Staging Area)
+FlexFlow - Gerador de Arquivo ONET Mock para Testes de Produção
+Gera um arquivo Excel profissional com 50 linhas e estrutura completa de 19 campos
 """
 
 import pandas as pd
@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 import sys
 import io
+import random
 
 # Fix encoding for Windows console
 if sys.platform == 'win32':
@@ -15,115 +16,191 @@ if sys.platform == 'win32':
 
 def generate_onet_mock():
     """
-    Gera arquivo Excel mock com as 14 colunas ONET definidas para Ewaldo.
+    Gera arquivo Excel mock com as 19 colunas ONET completas para produção.
     
-    Inclui:
-    - 2 itens com SKUs existentes em material_costs (PP-1000, ABS-2000)
-    - 1 item com SKU novo (para trigger warning amarelo)
-    - 2 itens que requerem toggle 'Personalizado'
+    Estrutura de 19 campos:
+    1. Pedido
+    2. Cliente
+    3. SKU
+    4. Descrição
+    5. Qtd
+    6. Unidade
+    7. Largura
+    8. Comprimento
+    9. Lead Time
+    10. Data Entrega
+    11. Data Faturamento
+    12. % ICMS
+    13. Bloqueio (Crédito)
+    14. Saldo
+    15. Atraso
+    16. Condição Pagamento
+    17. Frete
+    18. Vendedor
+    19. IPI
+    
+    Gera 50 linhas com:
+    - Mix de SKUs existentes e novos
+    - Mix de status de crédito (bloqueado/liberado)
+    - Mix de tipos de pedido (Replacement/Normal)
+    - Variação realista de quantidades, dimensões e valores
     """
     
     # Data base para cálculos
     today = datetime.now()
     
-    # Dados realistas para 5 linhas
-    data = [
-        {
-            'Pedido': 'ONET-2024-1001',
-            'Cliente': 'Indústria Automotiva XYZ Ltda',
-            'SKU': 'PP-1000',  # ✅ EXISTE em material_costs
-            'Descrição': 'Tampa Reservatório Polipropileno Natural',
-            'Qtd': 500,
-            'Unidade': 'UN',
-            'Largura': 120.5,
-            'Comprimento': 85.3,
-            'Lead Time': 15,
-            'Data Entrega': (today + timedelta(days=20)).strftime('%d/%m/%Y'),
-            'Data Faturamento': (today + timedelta(days=18)).strftime('%d/%m/%Y'),
-            '% ICMS': 18.0,
-            'Frete': 450.00,
-            'Seguro': 125.50
-        },
-        {
-            'Pedido': 'ONET-2024-1002',
-            'Cliente': 'Embalagens Premium S.A.',
-            'SKU': 'ABS-2000',  # ✅ EXISTE em material_costs
-            'Descrição': 'Caixa Organizadora ABS Preto com Tampa',
-            'Qtd': 1000,
-            'Unidade': 'UN',
-            'Largura': 250.0,
-            'Comprimento': 180.0,
-            'Lead Time': 20,
-            'Data Entrega': (today + timedelta(days=25)).strftime('%d/%m/%Y'),
-            'Data Faturamento': (today + timedelta(days=23)).strftime('%d/%m/%Y'),
-            '% ICMS': 12.0,
-            'Frete': 680.00,
-            'Seguro': 210.00
-        },
-        {
-            'Pedido': 'ONET-2024-1003',
-            'Cliente': 'Eletrônicos Delta Corp',
-            'SKU': 'PAB-035',  # ⚠️ SKU NOVO - vai trigger warning amarelo
-            'Descrição': 'Painel Frontal Customizado com Logo Gravado',  # 🔧 PERSONALIZADO
-            'Qtd': 250,
-            'Unidade': 'UN',
-            'Largura': 300.0,
-            'Comprimento': 200.0,
-            'Lead Time': 30,
-            'Data Entrega': (today + timedelta(days=35)).strftime('%d/%m/%Y'),
-            'Data Faturamento': (today + timedelta(days=33)).strftime('%d/%m/%Y'),
-            '% ICMS': 18.0,
-            'Frete': 890.00,
-            'Seguro': 340.00
-        },
-        {
-            'Pedido': 'ONET-2024-1004',
-            'Cliente': 'Móveis Modernos Ltda',
-            'SKU': 'PE-1000',  # ✅ EXISTE em material_costs
-            'Descrição': 'Gaveta Modular PE HD Natural com Divisórias Personalizadas',  # 🔧 PERSONALIZADO
-            'Qtd': 750,
-            'Unidade': 'UN',
-            'Largura': 400.0,
-            'Comprimento': 350.0,
-            'Lead Time': 25,
-            'Data Entrega': (today + timedelta(days=30)).strftime('%d/%m/%Y'),
-            'Data Faturamento': (today + timedelta(days=28)).strftime('%d/%m/%Y'),
-            '% ICMS': 12.0,
-            'Frete': 1200.00,
-            'Seguro': 450.00
-        },
-        {
-            'Pedido': 'ONET-2024-1005',
-            'Cliente': 'Farmacêutica BioHealth',
-            'SKU': 'PET-1000',  # ✅ EXISTE em material_costs
-            'Descrição': 'Frasco PET Cristal 500ml',
-            'Qtd': 2000,
-            'Unidade': 'UN',
-            'Largura': 75.0,
-            'Comprimento': 180.0,
-            'Lead Time': 12,
-            'Data Entrega': (today + timedelta(days=15)).strftime('%d/%m/%Y'),
-            'Data Faturamento': (today + timedelta(days=14)).strftime('%d/%m/%Y'),
-            '% ICMS': 18.0,
-            'Frete': 320.00,
-            'Seguro': 95.00
-        }
+    # SKUs existentes no sistema (baseado em material_costs)
+    existing_skus = [
+        'PP-1000', 'ABS-2000', 'PE-1000', 'PET-1000', 'PC-1000',
+        'PS-1000', 'PVC-1000', 'PMMA-1000', 'PA-1000', 'POM-1000'
     ]
+    
+    # SKUs novos (para testar warnings)
+    new_skus = [
+        'PAB-035', 'PAB-036', 'PAB-037', 'PAB-038', 'PAB-039',
+        'NEW-100', 'NEW-101', 'NEW-102', 'NEW-103', 'NEW-104'
+    ]
+    
+    # Clientes variados
+    clients = [
+        'Indústria Automotiva XYZ Ltda',
+        'Embalagens Premium S.A.',
+        'Eletrônicos Delta Corp',
+        'Móveis Modernos Ltda',
+        'Farmacêutica BioHealth',
+        'Cosméticos Bella Vita',
+        'Alimentos Natureza S.A.',
+        'Tecnologia Inovare Ltda',
+        'Construção Forte & Cia',
+        'Têxtil Fashion Group'
+    ]
+    
+    # Vendedores
+    sellers = [
+        'João Silva',
+        'Maria Santos',
+        'Pedro Oliveira',
+        'Ana Costa',
+        'Carlos Ferreira'
+    ]
+    
+    # Condições de pagamento
+    payment_terms = [
+        '30 dias',
+        '45 dias',
+        '60 dias',
+        '30/60 dias',
+        'À vista',
+        '15/30/45 dias'
+    ]
+    
+    # Descrições base
+    descriptions = [
+        'Tampa Reservatório {} Natural',
+        'Caixa Organizadora {} com Tampa',
+        'Painel Frontal {} Customizado',
+        'Gaveta Modular {} com Divisórias',
+        'Frasco {} Cristal 500ml',
+        'Pote {} Transparente com Lacre',
+        'Bandeja {} Retangular',
+        'Suporte {} para Eletrônicos',
+        'Protetor {} Industrial',
+        'Componente {} Técnico'
+    ]
+    
+    data = []
+    
+    # Gerar 50 linhas com variação realista
+    for i in range(50):
+        # Determinar se é SKU existente ou novo (70% existente, 30% novo)
+        is_existing = random.random() < 0.7
+        sku = random.choice(existing_skus) if is_existing else random.choice(new_skus)
+        
+        # Extrair material do SKU para descrição
+        material = sku.split('-')[0]
+        description = random.choice(descriptions).format(material)
+        
+        # Adicionar flag de personalização em alguns casos
+        is_personalized = random.random() < 0.3
+        if is_personalized:
+            description += ' - PERSONALIZADO'
+        
+        # Determinar se é Replacement (20% dos casos)
+        is_replacement = random.random() < 0.2
+        
+        # Bloqueio de crédito (15% dos casos)
+        is_blocked = random.random() < 0.15
+        credit_status = 'BLOQUEADO' if is_blocked else 'LIBERADO'
+        
+        # Atraso (10% dos casos, apenas para pedidos não-replacement)
+        has_delay = random.random() < 0.1 and not is_replacement
+        delay_days = random.randint(1, 15) if has_delay else 0
+        
+        # Calcular datas
+        lead_time = random.randint(10, 45)
+        delivery_date = today + timedelta(days=lead_time + random.randint(0, 10))
+        invoice_date = delivery_date - timedelta(days=random.randint(1, 3))
+        
+        # Ajustar data de entrega se houver atraso
+        if has_delay:
+            delivery_date = delivery_date - timedelta(days=delay_days)
+        
+        # Gerar valores realistas
+        quantity = random.choice([50, 100, 150, 200, 250, 300, 500, 750, 1000, 1500, 2000])
+        width = round(random.uniform(50.0, 500.0), 1)
+        length = round(random.uniform(50.0, 500.0), 1)
+        icms_rate = random.choice([0.0, 7.0, 12.0, 18.0])
+        freight = round(random.uniform(100.0, 2000.0), 2)
+        ipi_rate = random.choice([0.0, 5.0, 10.0, 15.0])
+        
+        # Saldo (para Replacement, pode ter saldo pendente)
+        balance = 0
+        if is_replacement:
+            balance = random.randint(0, quantity // 2)
+        
+        # Número do pedido
+        po_type = 'REP' if is_replacement else 'ONET'
+        po_number = f'{po_type}-2026-{1001 + i}'
+        
+        row = {
+            'Pedido': po_number,
+            'Cliente': random.choice(clients),
+            'SKU': sku,
+            'Descrição': description,
+            'Qtd': quantity,
+            'Unidade': 'UN',
+            'Largura': width,
+            'Comprimento': length,
+            'Lead Time': lead_time,
+            'Data Entrega': delivery_date.strftime('%d/%m/%Y'),
+            'Data Faturamento': invoice_date.strftime('%d/%m/%Y'),
+            '% ICMS': icms_rate,
+            'Bloqueio': credit_status,
+            'Saldo': balance,
+            'Atraso': delay_days,
+            'Condição Pagamento': random.choice(payment_terms),
+            'Frete': freight,
+            'Vendedor': random.choice(sellers),
+            'IPI': ipi_rate
+        }
+        
+        data.append(row)
     
     # Criar DataFrame
     df = pd.DataFrame(data)
     
-    # Definir ordem exata das colunas conforme especificação Ewaldo
+    # Definir ordem exata das colunas (19 campos)
     columns_order = [
         'Pedido', 'Cliente', 'SKU', 'Descrição', 'Qtd', 'Unidade',
         'Largura', 'Comprimento', 'Lead Time', 'Data Entrega',
-        'Data Faturamento', '% ICMS', 'Frete', 'Seguro'
+        'Data Faturamento', '% ICMS', 'Bloqueio', 'Saldo', 'Atraso',
+        'Condição Pagamento', 'Frete', 'Vendedor', 'IPI'
     ]
     
     df = df[columns_order]
     
     # Gerar arquivo Excel com formatação profissional
-    output_file = 'onet_test_data.xlsx'
+    output_file = 'onet_production_test_50_rows.xlsx'
     
     with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
         df.to_excel(writer, sheet_name='Pedidos ONET', index=False)
@@ -145,55 +222,114 @@ def generate_onet_mock():
             'J': 15,  # Data Entrega
             'K': 18,  # Data Faturamento
             'L': 10,  # % ICMS
-            'M': 12,  # Frete
-            'N': 12   # Seguro
+            'M': 12,  # Bloqueio
+            'N': 10,  # Saldo
+            'O': 10,  # Atraso
+            'P': 20,  # Condição Pagamento
+            'Q': 12,  # Frete
+            'R': 18,  # Vendedor
+            'S': 10   # IPI
         }
         
         for col, width in column_widths.items():
             worksheet.column_dimensions[col].width = width
         
-        # Formatar cabeçalho (negrito)
+        # Formatar cabeçalho
         from openpyxl.styles import Font, PatternFill, Alignment
         
-        header_font = Font(bold=True, size=11)
+        header_font = Font(bold=True, size=11, color='FFFFFF')
         header_fill = PatternFill(start_color='366092', end_color='366092', fill_type='solid')
         header_alignment = Alignment(horizontal='center', vertical='center')
         
         for cell in worksheet[1]:
-            cell.font = Font(bold=True, size=11, color='FFFFFF')
+            cell.font = header_font
             cell.fill = header_fill
             cell.alignment = header_alignment
         
         # Alinhar dados
         for row in worksheet.iter_rows(min_row=2, max_row=len(df)+1):
             for idx, cell in enumerate(row):
-                if idx in [4, 6, 7, 8, 11, 12, 13]:  # Colunas numéricas
+                if idx in [4, 6, 7, 8, 11, 13, 14, 16, 18]:  # Colunas numéricas
                     cell.alignment = Alignment(horizontal='right')
                 elif idx in [9, 10]:  # Datas
                     cell.alignment = Alignment(horizontal='center')
+                elif idx == 12:  # Bloqueio (status)
+                    cell.alignment = Alignment(horizontal='center')
+                    # Colorir células bloqueadas
+                    if cell.value == 'BLOQUEADO':
+                        cell.fill = PatternFill(start_color='FFC7CE', end_color='FFC7CE', fill_type='solid')
+                        cell.font = Font(color='9C0006', bold=True)
                 else:
                     cell.alignment = Alignment(horizontal='left')
     
+    # Estatísticas do arquivo gerado
+    existing_count = len(df[df['SKU'].isin(existing_skus)])
+    new_count = len(df[df['SKU'].isin(new_skus)])
+    blocked_count = len(df[df['Bloqueio'] == 'BLOQUEADO'])
+    replacement_count = len(df[df['Pedido'].str.startswith('REP')])
+    personalized_count = len(df[df['Descrição'].str.contains('PERSONALIZADO')])
+    delayed_count = len(df[df['Atraso'] > 0])
+    
     print("=" * 80)
-    print("[OK] Arquivo ONET Mock Gerado com Sucesso!")
+    print("[OK] Arquivo ONET Mock de Produção Gerado com Sucesso!")
     print("=" * 80)
     print(f"\nArquivo: {output_file}")
     print(f"Total de linhas: {len(df)}")
-    print("\nResumo dos dados:")
-    print(f"   - 2 itens com SKUs EXISTENTES (PP-1000, ABS-2000)")
-    print(f"   - 1 item com SKU NOVO (PAB-035) - vai trigger WARNING amarelo")
-    print(f"   - 2 itens PERSONALIZADOS (PAB-035, PE-1000)")
-    print("\nCasos de teste incluidos:")
+    print(f"Total de campos: 19")
+    print("\n📊 Estatísticas dos Dados:")
+    print(f"   ✅ SKUs EXISTENTES: {existing_count} ({existing_count/len(df)*100:.1f}%)")
+    print(f"   ⚠️  SKUs NOVOS: {new_count} ({new_count/len(df)*100:.1f}%)")
+    print(f"   🔒 Crédito BLOQUEADO: {blocked_count} ({blocked_count/len(df)*100:.1f}%)")
+    print(f"   🔄 Pedidos REPLACEMENT: {replacement_count} ({replacement_count/len(df)*100:.1f}%)")
+    print(f"   🎨 Itens PERSONALIZADOS: {personalized_count} ({personalized_count/len(df)*100:.1f}%)")
+    print(f"   ⏰ Pedidos com ATRASO: {delayed_count} ({delayed_count/len(df)*100:.1f}%)")
+    
+    print("\n📋 Estrutura de 19 Campos:")
+    for i, col in enumerate(columns_order, 1):
+        print(f"   {i:2d}. {col}")
+    
+    print("\n🎯 Casos de Teste Incluídos:")
     print("   [x] SKUs existentes em material_costs")
-    print("   [x] SKU novo para testar warning de custo nao encontrado")
-    print("   [x] Itens que requerem toggle 'Personalizado'")
-    print("   [x] Diferentes clientes e valores de ICMS")
-    print("   [x] Variacao de quantidades e dimensoes")
+    print("   [x] SKUs novos para testar warning de custo não encontrado")
+    print("   [x] Itens personalizados (requerem toggle 'Personalizado')")
+    print("   [x] Pedidos Replacement com saldo pendente")
+    print("   [x] Bloqueios de crédito (status BLOQUEADO)")
+    print("   [x] Pedidos com atraso na entrega")
+    print("   [x] Diferentes clientes e vendedores")
+    print("   [x] Variação de ICMS, IPI e condições de pagamento")
+    print("   [x] Variação de quantidades (50 a 2000 unidades)")
+    print("   [x] Variação de dimensões (50mm a 500mm)")
+    
     print("\n" + "=" * 80)
-    print("\nProximo passo:")
-    print("   Importe este arquivo na Mesa de Conferencia (Staging Area)")
-    print("   para testar a validacao e preview dos dados ONET.")
+    print("\n🚀 Próximos Passos:")
+    print("   1. Importe este arquivo na Mesa de Conferência (Staging Area)")
+    print("   2. Verifique se todos os 19 campos são reconhecidos")
+    print("   3. Valide os cálculos de Margem (CM) e Valor Presente (VP)")
+    print("   4. Teste a performance com 50+ linhas")
+    print("   5. Confirme que paginação/virtual scrolling funciona")
     print("=" * 80)
+    
+    # Gerar também um arquivo de resumo
+    summary_file = 'onet_production_test_summary.txt'
+    with open(summary_file, 'w', encoding='utf-8') as f:
+        f.write("FLEXFLOW - RESUMO DO ARQUIVO DE TESTE DE PRODUÇÃO\n")
+        f.write("=" * 80 + "\n\n")
+        f.write(f"Arquivo gerado: {output_file}\n")
+        f.write(f"Data de geração: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n")
+        f.write(f"Total de linhas: {len(df)}\n")
+        f.write(f"Total de campos: 19\n\n")
+        f.write("ESTATÍSTICAS:\n")
+        f.write(f"  - SKUs existentes: {existing_count}\n")
+        f.write(f"  - SKUs novos: {new_count}\n")
+        f.write(f"  - Crédito bloqueado: {blocked_count}\n")
+        f.write(f"  - Pedidos Replacement: {replacement_count}\n")
+        f.write(f"  - Itens personalizados: {personalized_count}\n")
+        f.write(f"  - Pedidos com atraso: {delayed_count}\n\n")
+        f.write("CAMPOS (19):\n")
+        for i, col in enumerate(columns_order, 1):
+            f.write(f"  {i:2d}. {col}\n")
+    
+    print(f"\n📄 Resumo salvo em: {summary_file}")
 
 if __name__ == "__main__":
     generate_onet_mock()

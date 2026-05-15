@@ -1,0 +1,36 @@
+FLEXFLOW - RESUMO DO ARQUIVO DE TESTE DE PRODUÇÃO
+================================================================================
+
+Arquivo gerado: onet_production_test_50_rows.xlsx
+Data de geração: 15/05/2026 09:27:43
+Total de linhas: 50
+Total de campos: 19
+
+ESTATÍSTICAS:
+  - SKUs existentes: 36
+  - SKUs novos: 14
+  - Crédito bloqueado: 6
+  - Pedidos Replacement: 8
+  - Itens personalizados: 13
+  - Pedidos com atraso: 6
+
+CAMPOS (19):
+   1. Pedido
+   2. Cliente
+   3. SKU
+   4. Descrição
+   5. Qtd
+   6. Unidade
+   7. Largura
+   8. Comprimento
+   9. Lead Time
+  10. Data Entrega
+  11. Data Faturamento
+  12. % ICMS
+  13. Bloqueio
+  14. Saldo
+  15. Atraso
+  16. Condição Pagamento
+  17. Frete
+  18. Vendedor
+  19. IPI

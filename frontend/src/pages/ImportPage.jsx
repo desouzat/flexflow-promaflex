@@ -1,10 +1,12 @@
 import React, { useState, useRef } from 'react'
-import { Upload, FileSpreadsheet, AlertCircle, CheckCircle, X, HelpCircle, Paperclip, Trash2, Cloud } from 'lucide-react'
+import { Upload, FileSpreadsheet, AlertCircle, CheckCircle, X, HelpCircle, Paperclip, Trash2, Cloud, ChevronLeft, ChevronRight } from 'lucide-react'
 import api from '../utils/api'
 import { showSuccess, showError, showLoading, dismissToast } from '../utils/toast'
 import { useNotifications } from '../context/NotificationContext'
 import HelpModal from '../components/HelpModal'
 import { getHelpForStatus } from '../config/helpConfig'
+
+const ITEMS_PER_PAGE = 10
 
 const ImportPage = () => {
     const [selectedFile, setSelectedFile] = useState(null)
@@ -12,6 +14,7 @@ const ImportPage = () => {
     const [stagingData, setStagingData] = useState(null)
     const [showHelp, setShowHelp] = useState(false)
     const [syncing, setSyncing] = useState(false)
+    const [currentPage, setCurrentPage] = useState(1)
     const fileInputRef = useRef(null)
     const { refreshNotifications } = useNotifications()
 
@@ -36,6 +39,7 @@ const ImportPage = () => {
 
             setSelectedFile(file)
             setStagingData(null)
+            setCurrentPage(1)
         }
     }
 
@@ -85,6 +89,7 @@ const ImportPage = () => {
 
             dismissToast(toastId)
             setStagingData(mockStagingData)
+            setCurrentPage(1)
             showSuccess('Arquivo processado! Revise os dados abaixo.')
         } catch (error) {
             dismissToast(toastId)
@@ -230,6 +235,7 @@ const ImportPage = () => {
             // Reset form
             setSelectedFile(null)
             setStagingData(null)
+            setCurrentPage(1)
             if (fileInputRef.current) {
                 fileInputRef.current.value = ''
             }
@@ -267,12 +273,11 @@ const ImportPage = () => {
             dismissToast(toastId)
             console.error('S3 sync error:', error)
 
+            // Don't block manual upload if S3 fails
             if (error.response?.status === 503) {
-                showError('Serviço S3 não configurado. Contate o administrador.')
+                showError('⚠️ Serviço S3 não disponível. Use upload manual abaixo.')
             } else {
-                showError(
-                    error.response?.data?.detail || 'Erro ao sincronizar com ONET. Tente novamente.'
-                )
+                showError('⚠️ Erro ao sincronizar com ONET. Use upload manual abaixo.')
             }
         } finally {
             setSyncing(false)
@@ -299,6 +304,24 @@ const ImportPage = () => {
         }
     }
 
+    // Pagination logic
+    const getPaginatedItems = () => {
+        if (!stagingData || !stagingData.items) return []
+        const startIndex = (currentPage - 1) * ITEMS_PER_PAGE
+        const endIndex = startIndex + ITEMS_PER_PAGE
+        return stagingData.items.slice(startIndex, endIndex)
+    }
+
+    const totalPages = stagingData ? Math.ceil(stagingData.items.length / ITEMS_PER_PAGE) : 0
+
+    const handlePreviousPage = () => {
+        setCurrentPage(prev => Math.max(1, prev - 1))
+    }
+
+    const handleNextPage = () => {
+        setCurrentPage(prev => Math.min(totalPages, prev + 1))
+    }
+
     const helpContent = getHelpForStatus('Staging')
 
     return (
@@ -309,7 +332,7 @@ const ImportPage = () => {
                     <div>
                         <h1 className="text-2xl font-bold text-gray-900">Mesa de Conferência</h1>
                         <p className="text-sm text-gray-600 mt-1">
-                            Importar e validar pedidos de compra
+                            Importar e validar pedidos de compra (19 campos ONET)
                         </p>
                     </div>
                     <div className="flex items-center gap-3">
@@ -345,9 +368,14 @@ const ImportPage = () => {
             {/* Content */}
             <div className="flex-1 p-6 overflow-auto">
                 <div className="max-w-6xl mx-auto">
-                    {/* Upload Area */}
+                    {/* Upload Area - ALWAYS VISIBLE for manual contingency */}
                     {!stagingData && (
                         <div className="card mb-6">
+                            <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                                <p className="text-sm text-blue-800">
+                                    <strong>💡 Upload Manual:</strong> Sempre disponível como contingência, mesmo com S3 configurado.
+                                </p>
+                            </div>
                             <div
                                 onDragOver={handleDragOver}
                                 onDrop={handleDrop}
@@ -359,7 +387,7 @@ const ImportPage = () => {
                                     Arraste seu arquivo Excel aqui
                                 </h3>
                                 <p className="text-sm text-gray-600 mb-4">
-                                    ou clique para selecionar
+                                    ou clique para selecionar (19 campos ONET)
                                 </p>
                                 <input
                                     ref={fileInputRef}
@@ -416,7 +444,7 @@ const ImportPage = () => {
                         </div>
                     )}
 
-                    {/* Staging Area Grid */}
+                    {/* Staging Area Grid with Pagination */}
                     {stagingData && (
                         <div className="space-y-6">
                             {/* PO Header */}
@@ -436,11 +464,11 @@ const ImportPage = () => {
                                 </div>
                             </div>
 
-                            {/* Items Grid */}
+                            {/* Items Grid with Pagination */}
                             <div className="card">
                                 <div className="flex items-center justify-between mb-4">
                                     <h3 className="text-lg font-semibold text-gray-900">
-                                        Itens do Pedido ({stagingData.items.length})
+                                        Itens do Pedido ({stagingData.items.length} total)
                                     </h3>
                                     {hasErrors() && (
                                         <div className="flex items-center gap-2 text-red-600">
@@ -450,8 +478,33 @@ const ImportPage = () => {
                                     )}
                                 </div>
 
+                                {/* Pagination Controls - Top */}
+                                {totalPages > 1 && (
+                                    <div className="flex items-center justify-between mb-4 p-3 bg-gray-50 rounded-lg">
+                                        <span className="text-sm text-gray-600">
+                                            Página {currentPage} de {totalPages} ({ITEMS_PER_PAGE} itens por página)
+                                        </span>
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                onClick={handlePreviousPage}
+                                                disabled={currentPage === 1}
+                                                className="p-2 border border-gray-300 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            >
+                                                <ChevronLeft className="w-5 h-5" />
+                                            </button>
+                                            <button
+                                                onClick={handleNextPage}
+                                                disabled={currentPage === totalPages}
+                                                className="p-2 border border-gray-300 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            >
+                                                <ChevronRight className="w-5 h-5" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+
                                 <div className="space-y-4">
-                                    {stagingData.items.map((item) => {
+                                    {getPaginatedItems().map((item) => {
                                         const errors = validateItem(item)
                                         const hasError = errors.length > 0
 
@@ -582,6 +635,34 @@ const ImportPage = () => {
                                         )
                                     })}
                                 </div>
+
+                                {/* Pagination Controls - Bottom */}
+                                {totalPages > 1 && (
+                                    <div className="flex items-center justify-between mt-4 p-3 bg-gray-50 rounded-lg">
+                                        <span className="text-sm text-gray-600">
+                                            Página {currentPage} de {totalPages}
+                                        </span>
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                onClick={handlePreviousPage}
+                                                disabled={currentPage === 1}
+                                                className="p-2 border border-gray-300 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            >
+                                                <ChevronLeft className="w-5 h-5" />
+                                            </button>
+                                            <span className="text-sm font-medium text-gray-700">
+                                                {currentPage} / {totalPages}
+                                            </span>
+                                            <button
+                                                onClick={handleNextPage}
+                                                disabled={currentPage === totalPages}
+                                                className="p-2 border border-gray-300 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            >
+                                                <ChevronRight className="w-5 h-5" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
 
                             {/* Action Buttons */}
@@ -590,6 +671,7 @@ const ImportPage = () => {
                                     onClick={() => {
                                         setStagingData(null)
                                         setSelectedFile(null)
+                                        setCurrentPage(1)
                                         if (fileInputRef.current) {
                                             fileInputRef.current.value = ''
                                         }
@@ -617,12 +699,12 @@ const ImportPage = () => {
                                 <FileSpreadsheet className="w-6 h-6 text-primary-600 flex-shrink-0" />
                                 <div>
                                     <h3 className="font-semibold text-gray-900 mb-2">
-                                        Requisitos do Arquivo
+                                        Requisitos do Arquivo (19 Campos ONET)
                                     </h3>
                                     <ul className="text-sm text-gray-600 space-y-1 list-disc list-inside">
                                         <li>Formato Excel (.xlsx, .xls)</li>
                                         <li>Tamanho máximo: 10MB</li>
-                                        <li>Colunas obrigatórias: PO Number, Cliente, SKU, Quantidade, Preço</li>
+                                        <li>19 campos obrigatórios: Pedido, Cliente, SKU, Descrição, Qtd, Unidade, Largura, Comprimento, Lead Time, Data Entrega, Data Faturamento, % ICMS, Bloqueio, Saldo, Atraso, Condição Pagamento, Frete, Vendedor, IPI</li>
                                     </ul>
                                 </div>
                             </div>
@@ -637,6 +719,7 @@ const ImportPage = () => {
                                         <li>Anexos são obrigatórios apenas para Clientes Novos em pedidos Personalizados</li>
                                         <li>Descrição da customização é obrigatória para qualquer pedido Personalizado</li>
                                         <li>Limite de arquivo: 5MB (PDF, JPG, PNG)</li>
+                                        <li>Paginação automática para mais de 10 itens</li>
                                     </ul>
                                 </div>
                             </div>
