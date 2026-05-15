@@ -574,21 +574,38 @@ class ImportService:
                 continue
             
             # Create item data
+            # Use .get() for optional cost fields to avoid KeyError
             try:
                 item = ImportItemData(
                     sku=row_data['sku'],
                     quantity=row_data['quantity'],
-                    price_unit=row_data['price_unit'],
-                    cost_mp=row_data['cost_mp'],
-                    cost_mo=row_data['cost_mo'],
-                    cost_energy=row_data['cost_energy'],
-                    cost_gas=row_data['cost_gas']
+                    price_unit=row_data.get('price_unit'),
+                    cost_mp=row_data.get('cost_mp'),
+                    cost_mo=row_data.get('cost_mo'),
+                    cost_energy=row_data.get('cost_energy'),
+                    cost_gas=row_data.get('cost_gas'),
+                    # Include ONET fields if present
+                    description=row_data.get('description'),
+                    unit=row_data.get('unit'),
+                    width=row_data.get('width'),
+                    length=row_data.get('length'),
+                    lead_time=row_data.get('lead_time'),
+                    delivery_date=row_data.get('delivery_date'),
+                    billing_date=row_data.get('billing_date'),
+                    icms_percent=row_data.get('icms_percent'),
+                    block_status=row_data.get('block_status'),
+                    balance=row_data.get('balance'),
+                    delay=row_data.get('delay'),
+                    payment_terms=row_data.get('payment_terms'),
+                    freight=row_data.get('freight'),
+                    salesperson=row_data.get('salesperson'),
+                    ipi=row_data.get('ipi')
                 )
                 po_groups[po_number]['items'].append(item)
             except Exception as e:
                 all_errors.append(ImportRowError(
                     row_number=0,
-                    error_message=f"Validation error for SKU {row_data['sku']}: {str(e)}"
+                    error_message=f"Validation error for SKU {row_data.get('sku', 'UNKNOWN')}: {str(e)}"
                 ))
         
         # If there are validation errors, return failure

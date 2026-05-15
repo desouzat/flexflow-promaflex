@@ -133,6 +133,41 @@ async def add_process_time_header(request: Request, call_next):
     return response
 
 
+# Request body logger middleware (for debugging POST requests)
+@app.middleware("http")
+async def log_request_body(request: Request, call_next):
+    """Log full JSON body of POST requests for debugging"""
+    if request.method == "POST":
+        try:
+            # Read the body
+            body = await request.body()
+            
+            # Try to parse as JSON
+            try:
+                import json
+                body_json = json.loads(body.decode('utf-8'))
+                print(f"\n{'='*80}")
+                print(f"[POST REQUEST BODY] {request.url.path}")
+                print(f"{'='*80}")
+                print(json.dumps(body_json, indent=2, ensure_ascii=False))
+                print(f"{'='*80}\n")
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                # Not JSON or can't decode - log raw
+                print(f"\n[POST REQUEST BODY - RAW] {request.url.path}: {body[:500]}")
+            
+            # Important: Create a new request with the body we just read
+            # because body can only be read once
+            async def receive():
+                return {"type": "http.request", "body": body}
+            
+            request._receive = receive
+        except Exception as e:
+            print(f"[ERROR] Failed to log request body: {e}")
+    
+    response = await call_next(request)
+    return response
+
+
 # Logging middleware
 @app.middleware("http")
 async def log_requests(request: Request, call_next):

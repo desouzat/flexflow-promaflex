@@ -165,11 +165,11 @@ class ImportItemData(BaseModel):
     salesperson: Optional[str] = Field(None, max_length=100, description="Salesperson name")
     
     # Legacy cost fields (optional for backward compatibility)
-    price_unit: Optional[Decimal] = Field(None, ge=0, description="Unit price")
-    cost_mp: Optional[Decimal] = Field(None, ge=0, description="Material cost")
-    cost_mo: Optional[Decimal] = Field(None, ge=0, description="Labor cost")
-    cost_energy: Optional[Decimal] = Field(None, ge=0, description="Energy cost")
-    cost_gas: Optional[Decimal] = Field(None, ge=0, description="Gas cost")
+    price_unit: Optional[float] = None
+    cost_mp: Optional[float] = None
+    cost_mo: Optional[float] = None
+    cost_energy: Optional[float] = None
+    cost_gas: Optional[float] = None
     
     # Staging Area / Customization fields
     is_personalized: bool = Field(default=False, description="Whether item is personalized")
@@ -242,22 +242,33 @@ class ImportPOData(BaseModel):
         if not self.items:
             raise ValueError("PO must have at least one item")
         
-        # Calculate totals
+        # Calculate totals only if cost data is available
+        # Use .get() pattern to safely handle None values
         self.total_value = sum(
-            item.price_unit * item.quantity for item in self.items
+            (item.price_unit or 0) * item.quantity
+            for item in self.items
+            if item.price_unit is not None
         )
         
         self.total_cost = sum(
-            item.total_cost * item.quantity for item in self.items
+            (item.total_cost or 0) * item.quantity
+            for item in self.items
+            if item.total_cost is not None
         )
         
-        self.margin_global = self.total_value - self.total_cost
-        
-        # Calculate margin percentage
-        if self.total_value > 0:
-            self.margin_percentage = (self.margin_global / self.total_value) * 100
+        # Only calculate margin if we have both values
+        if self.total_value and self.total_cost:
+            self.margin_global = self.total_value - self.total_cost
+            
+            # Calculate margin percentage
+            if self.total_value > 0:
+                self.margin_percentage = (self.margin_global / self.total_value) * 100
+            else:
+                self.margin_percentage = Decimal(0)
         else:
-            self.margin_percentage = Decimal(0)
+            # No cost data available - set to None
+            self.margin_global = None
+            self.margin_percentage = None
         
         return self
 
