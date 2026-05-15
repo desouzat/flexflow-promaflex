@@ -247,11 +247,13 @@ const KanbanPage = () => {
         if (!selectedPO) return
 
         try {
+            // Send po_id as query parameter
             const response = await api.post('/kanban/advance-status', null, {
                 params: { po_id: selectedPO.id }
             })
             showSuccess(response.data.message)
-            fetchBoard()
+            await fetchBoard() // Refresh board data
+            refreshNotifications() // Refresh notifications
             handleCloseModal()
         } catch (err) {
             const errorMsg = err.response?.data?.detail?.message || err.response?.data?.detail || 'Falha ao avançar status'
@@ -272,6 +274,7 @@ const KanbanPage = () => {
         }
 
         try {
+            // Send po_id and reason as query parameters
             const response = await api.post('/kanban/return-status', null, {
                 params: {
                     po_id: selectedPO.id,
@@ -281,7 +284,8 @@ const KanbanPage = () => {
             showSuccess(response.data.message)
             setShowReturnModal(false)
             setReturnReason('')
-            fetchBoard()
+            await fetchBoard() // Refresh board data
+            refreshNotifications() // Refresh notifications
             handleCloseModal()
         } catch (err) {
             const errorMsg = err.response?.data?.detail || 'Falha ao devolver status'

@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react'
-import { Upload, FileSpreadsheet, AlertCircle, CheckCircle, X, HelpCircle, Paperclip, Trash2, Cloud, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Upload, FileSpreadsheet, AlertCircle, CheckCircle, X, HelpCircle, Paperclip, Trash2, Cloud, ChevronLeft, ChevronRight, Globe, RefreshCw, DollarSign } from 'lucide-react'
 import api from '../utils/api'
 import { showSuccess, showError, showLoading, dismissToast } from '../utils/toast'
 import { useNotifications } from '../context/NotificationContext'
@@ -16,6 +16,8 @@ const ImportPage = () => {
     const [syncing, setSyncing] = useState(false)
     const [currentPage, setCurrentPage] = useState(1)
     const [selectedPOIndex, setSelectedPOIndex] = useState(0) // For multi-PO navigation
+    const [showSummaryModal, setShowSummaryModal] = useState(false)
+    const [commitSummary, setCommitSummary] = useState({ valid: 0, errors: 0 })
     const fileInputRef = useRef(null)
     const { refreshNotifications } = useNotifications()
 
@@ -103,6 +105,8 @@ const ImportPage = () => {
                     const poList = response.data.po_list.map(po => ({
                         po_number: po.po_number,
                         client_name: po.client_name,
+                        freight_cost: 0,
+                        additional_costs: 0,
                         items: po.items.map((item, index) => ({
                             id: `${po.po_number}-${index + 1}`,
                             sku: item.sku,
@@ -110,6 +114,8 @@ const ImportPage = () => {
                             price_unit: item.price_unit || 0,
                             is_personalized: false,
                             is_new_client: false,
+                            is_export: false,
+                            is_replacement: false,
                             customization_notes: '',
                             attachment_path: null,
                             needs_mapping: false
@@ -137,6 +143,8 @@ const ImportPage = () => {
                         po_list: [{
                             po_number: response.data.po_number,
                             client_name: response.data.client_name,
+                            freight_cost: 0,
+                            additional_costs: 0,
                             items: response.data.items.map((item, index) => ({
                                 id: index + 1,
                                 sku: item.sku,
@@ -144,6 +152,8 @@ const ImportPage = () => {
                                 price_unit: item.price_unit || 0,
                                 is_personalized: false,
                                 is_new_client: false,
+                                is_export: false,
+                                is_replacement: false,
                                 customization_notes: '',
                                 attachment_path: null,
                                 needs_mapping: false
@@ -207,6 +217,42 @@ const ImportPage = () => {
         })
     }
 
+    const handleToggleExport = (itemId) => {
+        setStagingData(prev => {
+            if (!prev || !prev.po_list || !Array.isArray(prev.po_list)) return prev
+
+            return {
+                ...prev,
+                po_list: prev.po_list.map(po => ({
+                    ...po,
+                    items: Array.isArray(po.items) ? po.items.map(item =>
+                        item.id === itemId
+                            ? { ...item, is_export: !item.is_export }
+                            : item
+                    ) : []
+                }))
+            }
+        })
+    }
+
+    const handleToggleReplacement = (itemId) => {
+        setStagingData(prev => {
+            if (!prev || !prev.po_list || !Array.isArray(prev.po_list)) return prev
+
+            return {
+                ...prev,
+                po_list: prev.po_list.map(po => ({
+                    ...po,
+                    items: Array.isArray(po.items) ? po.items.map(item =>
+                        item.id === itemId
+                            ? { ...item, is_replacement: !item.is_replacement }
+                            : item
+                    ) : []
+                }))
+            }
+        })
+    }
+
     const handleNotesChange = (itemId, notes) => {
         setStagingData(prev => {
             if (!prev || !prev.po_list || !Array.isArray(prev.po_list)) return prev
@@ -221,6 +267,23 @@ const ImportPage = () => {
                             : item
                     ) : []
                 }))
+            }
+        })
+    }
+
+    const handlePOFieldChange = (field, value) => {
+        setStagingData(prev => {
+            if (!prev || !prev.po_list || !Array.isArray(prev.po_list)) return prev
+
+            const updatedPoList = [...prev.po_list]
+            updatedPoList[selectedPOIndex] = {
+                ...updatedPoList[selectedPOIndex],
+                [field]: parseFloat(value) || 0
+            }
+
+            return {
+                ...prev,
+                po_list: updatedPoList
             }
         })
     }
@@ -324,32 +387,87 @@ const ImportPage = () => {
         )
     }
 
-    const handleConfirmPO = async () => {
-        if (hasErrors()) {
-            showError('Corrija todos os erros antes de confirmar')
-            return
-        }
+    const calculateSummary = () => {
+        if (!stagingData || !stagingData.po_list) return { valid: 0, errors: 0 }
 
-        const toastId = showLoading('Criando pedido...')
+        let validCount = 0
+        let errorCount = 0
+
+        stagingData.po_list.forEach(po => {
+            if (Array.isArray(po.items)) {
+                po.items.forEach(item => {
+                    if (validateItem(item).length === 0) {
+                        validCount++
+                    } else {
+                        errorCount++
+                    }
+                })
+            }
+        })
+
+        return { valid: validCount, errors: errorCount }
+    }
+
+    const handleConfirmPO = async () => {
+        const summary = calculateSummary()
+        setCommitSummary(summary)
+        setShowSummaryModal(true)
+    }
+
+    const handleCommitValidOnly = async () => {
+        const toastId = showLoading('Criando pedidos válidos...')
 
         try {
-            // Here you would call the API to create the PO with staging data
-            // const response = await api.post('/import/confirm-staging', stagingData)
+            // Filter only valid items
+            const validPOs = stagingData.po_list.map(po => ({
+                ...po,
+                items: po.items.filter(item => validateItem(item).length === 0)
+            })).filter(po => po.items.length > 0)
+
+            // Prepare payload with all 19 fields + metadata
+            const payload = {
+                pos: validPOs.map(po => ({
+                    po_number: po.po_number,
+                    client_name: po.client_name,
+                    freight_cost: po.freight_cost || 0,
+                    additional_costs: po.additional_costs || 0,
+                    items: po.items.map(item => ({
+                        sku: item.sku,
+                        quantity: item.quantity,
+                        price_unit: item.price_unit,
+                        extra_metadata: {
+                            is_personalized: item.is_personalized,
+                            is_new_client: item.is_new_client,
+                            is_export: item.is_export,
+                            is_replacement: item.is_replacement,
+                            customization_notes: item.customization_notes,
+                            attachment_path: item.attachment_path,
+                            attachment_filename: item.attachment_filename,
+                            // SLA reduction flag for backend
+                            apply_sla_reduction: item.is_replacement
+                        }
+                    }))
+                }))
+            }
+
+            // TODO: Call actual backend endpoint when ready
+            // const response = await api.post('/import/confirm-staging', payload)
 
             dismissToast(toastId)
-            showSuccess('Pedido criado com sucesso!')
+            showSuccess(`${validPOs.length} pedido(s) criado(s) com sucesso!`)
             refreshNotifications()
 
             // Reset form
             setSelectedFile(null)
             setStagingData(null)
             setCurrentPage(1)
+            setShowSummaryModal(false)
             if (fileInputRef.current) {
                 fileInputRef.current.value = ''
             }
         } catch (error) {
             dismissToast(toastId)
-            showError(error.response?.data?.detail || 'Erro ao criar pedido')
+            showError(error.response?.data?.detail || 'Erro ao criar pedidos')
         }
     }
 
@@ -615,12 +733,12 @@ const ImportPage = () => {
                                 </div>
                             )}
 
-                            {/* PO Header */}
+                            {/* PO Header with PO-level fields */}
                             <div className="card">
                                 <h3 className="text-lg font-semibold text-gray-900 mb-4">
                                     Informações do Pedido {stagingData.isMultiPO ? `(${selectedPOIndex + 1}/${stagingData.total_pos})` : ''}
                                 </h3>
-                                <div className="grid grid-cols-2 gap-4">
+                                <div className="grid grid-cols-2 gap-4 mb-4">
                                     <div>
                                         <label className="text-sm font-medium text-gray-700">Número PO</label>
                                         <p className="text-lg font-semibold text-gray-900">{currentPO.po_number}</p>
@@ -628,6 +746,40 @@ const ImportPage = () => {
                                     <div>
                                         <label className="text-sm font-medium text-gray-700">Cliente</label>
                                         <p className="text-lg font-semibold text-gray-900">{currentPO.client_name}</p>
+                                    </div>
+                                </div>
+
+                                {/* PO-Level Cost Fields */}
+                                <div className="grid grid-cols-2 gap-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                                            <DollarSign className="w-4 h-4 inline mr-1" />
+                                            Frete (R$)
+                                        </label>
+                                        <input
+                                            type="number"
+                                            step="0.01"
+                                            min="0"
+                                            value={currentPO.freight_cost || 0}
+                                            onChange={(e) => handlePOFieldChange('freight_cost', e.target.value)}
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                            placeholder="0.00"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                                            <DollarSign className="w-4 h-4 inline mr-1" />
+                                            Custos Adicionais (R$)
+                                        </label>
+                                        <input
+                                            type="number"
+                                            step="0.01"
+                                            min="0"
+                                            value={currentPO.additional_costs || 0}
+                                            onChange={(e) => handlePOFieldChange('additional_costs', e.target.value)}
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                            placeholder="0.00"
+                                        />
                                     </div>
                                 </div>
                             </div>
@@ -709,8 +861,8 @@ const ImportPage = () => {
                                                     </div>
                                                 </div>
 
-                                                {/* Toggles */}
-                                                <div className="grid grid-cols-2 gap-4 mb-4">
+                                                {/* Toggles - Now with 4 flags */}
+                                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
                                                     <label className="flex items-center gap-3 cursor-pointer">
                                                         <input
                                                             type="checkbox"
@@ -733,7 +885,40 @@ const ImportPage = () => {
                                                             Cliente Novo?
                                                         </span>
                                                     </label>
+                                                    <label className="flex items-center gap-3 cursor-pointer">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={item.is_export}
+                                                            onChange={() => handleToggleExport(item.id)}
+                                                            className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
+                                                        />
+                                                        <span className="text-sm font-medium text-gray-700 flex items-center gap-1">
+                                                            <Globe className="w-4 h-4" />
+                                                            Exportação?
+                                                        </span>
+                                                    </label>
+                                                    <label className="flex items-center gap-3 cursor-pointer">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={item.is_replacement}
+                                                            onChange={() => handleToggleReplacement(item.id)}
+                                                            className="w-5 h-5 text-purple-600 rounded focus:ring-purple-500"
+                                                        />
+                                                        <span className="text-sm font-medium text-gray-700 flex items-center gap-1">
+                                                            <RefreshCw className="w-4 h-4" />
+                                                            Troca/Reposição?
+                                                        </span>
+                                                    </label>
                                                 </div>
+
+                                                {/* SLA Reduction Notice */}
+                                                {item.is_replacement && (
+                                                    <div className="mb-4 p-3 bg-purple-50 border border-purple-200 rounded-lg">
+                                                        <p className="text-sm text-purple-800">
+                                                            <strong>⚡ SLA Reduzido:</strong> Este item terá o prazo de entrega reduzido em 50% (Troca/Reposição)
+                                                        </p>
+                                                    </div>
+                                                )}
 
                                                 {/* Customization Notes */}
                                                 {item.is_personalized && (
@@ -751,11 +936,11 @@ const ImportPage = () => {
                                                     </div>
                                                 )}
 
-                                                {/* File Upload */}
-                                                {item.is_personalized && item.is_new_client && (
+                                                {/* File Upload - Shows when Cliente Novo is checked */}
+                                                {item.is_new_client && (
                                                     <div className="mb-4">
                                                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                                                            Anexo (PDF, JPG, PNG - Max 5MB) *
+                                                            Anexo (PDF, JPG, PNG - Max 5MB) {item.is_personalized ? '*' : ''}
                                                         </label>
                                                         {item.attachment_path ? (
                                                             <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg">
@@ -850,8 +1035,7 @@ const ImportPage = () => {
                                 </button>
                                 <button
                                     onClick={handleConfirmPO}
-                                    disabled={hasErrors()}
-                                    className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                                    className="btn-primary"
                                 >
                                     <CheckCircle className="w-5 h-5 mr-2" />
                                     Confirmar Pedido
@@ -888,6 +1072,7 @@ const ImportPage = () => {
                                         <li>Descrição da customização é obrigatória para qualquer pedido Personalizado</li>
                                         <li>Limite de arquivo: 5MB (PDF, JPG, PNG)</li>
                                         <li>Paginação automática para mais de 10 itens</li>
+                                        <li><strong>Troca/Reposição:</strong> Reduz o SLA em 50% automaticamente</li>
                                     </ul>
                                 </div>
                             </div>
@@ -895,6 +1080,62 @@ const ImportPage = () => {
                     )}
                 </div>
             </div>
+
+            {/* Summary Modal */}
+            {showSummaryModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+                        <div className="p-6">
+                            <h3 className="text-xl font-bold text-gray-900 mb-4">
+                                Resumo do Pedido
+                            </h3>
+                            <div className="space-y-3 mb-6">
+                                <div className="flex items-center justify-between p-3 bg-green-50 border border-green-200 rounded-lg">
+                                    <span className="text-sm font-medium text-green-900">Itens Válidos</span>
+                                    <span className="text-2xl font-bold text-green-600">{commitSummary.valid}</span>
+                                </div>
+                                {commitSummary.errors > 0 && (
+                                    <div className="flex items-center justify-between p-3 bg-red-50 border border-red-200 rounded-lg">
+                                        <span className="text-sm font-medium text-red-900">Itens com Erros</span>
+                                        <span className="text-2xl font-bold text-red-600">{commitSummary.errors}</span>
+                                    </div>
+                                )}
+                            </div>
+
+                            {commitSummary.errors > 0 ? (
+                                <div className="mb-6 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                                    <p className="text-sm text-yellow-800">
+                                        <strong>⚠️ Atenção:</strong> Alguns itens possuem erros. Você pode confirmar apenas os itens válidos ou corrigir os erros primeiro.
+                                    </p>
+                                </div>
+                            ) : (
+                                <div className="mb-6 p-3 bg-green-50 border border-green-200 rounded-lg">
+                                    <p className="text-sm text-green-800">
+                                        <strong>✅ Tudo certo!</strong> Todos os itens estão válidos e prontos para serem confirmados.
+                                    </p>
+                                </div>
+                            )}
+
+                            <div className="flex items-center justify-end gap-3">
+                                <button
+                                    onClick={() => setShowSummaryModal(false)}
+                                    className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors"
+                                >
+                                    Voltar e Corrigir
+                                </button>
+                                {commitSummary.valid > 0 && (
+                                    <button
+                                        onClick={handleCommitValidOnly}
+                                        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                                    >
+                                        Confirmar {commitSummary.errors > 0 ? 'Apenas Válidos' : 'Todos'}
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Help Modal */}
             {showHelp && (

@@ -171,8 +171,8 @@ async def get_kanban_board(
             po_response = POResponse(
                 id=str(po.id),
                 po_number=po.po_number,
-                client_name=getattr(po, 'client_name', None) or "Cliente",
-                supplier_name=getattr(po, 'supplier_name', None) or getattr(po, 'client_name', None) or "Fornecedor Desconhecido",
+                client_name=getattr(po, 'client_name', None) or "Cliente Desconhecido",
+                supplier_name=getattr(po, 'client_name', None) or "Fornecedor Desconhecido",
                 status_macro=display_name,  # Use display name
                 status=display_name,  # Alias for frontend compatibility
                 items=items,
@@ -295,8 +295,8 @@ async def list_purchase_orders(
         po_response = POResponse(
             id=str(po.id),
             po_number=po.po_number,
-            client_name=getattr(po, 'client_name', None) or "Cliente",
-            supplier_name=getattr(po, 'supplier_name', None) or getattr(po, 'client_name', None) or "Fornecedor Desconhecido",
+            client_name=getattr(po, 'client_name', None) or "Cliente Desconhecido",
+            supplier_name=getattr(po, 'client_name', None) or "Fornecedor Desconhecido",
             status_macro=STATUS_DISPLAY_MAP.get(po.status_macro, po.status_macro),
             status=STATUS_DISPLAY_MAP.get(po.status_macro, po.status_macro),
             items=items,
@@ -394,8 +394,8 @@ async def get_purchase_order(
     return POResponse(
         id=str(po.id),
         po_number=po.po_number,
-        client_name=getattr(po, 'client_name', None) or "Cliente",
-        supplier_name=getattr(po, 'supplier_name', None) or getattr(po, 'client_name', None) or "Fornecedor Desconhecido",
+        client_name=getattr(po, 'client_name', None) or "Cliente Desconhecido",
+        supplier_name=getattr(po, 'client_name', None) or "Fornecedor Desconhecido",
         status_macro=STATUS_DISPLAY_MAP.get(po.status_macro, po.status_macro),
         status=STATUS_DISPLAY_MAP.get(po.status_macro, po.status_macro),
         items=items,
