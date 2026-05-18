@@ -10,7 +10,7 @@ from fastapi.exceptions import RequestValidationError
 from contextlib import asynccontextmanager
 import time
 
-from backend.routers import auth, import_router, kanban, dashboard, costs, workshop, partition
+from backend.routers import auth, import_router, kanban, dashboard, costs, workshop, partition, users
 from backend.database import engine, Base
 from backend.middleware import AuthenticationMiddleware, TenantIsolationMiddleware
 
@@ -47,7 +47,9 @@ async def lifespan(app: FastAPI):
     Handles startup and shutdown events.
     """
     # Startup
-    print("Starting FlexFlow API...")
+    from datetime import datetime
+    timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
+    print(f"{timestamp} Starting FlexFlow API...")
     
     # Create database tables (in production, use Alembic migrations)
     # Base.metadata.create_all(bind=engine)
@@ -56,21 +58,27 @@ async def lifespan(app: FastAPI):
     from backend.services.background_worker import start_background_worker, stop_background_worker
     try:
         await start_background_worker()
-        print("Background worker started successfully")
+        timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
+        print(f"{timestamp} Background worker started successfully")
     except Exception as e:
-        print(f"[WARNING] Background worker failed to start: {e}")
-        print("[WARNING] S3 sync will not be available, but API will continue to work")
+        timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
+        print(f"{timestamp} [WARNING] Background worker failed to start: {e}")
+        print(f"{timestamp} [WARNING] S3 sync will not be available, but API will continue to work")
     
-    print("FlexFlow API started successfully")
+    timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
+    print(f"{timestamp} FlexFlow API started successfully")
     
     yield
     
     # Shutdown
-    print("Shutting down FlexFlow API...")
+    from datetime import datetime
+    timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
+    print(f"{timestamp} Shutting down FlexFlow API...")
     try:
         await stop_background_worker()
     except Exception as e:
-        print(f"[WARNING] Error stopping background worker: {e}")
+        timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
+        print(f"{timestamp} [WARNING] Error stopping background worker: {e}")
 
 
 # Create FastAPI application
@@ -133,57 +141,15 @@ async def add_process_time_header(request: Request, call_next):
     return response
 
 
-# Request body logger middleware (for debugging POST requests)
-@app.middleware("http")
-async def log_request_body(request: Request, call_next):
-    """Log full JSON body of POST requests for debugging"""
-    if request.method == "POST":
-        try:
-            # Check content-type header
-            content_type = request.headers.get("content-type", "")
-            
-            # Skip body reading for multipart/form-data (file uploads)
-            if "multipart/form-data" in content_type.lower():
-                print(f"\n[LOG] File Upload Request - Skipping body print for {request.url.path}")
-                response = await call_next(request)
-                return response
-            
-            # Read the body
-            body = await request.body()
-            
-            # Try to parse as JSON
-            try:
-                import json
-                body_json = json.loads(body.decode('utf-8'))
-                print(f"\n{'='*80}")
-                print(f"[POST REQUEST BODY] {request.url.path}")
-                print(f"{'='*80}")
-                print(json.dumps(body_json, indent=2, ensure_ascii=False))
-                print(f"{'='*80}\n")
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                # Not JSON or can't decode - log raw
-                print(f"\n[POST REQUEST BODY - RAW] {request.url.path}: {body[:500]}")
-            
-            # Important: Create a new request with the body we just read
-            # because body can only be read once
-            async def receive():
-                return {"type": "http.request", "body": body}
-            
-            request._receive = receive
-        except Exception as e:
-            print(f"[ERROR] Failed to log request body: {e}")
-    
-    response = await call_next(request)
-    return response
-
-
-# Logging middleware
+# Simple logging middleware - logs method, path, and status code with timestamps
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    """Log all requests"""
-    print(f"[IN] {request.method} {request.url.path}")
+    """Log all requests with method, path, and status code"""
+    from datetime import datetime
+    timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
+    print(f"{timestamp} [REQUEST] {request.method} {request.url.path}")
     response = await call_next(request)
-    print(f"[OUT] {request.method} {request.url.path} - Status: {response.status_code}")
+    print(f"{timestamp} [RESPONSE] {request.method} {request.url.path} - Status: {response.status_code}")
     return response
 
 
@@ -214,7 +180,9 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
     """Handle unexpected errors"""
-    print(f"[ERROR] Unexpected error: {str(exc)}")
+    from datetime import datetime
+    timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
+    print(f"{timestamp} [ERROR] Unexpected error: {str(exc)}")
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
@@ -235,6 +203,7 @@ app.include_router(kanban.router)
 app.include_router(dashboard.router)
 app.include_router(costs.router)
 app.include_router(partition.router)
+app.include_router(users.router)
 
 
 # ============================================================================

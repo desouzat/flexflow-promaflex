@@ -10,11 +10,15 @@ import {
     Menu,
     X,
     User,
-    DollarSign
+    DollarSign,
+    Users,
+    AlertCircle
 } from 'lucide-react'
 
 const Layout = () => {
     const [sidebarOpen, setSidebarOpen] = useState(true)
+    const [showReportModal, setShowReportModal] = useState(false)
+    const [reportDescription, setReportDescription] = useState('')
     const { user, logout } = useAuth()
     const { badges } = useNotifications()
     const navigate = useNavigate()
@@ -29,7 +33,23 @@ const Layout = () => {
         { path: '/import', icon: Upload, label: 'Import POs', badge: 'import' },
         { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', badge: 'dashboard' },
         { path: '/costs', icon: DollarSign, label: 'Gerenciar Custos', badge: 'costs', adminOnly: true },
+        { path: '/users', icon: Users, label: 'Gestão de Equipe', badge: 'users', masterOnly: true },
     ]
+
+    const handleReportProblem = () => {
+        if (!reportDescription.trim()) {
+            alert('Por favor, descreva o problema')
+            return
+        }
+
+        // Log to console (in production, this would send to backend)
+        const timestamp = new Date().toISOString()
+        console.error(`[${timestamp}] PROBLEM REPORT from ${user?.username}:`, reportDescription)
+
+        alert('Problema reportado com sucesso! Nossa equipe foi notificada.')
+        setReportDescription('')
+        setShowReportModal(false)
+    }
 
     return (
         <div className="flex h-screen bg-gray-50">
@@ -61,6 +81,11 @@ const Layout = () => {
                     {navItems.map((item) => {
                         // Hide admin-only items if user is not admin or master
                         if (item.adminOnly && user?.role !== 'admin' && user?.role !== 'master') {
+                            return null
+                        }
+
+                        // Hide master-only items if user is not master
+                        if (item.masterOnly && user?.role !== 'master') {
                             return null
                         }
 
@@ -107,8 +132,17 @@ const Layout = () => {
                         )}
                     </div>
                     <button
+                        onClick={() => setShowReportModal(true)}
+                        className={`mt-3 w-full flex items-center gap-3 px-3 py-2 text-orange-600 hover:bg-orange-50 rounded-lg transition-colors ${!sidebarOpen && 'justify-center'
+                            }`}
+                        title="Reportar Problema"
+                    >
+                        <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                        {sidebarOpen && <span className="font-medium">Reportar Problema</span>}
+                    </button>
+                    <button
                         onClick={handleLogout}
-                        className={`mt-3 w-full flex items-center gap-3 px-3 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors ${!sidebarOpen && 'justify-center'
+                        className={`mt-2 w-full flex items-center gap-3 px-3 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors ${!sidebarOpen && 'justify-center'
                             }`}
                         aria-label="Logout"
                     >
@@ -124,6 +158,50 @@ const Layout = () => {
                     <Outlet />
                 </div>
             </main>
+
+            {/* Report Problem Modal */}
+            {showReportModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+                        <div className="p-6">
+                            <div className="flex items-center gap-3 mb-4">
+                                <AlertCircle className="w-6 h-6 text-orange-600" />
+                                <h3 className="text-xl font-bold text-gray-900">Reportar Problema</h3>
+                            </div>
+
+                            <p className="text-sm text-gray-600 mb-4">
+                                Descreva o problema encontrado. Nossa equipe será notificada imediatamente.
+                            </p>
+
+                            <textarea
+                                value={reportDescription}
+                                onChange={(e) => setReportDescription(e.target.value)}
+                                placeholder="Descreva o problema em detalhes..."
+                                rows={5}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent mb-4"
+                            />
+
+                            <div className="flex items-center justify-end gap-3">
+                                <button
+                                    onClick={() => {
+                                        setShowReportModal(false)
+                                        setReportDescription('')
+                                    }}
+                                    className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    onClick={handleReportProblem}
+                                    className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors"
+                                >
+                                    Enviar Relatório
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }

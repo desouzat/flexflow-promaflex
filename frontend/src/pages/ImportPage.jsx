@@ -379,19 +379,20 @@ const ImportPage = () => {
     }
 
     const hasErrors = () => {
-        if (!stagingData || !stagingData.po_list || !Array.isArray(stagingData.po_list)) return false
+        if (!stagingData || !stagingData.po_list || !Array.isArray(stagingData.po_list)) return true
 
         // FIXED: Check ALL items across ALL POs (not just current PO)
+        // Returns TRUE if there are errors, FALSE if all valid
         for (const po of stagingData.po_list) {
             if (Array.isArray(po.items)) {
                 for (const item of po.items) {
                     if (validateItem(item).length > 0) {
-                        return true
+                        return true  // Found an error
                     }
                 }
             }
         }
-        return false
+        return false  // No errors found, all valid
     }
 
     const calculateSummary = () => {
@@ -463,8 +464,13 @@ const ImportPage = () => {
             dismissToast(toastId)
             showSuccess(`${validPOs.length} pedido(s) criado(s) com sucesso! Atualizando Kanban...`)
 
-            // FIXED: Refresh notifications to update Kanban board
+            // FIXED: Hard refresh - Force Kanban data reload
             await refreshNotifications()
+
+            // Trigger a hard refresh by reloading the window after a short delay
+            setTimeout(() => {
+                window.location.reload()
+            }, 1500)
 
             // Reset form
             setSelectedFile(null)

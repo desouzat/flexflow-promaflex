@@ -9,6 +9,7 @@ import KanbanPage from './pages/KanbanPage'
 import ImportPage from './pages/ImportPage'
 import DashboardPage from './pages/DashboardPage'
 import CostsPage from './pages/CostsPage'
+import UsersPage from './pages/UsersPage'
 
 // Protected Route Component
 const ProtectedRoute = ({ children }) => {
@@ -72,6 +73,7 @@ function AppRoutes() {
                 <Route path="import" element={<ImportPage />} />
                 <Route path="dashboard" element={<DashboardPage />} />
                 <Route path="costs" element={<CostsPage />} />
+                <Route path="users" element={<UsersPage />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
