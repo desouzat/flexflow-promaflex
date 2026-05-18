@@ -6,14 +6,14 @@ import HelpModal from '../HelpModal'
 const KanbanColumn = ({ title, status, pos, onCardClick, onMoveCard, color = 'gray', compactView = false }) => {
     const [showHelp, setShowHelp] = useState(false)
     const colorClasses = {
-        gray: 'bg-gray-100 border-gray-300',
-        yellow: 'bg-yellow-50 border-yellow-300',
-        green: 'bg-green-50 border-green-300',
-        blue: 'bg-blue-50 border-blue-300',
-        lightblue: 'bg-blue-50 border-blue-200',
-        purple: 'bg-purple-50 border-purple-300',
-        red: 'bg-red-50 border-red-300',
-        orange: 'bg-orange-50 border-orange-300',
+        gray: 'bg-gray-100 border-gray-400',
+        yellow: 'bg-yellow-50 border-yellow-400',
+        green: 'bg-green-50 border-green-400',
+        blue: 'bg-blue-50 border-blue-400',
+        lightblue: 'bg-blue-50 border-blue-300',
+        purple: 'bg-purple-50 border-purple-400',
+        red: 'bg-red-50 border-red-400',
+        orange: 'bg-orange-50 border-orange-400',
     }
 
     const headerColorClasses = {
@@ -21,7 +21,7 @@ const KanbanColumn = ({ title, status, pos, onCardClick, onMoveCard, color = 'gr
         yellow: 'bg-yellow-100 text-yellow-800',
         green: 'bg-green-100 text-green-800',
         blue: 'bg-blue-100 text-blue-800',
-        lightblue: 'bg-blue-50 text-blue-900',
+        lightblue: 'bg-blue-100 text-blue-800',
         purple: 'bg-purple-100 text-purple-800',
         red: 'bg-red-100 text-red-800',
         orange: 'bg-orange-100 text-orange-800',

@@ -247,10 +247,8 @@ const KanbanPage = () => {
         if (!selectedPO) return
 
         try {
-            // Send po_id as query parameter
-            const response = await api.post('/kanban/advance-status', null, {
-                params: { po_id: selectedPO.id }
-            })
+            // FIXED: Send po_id as query parameter with proper encoding
+            const response = await api.post(`/kanban/advance-status?po_id=${encodeURIComponent(selectedPO.id)}`)
             showSuccess(response.data.message)
             await fetchBoard() // Refresh board data
             refreshNotifications() // Refresh notifications
@@ -274,13 +272,10 @@ const KanbanPage = () => {
         }
 
         try {
-            // Send po_id and reason as query parameters
-            const response = await api.post('/kanban/return-status', null, {
-                params: {
-                    po_id: selectedPO.id,
-                    reason: returnReason
-                }
-            })
+            // FIXED: Send po_id and reason as query parameters with proper encoding
+            const response = await api.post(
+                `/kanban/return-status?po_id=${encodeURIComponent(selectedPO.id)}&reason=${encodeURIComponent(returnReason)}`
+            )
             showSuccess(response.data.message)
             setShowReturnModal(false)
             setReturnReason('')
@@ -301,12 +296,10 @@ const KanbanPage = () => {
         }
 
         try {
-            const response = await api.post('/kanban/suggest-partition', null, {
-                params: {
-                    po_id: selectedPO.id,
-                    reason: partitionReason
-                }
-            })
+            // FIXED: Send po_id and reason as query parameters with proper encoding
+            const response = await api.post(
+                `/kanban/suggest-partition?po_id=${encodeURIComponent(selectedPO.id)}&reason=${encodeURIComponent(partitionReason)}`
+            )
             showSuccess(response.data.message)
             setShowPartitionModal(false)
             setPartitionReason('')

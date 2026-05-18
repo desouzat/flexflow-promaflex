@@ -116,8 +116,15 @@ class FileService:
         with open(file_path, 'wb') as f:
             f.write(content)
         
-        # Return relative path from project root
-        relative_path = str(file_path.relative_to(Path.cwd()))
+        # Return relative path from project root with proper Windows path handling
+        # Use os.path.normpath and convert to forward slashes for consistency
+        try:
+            relative_path = os.path.relpath(file_path, Path.cwd())
+            # Normalize path and convert backslashes to forward slashes for cross-platform compatibility
+            relative_path = relative_path.replace('\\', '/')
+        except ValueError:
+            # If paths are on different drives on Windows, use absolute path
+            relative_path = str(file_path).replace('\\', '/')
         
         return relative_path, file.filename
     

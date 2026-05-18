@@ -381,10 +381,17 @@ const ImportPage = () => {
     const hasErrors = () => {
         if (!stagingData || !stagingData.po_list || !Array.isArray(stagingData.po_list)) return false
 
-        // Check all items across all POs
-        return stagingData.po_list.some(po =>
-            Array.isArray(po.items) && po.items.some(item => validateItem(item).length > 0)
-        )
+        // FIXED: Check ALL items across ALL POs (not just current PO)
+        for (const po of stagingData.po_list) {
+            if (Array.isArray(po.items)) {
+                for (const item of po.items) {
+                    if (validateItem(item).length > 0) {
+                        return true
+                    }
+                }
+            }
+        }
+        return false
     }
 
     const calculateSummary = () => {
@@ -450,12 +457,14 @@ const ImportPage = () => {
                 }))
             }
 
-            // TODO: Call actual backend endpoint when ready
-            // const response = await api.post('/import/confirm-staging', payload)
+            // Call actual backend endpoint
+            const response = await api.post('/import/confirm-staging', payload)
 
             dismissToast(toastId)
-            showSuccess(`${validPOs.length} pedido(s) criado(s) com sucesso!`)
-            refreshNotifications()
+            showSuccess(`${validPOs.length} pedido(s) criado(s) com sucesso! Atualizando Kanban...`)
+
+            // FIXED: Refresh notifications to update Kanban board
+            await refreshNotifications()
 
             // Reset form
             setSelectedFile(null)
