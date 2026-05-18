@@ -135,7 +135,7 @@ async def suggest_partition(
         po = service.suggest_partition(
             po_id=uuid.UUID(request.po_id),
             reason=request.reason,
-            user_id=current_user.user_id,
+            user_id=current_user.id,
             tenant_id=current_user.tenant_id
         )
         
@@ -204,7 +204,7 @@ async def execute_partition(
             po_id=uuid.UUID(request.po_id),
             items_ship_now=items_ship_now,
             freight_strategy=request.freight_strategy,
-            user_id=current_user.user_id,
+            user_id=current_user.id,
             tenant_id=current_user.tenant_id,
             freight_ship_now=request.freight_ship_now,
             freight_ship_later=request.freight_ship_later

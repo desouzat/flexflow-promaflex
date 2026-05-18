@@ -578,7 +578,7 @@ async def sync_s3_bucket(
         # Trigger sync
         result = s3_service.check_for_new_files(
             tenant_id=str(current_user.tenant_id),
-            user_id=str(current_user.user_id)
+            user_id=str(current_user.id)
         )
         
         # Format response

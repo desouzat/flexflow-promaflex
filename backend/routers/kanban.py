@@ -523,7 +523,7 @@ async def move_po_status(
                 to_status=to_status_db,
                 timestamp=datetime.utcnow(),
                 previous_hash=previous_hash,
-                changed_by=current_user.user_id
+                changed_by=current_user.id
             )
             
             # Create audit log entry
@@ -535,7 +535,7 @@ async def move_po_status(
                 previous_hash=previous_hash,
                 is_exception=True,
                 justification=request.justificativa_lider,
-                changed_by=current_user.user_id,
+                changed_by=current_user.id,
                 extra_data={
                     "po_id": str(po.id),
                     "po_number": po.po_number,
@@ -680,7 +680,7 @@ async def update_manual_commission(
     
     po.partition_metadata["manual_commission_rate"] = float(request.manual_commission_rate)
     po.partition_metadata["commission_justification"] = request.justification
-    po.partition_metadata["commission_updated_by"] = str(current_user.user_id)
+    po.partition_metadata["commission_updated_by"] = str(current_user.id)
     po.partition_metadata["commission_updated_at"] = datetime.utcnow().isoformat()
     
     # If updating specific item
@@ -703,7 +703,7 @@ async def update_manual_commission(
         
         item.extra_metadata["manual_commission_rate"] = float(request.manual_commission_rate)
         item.extra_metadata["commission_justification"] = request.justification
-        item.extra_metadata["commission_updated_by"] = str(current_user.user_id)
+        item.extra_metadata["commission_updated_by"] = str(current_user.id)
         item.extra_metadata["commission_updated_at"] = datetime.utcnow().isoformat()
     
     po.updated_at = datetime.utcnow()
@@ -783,7 +783,7 @@ async def update_logistics_checklist(
         "etiquetas_impressas": request.etiquetas_impressas,
         "foto_carga_path": request.foto_carga_path,
         "foto_canhoto_path": request.foto_canhoto_path,
-        "updated_by": str(current_user.user_id),
+        "updated_by": str(current_user.id),
         "updated_at": datetime.utcnow().isoformat()
     }
     
@@ -1029,7 +1029,7 @@ async def return_po_status(
             to_status=prev_status,
             timestamp=datetime.utcnow(),
             previous_hash=previous_hash,
-            changed_by=current_user.user_id
+            changed_by=current_user.id
         )
         
         # Create audit log entry
@@ -1041,7 +1041,7 @@ async def return_po_status(
             previous_hash=previous_hash,
             is_exception=False,
             justification=f"DEVOLUÇÃO: {reason}",
-            changed_by=current_user.user_id,
+            changed_by=current_user.id,
             extra_data={
                 "po_id": str(po.id),
                 "po_number": po.po_number,
@@ -1118,7 +1118,7 @@ async def suggest_partition(
             to_status="WAITING_COMMERCIAL_PARTITION",
             timestamp=datetime.utcnow(),
             previous_hash=previous_hash,
-            changed_by=current_user.user_id
+            changed_by=current_user.id
         )
         
         audit_entry = AuditLog(
@@ -1129,7 +1129,7 @@ async def suggest_partition(
             previous_hash=previous_hash,
             is_exception=False,
             justification=f"SUGESTÃO DE PARTIÇÃO: {reason}",
-            changed_by=current_user.user_id,
+            changed_by=current_user.id,
             extra_data={
                 "po_id": str(po.id),
                 "po_number": po.po_number,

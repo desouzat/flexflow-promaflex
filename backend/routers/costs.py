@@ -180,7 +180,7 @@ async def create_material_cost(
         custo_mp_kg=material_data.custo_mp_kg,
         rendimento=material_data.rendimento,
         indice_impostos=material_data.indice_impostos,
-        updated_by=current_user.user_id
+        updated_by=current_user.id
     )
     
     db.add(material)
@@ -239,7 +239,7 @@ async def update_material_cost(
     for field, value in update_data.items():
         setattr(material, field, value)
     
-    material.updated_by = current_user.user_id
+    material.updated_by = current_user.id
     
     db.commit()
     db.refresh(material)

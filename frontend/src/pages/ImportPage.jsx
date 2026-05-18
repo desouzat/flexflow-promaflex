@@ -365,6 +365,21 @@ const ImportPage = () => {
     const validateItem = (item) => {
         const errors = []
 
+        // Rule 0: Core data integrity - SKU must exist and have valid dimensions
+        if (!item.sku || !item.sku.trim()) {
+            errors.push('SKU é obrigatório')
+        }
+
+        // Rule 0.1: Quantity must be positive
+        if (!item.quantity || item.quantity <= 0) {
+            errors.push('Quantidade deve ser maior que zero')
+        }
+
+        // Rule 0.2: Price must be positive
+        if (!item.price_unit || item.price_unit <= 0) {
+            errors.push('Preço unitário deve ser maior que zero')
+        }
+
         // Rule 1: Personalized items require notes
         if (item.is_personalized && (!item.customization_notes || !item.customization_notes.trim())) {
             errors.push('Descrição da customização é obrigatória')
@@ -461,24 +476,31 @@ const ImportPage = () => {
             // Call actual backend endpoint
             const response = await api.post('/import/confirm-staging', payload)
 
-            dismissToast(toastId)
-            showSuccess(`${validPOs.length} pedido(s) criado(s) com sucesso! Atualizando Kanban...`)
+            // Only proceed if we got a successful response (200 OK)
+            if (response.status === 200) {
+                dismissToast(toastId)
+                showSuccess(`${validPOs.length} pedido(s) criado(s) com sucesso! Atualizando Kanban...`)
 
-            // FIXED: Hard refresh - Force Kanban data reload
-            await refreshNotifications()
+                // Reset form first
+                setSelectedFile(null)
+                setStagingData(null)
+                setCurrentPage(1)
+                setShowSummaryModal(false)
+                if (fileInputRef.current) {
+                    fileInputRef.current.value = ''
+                }
 
-            // Trigger a hard refresh by reloading the window after a short delay
-            setTimeout(() => {
-                window.location.reload()
-            }, 1500)
+                // Refresh notifications
+                await refreshNotifications()
 
-            // Reset form
-            setSelectedFile(null)
-            setStagingData(null)
-            setCurrentPage(1)
-            setShowSummaryModal(false)
-            if (fileInputRef.current) {
-                fileInputRef.current.value = ''
+                // Trigger a hard refresh by reloading the window after a short delay
+                // This ensures the Kanban board shows the new POs
+                setTimeout(() => {
+                    window.location.reload()
+                }, 1500)
+            } else {
+                dismissToast(toastId)
+                showError('Resposta inesperada do servidor')
             }
         } catch (error) {
             dismissToast(toastId)
@@ -846,14 +868,21 @@ const ImportPage = () => {
                                         return (
                                             <div
                                                 key={item.id}
-                                                className={`border rounded-lg p-4 ${hasError ? 'border-red-300 bg-red-50' : 'border-gray-200'
+                                                className={`border rounded-lg p-4 ${hasError ? 'border-red-300 bg-red-50' : 'border-green-200 bg-green-50'
                                                     }`}
                                             >
-                                                {/* Item Header */}
+                                                {/* Item Header with Revisado Indicator */}
                                                 <div className="grid grid-cols-4 gap-4 mb-4">
                                                     <div>
                                                         <label className="text-xs font-medium text-gray-600">SKU</label>
-                                                        <p className="font-semibold text-gray-900">{item.sku}</p>
+                                                        <div className="flex items-center gap-2">
+                                                            <p className="font-semibold text-gray-900">{item.sku}</p>
+                                                            {!hasError && (
+                                                                <span className="inline-flex items-center px-2 py-1 text-xs bg-green-100 text-green-800 rounded font-medium">
+                                                                    ✓ Revisado
+                                                                </span>
+                                                            )}
+                                                        </div>
                                                         {item.needs_mapping && (
                                                             <span className="inline-block mt-1 px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded">
                                                                 Precisa mapeamento
