@@ -254,6 +254,13 @@ class PurchaseOrder(Base):
         comment="Metadata about partition: original_items, split_date, freight_strategy, etc."
     )
     
+    # Financial fields (22-field ONET structure)
+    po_total_value: Mapped[Optional[float]] = mapped_column(
+        Numeric(12, 2),
+        nullable=True,
+        comment="PO total value from ONET (Valor Total do Pedido)"
+    )
+    
     # Relacionamentos
     tenant: Mapped["Tenant"] = relationship("Tenant", back_populates="purchase_orders")
     creator: Mapped[Optional["User"]] = relationship(
@@ -337,6 +344,18 @@ class OrderItem(Base):
     price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     status_item: Mapped[str] = mapped_column(String(50), nullable=False)
     extra_metadata: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    
+    # Financial fields (22-field ONET structure)
+    unit_value: Mapped[Optional[float]] = mapped_column(
+        Numeric(10, 2),
+        nullable=True,
+        comment="Unit value from ONET (Vl.Unit)"
+    )
+    item_total_value: Mapped[Optional[float]] = mapped_column(
+        Numeric(12, 2),
+        nullable=True,
+        comment="Item total value from ONET (Total Item = Qtd × Vl.Unit)"
+    )
     
     # Staging Area / Customization fields
     is_personalized: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

@@ -60,7 +60,7 @@ const ImportPage = () => {
             const formData = new FormData()
             formData.append('file', selectedFile)
 
-            // Default mapping for 19-field ONET structure
+            // Default mapping for 22-field ONET structure
             const defaultMapping = {
                 mappings: [
                     // Core required fields
@@ -68,7 +68,7 @@ const ImportPage = () => {
                     { column_name: 'Cliente', field_type: 'client_name' },
                     { column_name: 'SKU', field_type: 'sku' },
                     { column_name: 'Qtd', field_type: 'quantity' },
-                    // Optional ONET fields (19-field structure)
+                    // Optional ONET fields (22-field structure)
                     { column_name: 'Descrição', field_type: 'description' },
                     { column_name: 'Unidade', field_type: 'unit' },
                     { column_name: 'Largura', field_type: 'width' },
@@ -83,7 +83,11 @@ const ImportPage = () => {
                     { column_name: 'Condição Pagamento', field_type: 'payment_terms' },
                     { column_name: 'Frete', field_type: 'freight' },
                     { column_name: 'Vendedor', field_type: 'salesperson' },
-                    { column_name: 'IPI', field_type: 'ipi' }
+                    { column_name: 'IPI', field_type: 'ipi' },
+                    // NEW: Financial value fields
+                    { column_name: 'Vl.Unit', field_type: 'unit_value' },
+                    { column_name: 'Total Item', field_type: 'item_total_value' },
+                    { column_name: 'Valor Total do Pedido', field_type: 'po_total_value' }
                 ]
             }
             formData.append('mapping_json', JSON.stringify(defaultMapping))
@@ -468,7 +472,14 @@ const ImportPage = () => {
     }
 
     const canCommit = () => {
-        return allItemsChecked() && calculateSummary().withErrors === 0
+        // Check if all items are checked and have no errors
+        const allChecked = allItemsChecked()
+        const noErrors = calculateSummary().withErrors === 0
+
+        // Check if any PO has integrity errors
+        const hasIntegrityErrors = stagingData?.po_list?.some(po => po.has_integrity_error) || false
+
+        return allChecked && noErrors && !hasIntegrityErrors
     }
 
     const handleCommitAll = async () => {
@@ -809,7 +820,7 @@ const ImportPage = () => {
                                 <h3 className="text-lg font-semibold text-gray-900 mb-4">
                                     Informações do Pedido {stagingData.isMultiPO ? `(${selectedPOIndex + 1}/${stagingData.total_pos})` : ''}
                                 </h3>
-                                <div className="grid grid-cols-2 gap-4 mb-4">
+                                <div className="grid grid-cols-3 gap-4 mb-4">
                                     <div>
                                         <label className="text-sm font-medium text-gray-700">Número PO</label>
                                         <p className="text-lg font-semibold text-gray-900">{currentPO.po_number}</p>
@@ -818,7 +829,33 @@ const ImportPage = () => {
                                         <label className="text-sm font-medium text-gray-700">Cliente</label>
                                         <p className="text-lg font-semibold text-gray-900">{currentPO.client_name}</p>
                                     </div>
+                                    <div>
+                                        <label className="text-sm font-medium text-gray-700">💰 Valor Total do Pedido</label>
+                                        <p className="text-lg font-semibold text-green-600">
+                                            {currentPO.po_total_value ? `R$ ${parseFloat(currentPO.po_total_value).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'N/A'}
+                                        </p>
+                                    </div>
                                 </div>
+
+                                {/* Integrity Check Warning Banner */}
+                                {currentPO.has_integrity_error && (
+                                    <div className="mb-4 p-4 bg-red-50 border-2 border-red-300 rounded-lg">
+                                        <div className="flex items-start gap-3">
+                                            <AlertCircle className="w-6 h-6 text-red-600 flex-shrink-0 mt-0.5" />
+                                            <div className="flex-1">
+                                                <h4 className="text-sm font-bold text-red-900 mb-1">
+                                                    ⚠️ Divergência de Valores Detectada
+                                                </h4>
+                                                <p className="text-sm text-red-800">
+                                                    {currentPO.integrity_error_message || 'A soma dos itens não confere com o total do pedido.'}
+                                                </p>
+                                                <p className="text-xs text-red-700 mt-2">
+                                                    <strong>Ação necessária:</strong> Verifique os valores antes de marcar os itens como conferidos.
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
 
                                 {/* PO-Level Cost Fields */}
                                 <div className="grid grid-cols-2 gap-4 p-4 bg-green-50 border border-green-200 rounded-lg">
@@ -911,14 +948,14 @@ const ImportPage = () => {
                                             <div
                                                 key={item.id}
                                                 className={`border rounded-lg p-4 ${hasError
-                                                        ? 'border-red-300 bg-red-50'
-                                                        : item.is_checked
-                                                            ? 'border-green-300 bg-green-50'
-                                                            : 'border-gray-300 bg-gray-50'
+                                                    ? 'border-red-300 bg-red-50'
+                                                    : item.is_checked
+                                                        ? 'border-green-300 bg-green-50'
+                                                        : 'border-gray-300 bg-gray-50'
                                                     }`}
                                             >
                                                 {/* Item Header with Conferido Status */}
-                                                <div className="grid grid-cols-5 gap-4 mb-4">
+                                                <div className="grid grid-cols-6 gap-4 mb-4">
                                                     <div>
                                                         <label className="text-xs font-medium text-gray-600">SKU</label>
                                                         <p className="font-semibold text-gray-900">{item.sku}</p>
@@ -928,22 +965,37 @@ const ImportPage = () => {
                                                             </span>
                                                         )}
                                                     </div>
+                                                    <div className="col-span-2">
+                                                        <label className="text-xs font-medium text-gray-600">Descrição do Produto</label>
+                                                        <p className="font-semibold text-gray-900 text-sm truncate" title={item.description || 'N/A'}>
+                                                            {item.description || 'N/A'}
+                                                        </p>
+                                                    </div>
                                                     <div>
                                                         <label className="text-xs font-medium text-gray-600">Quantidade</label>
                                                         <p className="font-semibold text-gray-900">{item.quantity}</p>
                                                     </div>
                                                     <div>
-                                                        <label className="text-xs font-medium text-gray-600">Preço Unit.</label>
-                                                        <p className="font-semibold text-gray-900">R$ {item.price_unit.toFixed(2)}</p>
-                                                    </div>
-                                                    <div>
-                                                        <label className="text-xs font-medium text-gray-600">Total</label>
+                                                        <label className="text-xs font-medium text-gray-600">Vl.Unit</label>
                                                         <p className="font-semibold text-gray-900">
-                                                            R$ {(item.quantity * item.price_unit).toFixed(2)}
+                                                            {item.unit_value ? `R$ ${parseFloat(item.unit_value).toFixed(2)}` : `R$ ${item.price_unit.toFixed(2)}`}
                                                         </p>
                                                     </div>
                                                     <div>
-                                                        <label className="text-xs font-medium text-gray-600">Status</label>
+                                                        <label className="text-xs font-medium text-gray-600">Total Item</label>
+                                                        <p className="font-semibold text-green-600">
+                                                            {item.item_total_value
+                                                                ? `R$ ${parseFloat(item.item_total_value).toFixed(2)}`
+                                                                : `R$ ${(item.quantity * item.price_unit).toFixed(2)}`
+                                                            }
+                                                        </p>
+                                                    </div>
+                                                </div>
+
+                                                {/* Status Row */}
+                                                <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-200">
+                                                    <div>
+                                                        <label className="text-xs font-medium text-gray-600">Status de Conferência</label>
                                                         {hasError ? (
                                                             <div className="flex items-center gap-2 text-red-600">
                                                                 <AlertCircle className="w-4 h-4" />
@@ -961,6 +1013,11 @@ const ImportPage = () => {
                                                             </div>
                                                         )}
                                                     </div>
+                                                    {currentPO.has_integrity_error && (
+                                                        <div className="text-xs text-red-600 font-medium">
+                                                            ⚠️ Verifique os valores antes de conferir
+                                                        </div>
+                                                    )}
                                                 </div>
 
                                                 {/* Toggles - Now with 4 flags */}
@@ -1093,10 +1150,10 @@ const ImportPage = () => {
                                                         onClick={() => handleToggleChecked(item.id)}
                                                         disabled={hasError}
                                                         className={`w-full flex items-center justify-center gap-3 px-4 py-3 rounded-lg font-semibold transition-all ${hasError
-                                                                ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                                                                : item.is_checked
-                                                                    ? 'bg-green-600 text-white hover:bg-green-700'
-                                                                    : 'bg-blue-600 text-white hover:bg-blue-700'
+                                                            ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                                                            : item.is_checked
+                                                                ? 'bg-green-600 text-white hover:bg-green-700'
+                                                                : 'bg-blue-600 text-white hover:bg-blue-700'
                                                             }`}
                                                     >
                                                         {hasError ? (

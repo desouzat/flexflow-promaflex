@@ -10,7 +10,7 @@ from enum import Enum
 
 
 class ImportFieldType(str, Enum):
-    """Types of fields that can be imported - 19-field ONET structure"""
+    """Types of fields that can be imported - 22-field ONET structure"""
     # Core identification fields
     PO_NUMBER = "po_number"  # Pedido
     CLIENT_NAME = "client_name"  # Cliente
@@ -35,6 +35,11 @@ class ImportFieldType(str, Enum):
     IPI = "ipi"  # IPI
     FREIGHT = "freight"  # Frete
     PAYMENT_TERMS = "payment_terms"  # Condição Pagamento
+    
+    # NEW: Financial value fields (22-field structure)
+    UNIT_VALUE = "unit_value"  # Vl.Unit
+    ITEM_TOTAL_VALUE = "item_total_value"  # Total Item
+    PO_TOTAL_VALUE = "po_total_value"  # Valor Total do Pedido
     
     # Status/Control fields
     BLOCK_STATUS = "block_status"  # Bloqueio
@@ -133,7 +138,7 @@ class ImportMapping(BaseModel):
 class ImportItemData(BaseModel):
     """
     Validated data for a single item in the import.
-    Supports the full 19-field ONET structure with optional fields.
+    Supports the full 22-field ONET structure with optional fields.
     """
     # Core required fields
     sku: str = Field(..., min_length=1, max_length=100)
@@ -157,6 +162,10 @@ class ImportItemData(BaseModel):
     ipi: Optional[Decimal] = Field(None, ge=0, description="IPI value")
     freight: Optional[Decimal] = Field(None, ge=0, description="Freight cost")
     payment_terms: Optional[str] = Field(None, max_length=100, description="Payment terms")
+    
+    # NEW: Financial value fields (22-field structure)
+    unit_value: Optional[Decimal] = Field(None, ge=0, description="Unit value (Vl.Unit)")
+    item_total_value: Optional[Decimal] = Field(None, ge=0, description="Item total value (Total Item)")
     
     # Status/Control fields
     block_status: Optional[str] = Field(None, max_length=50, description="Block/Hold status")
@@ -205,6 +214,24 @@ class ImportItemData(BaseModel):
                 self.margin_item = self.price_unit - self.total_cost
         
         return self
+    
+    @model_validator(mode='after')
+    def validate_item_total(self):
+        """Validate that item_total_value matches quantity * unit_value if both are provided"""
+        if self.unit_value is not None and self.item_total_value is not None:
+            expected_total = Decimal(str(self.quantity)) * self.unit_value
+            # Allow small tolerance for floating point differences (0.01 = 1 cent)
+            tolerance = Decimal("0.01")
+            difference = abs(self.item_total_value - expected_total)
+            
+            if difference > tolerance:
+                self.validation_errors.append(
+                    f"Divergência no Total Item: Esperado {expected_total:.2f} "
+                    f"(Qtd {self.quantity} × Vl.Unit {self.unit_value:.2f}), "
+                    f"mas encontrado {self.item_total_value:.2f}"
+                )
+        
+        return self
 
 
 class ImportPOData(BaseModel):
@@ -216,11 +243,18 @@ class ImportPOData(BaseModel):
     client_name: str = Field(..., min_length=1, max_length=255)
     items: List[ImportItemData] = Field(..., min_length=1)
     
+    # NEW: PO total value from spreadsheet (22-field structure)
+    po_total_value: Optional[Decimal] = Field(None, ge=0, description="PO total value from spreadsheet (Valor Total do Pedido)")
+    
     # Calculated fields
     total_value: Optional[Decimal] = Field(None, description="Total PO value (calculated)")
     total_cost: Optional[Decimal] = Field(None, description="Total PO cost (calculated)")
     margin_global: Optional[Decimal] = Field(None, description="Global PO margin (calculated)")
     margin_percentage: Optional[Decimal] = Field(None, description="Margin percentage (calculated)")
+    
+    # Integrity check fields
+    has_integrity_error: bool = Field(default=False, description="Whether PO has integrity errors")
+    integrity_error_message: Optional[str] = Field(None, description="Integrity error details")
     
     @field_validator('po_number')
     @classmethod
@@ -269,6 +303,43 @@ class ImportPOData(BaseModel):
             # No cost data available - set to None
             self.margin_global = None
             self.margin_percentage = None
+        
+        return self
+    
+    @model_validator(mode='after')
+    def validate_po_integrity(self):
+        """
+        CRITICAL INTEGRITY CHECK:
+        Validate that the sum of all item_total_value matches po_total_value.
+        This ensures financial consistency in the PO.
+        """
+        if self.po_total_value is None:
+            # No PO total provided, skip integrity check
+            return self
+        
+        # Calculate sum of all item totals
+        items_with_totals = [item for item in self.items if item.item_total_value is not None]
+        
+        if not items_with_totals:
+            # No item totals to validate
+            return self
+        
+        calculated_sum = sum(item.item_total_value for item in items_with_totals)
+        
+        # Allow small tolerance for floating point differences (0.01 = 1 cent)
+        tolerance = Decimal("0.01")
+        difference = abs(calculated_sum - self.po_total_value)
+        
+        if difference > tolerance:
+            self.has_integrity_error = True
+            self.integrity_error_message = (
+                f"Divergência de valores: Soma dos itens (R$ {calculated_sum:.2f}) "
+                f"não confere com o total do pedido (R$ {self.po_total_value:.2f}). "
+                f"Diferença: R$ {difference:.2f}"
+            )
+        else:
+            self.has_integrity_error = False
+            self.integrity_error_message = None
         
         return self
 
