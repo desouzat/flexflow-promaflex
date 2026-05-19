@@ -56,8 +56,11 @@ class FileService:
         if not file.filename:
             return False, "No filename provided"
         
+        # Extract just the filename using os.path.basename to handle Windows paths
+        safe_filename = os.path.basename(file.filename)
+        
         # Check file extension
-        file_ext = Path(file.filename).suffix.lower()
+        file_ext = Path(safe_filename).suffix.lower()
         if file_ext not in self.ALLOWED_EXTENSIONS:
             allowed = ', '.join(self.ALLOWED_EXTENSIONS.keys())
             return False, f"Invalid file type. Allowed types: {allowed}"
@@ -103,8 +106,12 @@ class FileService:
                 detail=f"File size exceeds {size_mb}MB limit"
             )
         
+        # Extract just the filename using os.path.basename to handle Windows paths
+        # This prevents issues when browsers send full paths (e.g., C:\Users\...\file.pdf)
+        safe_filename = os.path.basename(file.filename) if file.filename else "unknown"
+        
         # Generate UUID filename
-        file_ext = Path(file.filename).suffix.lower()
+        file_ext = Path(safe_filename).suffix.lower()
         uuid_filename = f"{uuid.uuid4()}{file_ext}"
         
         # Create tenant subdirectory
@@ -126,7 +133,8 @@ class FileService:
             # If paths are on different drives on Windows, use absolute path
             relative_path = str(file_path).replace('\\', '/')
         
-        return relative_path, file.filename
+        # Return safe filename (basename only) to avoid exposing client paths
+        return relative_path, safe_filename
     
     def delete_file(self, file_path: str) -> bool:
         """

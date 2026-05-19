@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react'
-import { Upload, FileSpreadsheet, AlertCircle, CheckCircle, X, HelpCircle, Paperclip, Trash2, Cloud, ChevronLeft, ChevronRight, Globe, RefreshCw, DollarSign } from 'lucide-react'
+import { Upload, FileSpreadsheet, AlertCircle, CheckCircle, X, HelpCircle, Paperclip, Trash2, Cloud, ChevronLeft, ChevronRight, Globe, RefreshCw, DollarSign, CheckSquare, Square } from 'lucide-react'
 import api from '../utils/api'
 import { showSuccess, showError, showLoading, dismissToast } from '../utils/toast'
 import { useNotifications } from '../context/NotificationContext'
@@ -118,7 +118,8 @@ const ImportPage = () => {
                             is_replacement: false,
                             customization_notes: '',
                             attachment_path: null,
-                            needs_mapping: false
+                            needs_mapping: false,
+                            is_checked: false  // Human review flag
                         }))
                     }))
 
@@ -156,7 +157,8 @@ const ImportPage = () => {
                                 is_replacement: false,
                                 customization_notes: '',
                                 attachment_path: null,
-                                needs_mapping: false
+                                needs_mapping: false,
+                                is_checked: false  // Human review flag
                             }))
                         }],
                         total_pos: 1
@@ -266,6 +268,29 @@ const ImportPage = () => {
                             ? { ...item, customization_notes: notes }
                             : item
                     ) : []
+                }))
+            }
+        })
+    }
+
+    const handleToggleChecked = (itemId) => {
+        setStagingData(prev => {
+            if (!prev || !prev.po_list || !Array.isArray(prev.po_list)) return prev
+
+            return {
+                ...prev,
+                po_list: prev.po_list.map(po => ({
+                    ...po,
+                    items: Array.isArray(po.items) ? po.items.map(item => {
+                        if (item.id === itemId) {
+                            // Only allow checking if item has no errors
+                            const errors = validateItem(item)
+                            if (errors.length === 0) {
+                                return { ...item, is_checked: !item.is_checked }
+                            }
+                        }
+                        return item
+                    }) : []
                 }))
             }
         })
@@ -393,42 +418,47 @@ const ImportPage = () => {
         return errors
     }
 
-    const hasErrors = () => {
-        if (!stagingData || !stagingData.po_list || !Array.isArray(stagingData.po_list)) return true
+    const allItemsChecked = () => {
+        if (!stagingData || !stagingData.po_list || !Array.isArray(stagingData.po_list)) return false
 
-        // FIXED: Check ALL items across ALL POs (not just current PO)
-        // Returns TRUE if there are errors, FALSE if all valid
+        // Check if ALL items across ALL POs are checked
         for (const po of stagingData.po_list) {
             if (Array.isArray(po.items)) {
                 for (const item of po.items) {
-                    if (validateItem(item).length > 0) {
-                        return true  // Found an error
+                    if (!item.is_checked) {
+                        return false  // Found an unchecked item
                     }
                 }
             }
         }
-        return false  // No errors found, all valid
+        return true  // All items are checked
     }
 
     const calculateSummary = () => {
-        if (!stagingData || !stagingData.po_list) return { valid: 0, errors: 0 }
+        if (!stagingData || !stagingData.po_list) return { total: 0, checked: 0, unchecked: 0, withErrors: 0 }
 
-        let validCount = 0
+        let totalCount = 0
+        let checkedCount = 0
+        let uncheckedCount = 0
         let errorCount = 0
 
         stagingData.po_list.forEach(po => {
             if (Array.isArray(po.items)) {
                 po.items.forEach(item => {
-                    if (validateItem(item).length === 0) {
-                        validCount++
+                    totalCount++
+                    if (item.is_checked) {
+                        checkedCount++
                     } else {
+                        uncheckedCount++
+                    }
+                    if (validateItem(item).length > 0) {
                         errorCount++
                     }
                 })
             }
         })
 
-        return { valid: validCount, errors: errorCount }
+        return { total: totalCount, checked: checkedCount, unchecked: uncheckedCount, withErrors: errorCount }
     }
 
     const handleConfirmPO = async () => {
@@ -437,14 +467,18 @@ const ImportPage = () => {
         setShowSummaryModal(true)
     }
 
-    const handleCommitValidOnly = async () => {
-        const toastId = showLoading('Criando pedidos válidos...')
+    const canCommit = () => {
+        return allItemsChecked() && calculateSummary().withErrors === 0
+    }
+
+    const handleCommitAll = async () => {
+        const toastId = showLoading('Criando pedidos...')
 
         try {
-            // Filter only valid items
+            // All items must be checked and valid to reach here
             const validPOs = stagingData.po_list.map(po => ({
                 ...po,
-                items: po.items.filter(item => validateItem(item).length === 0)
+                items: po.items.filter(item => item.is_checked && validateItem(item).length === 0)
             })).filter(po => po.items.length > 0)
 
             // Prepare payload with all 19 fields + metadata
@@ -824,13 +858,21 @@ const ImportPage = () => {
                             {/* Items Grid with Pagination */}
                             <div className="card">
                                 <div className="flex items-center justify-between mb-4">
-                                    <h3 className="text-lg font-semibold text-gray-900">
-                                        Itens do Pedido ({currentPO && Array.isArray(currentPO.items) ? currentPO.items.length : 0} total)
-                                    </h3>
-                                    {hasErrors() && (
-                                        <div className="flex items-center gap-2 text-red-600">
+                                    <div>
+                                        <h3 className="text-lg font-semibold text-gray-900">
+                                            Itens do Pedido ({currentPO && Array.isArray(currentPO.items) ? currentPO.items.length : 0} total)
+                                        </h3>
+                                        <p className="text-sm text-gray-600 mt-1">
+                                            {(() => {
+                                                const summary = calculateSummary()
+                                                return `Conferidos: ${summary.checked} / ${summary.total}`
+                                            })()}
+                                        </p>
+                                    </div>
+                                    {!allItemsChecked() && (
+                                        <div className="flex items-center gap-2 text-yellow-600">
                                             <AlertCircle className="w-5 h-5" />
-                                            <span className="text-sm font-medium">Corrija os erros para continuar</span>
+                                            <span className="text-sm font-medium">Confira todos os itens para continuar</span>
                                         </div>
                                     )}
                                 </div>
@@ -868,21 +910,18 @@ const ImportPage = () => {
                                         return (
                                             <div
                                                 key={item.id}
-                                                className={`border rounded-lg p-4 ${hasError ? 'border-red-300 bg-red-50' : 'border-green-200 bg-green-50'
+                                                className={`border rounded-lg p-4 ${hasError
+                                                        ? 'border-red-300 bg-red-50'
+                                                        : item.is_checked
+                                                            ? 'border-green-300 bg-green-50'
+                                                            : 'border-gray-300 bg-gray-50'
                                                     }`}
                                             >
-                                                {/* Item Header with Revisado Indicator */}
-                                                <div className="grid grid-cols-4 gap-4 mb-4">
+                                                {/* Item Header with Conferido Status */}
+                                                <div className="grid grid-cols-5 gap-4 mb-4">
                                                     <div>
                                                         <label className="text-xs font-medium text-gray-600">SKU</label>
-                                                        <div className="flex items-center gap-2">
-                                                            <p className="font-semibold text-gray-900">{item.sku}</p>
-                                                            {!hasError && (
-                                                                <span className="inline-flex items-center px-2 py-1 text-xs bg-green-100 text-green-800 rounded font-medium">
-                                                                    ✓ Revisado
-                                                                </span>
-                                                            )}
-                                                        </div>
+                                                        <p className="font-semibold text-gray-900">{item.sku}</p>
                                                         {item.needs_mapping && (
                                                             <span className="inline-block mt-1 px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded">
                                                                 Precisa mapeamento
@@ -902,6 +941,25 @@ const ImportPage = () => {
                                                         <p className="font-semibold text-gray-900">
                                                             R$ {(item.quantity * item.price_unit).toFixed(2)}
                                                         </p>
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-xs font-medium text-gray-600">Status</label>
+                                                        {hasError ? (
+                                                            <div className="flex items-center gap-2 text-red-600">
+                                                                <AlertCircle className="w-4 h-4" />
+                                                                <span className="text-xs font-medium">Com Erros</span>
+                                                            </div>
+                                                        ) : item.is_checked ? (
+                                                            <div className="flex items-center gap-2 text-green-600">
+                                                                <CheckCircle className="w-4 h-4" />
+                                                                <span className="text-xs font-medium">✓ Conferido</span>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="flex items-center gap-2 text-gray-500">
+                                                                <AlertCircle className="w-4 h-4" />
+                                                                <span className="text-xs font-medium">Aguardando Conferência</span>
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 </div>
 
@@ -1017,7 +1075,7 @@ const ImportPage = () => {
 
                                                 {/* Error Messages */}
                                                 {hasError && (
-                                                    <div className="flex items-start gap-2 p-3 bg-red-100 border border-red-300 rounded-lg">
+                                                    <div className="flex items-start gap-2 p-3 bg-red-100 border border-red-300 rounded-lg mb-4">
                                                         <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
                                                         <div className="flex-1">
                                                             {errors.map((error, idx) => (
@@ -1028,6 +1086,37 @@ const ImportPage = () => {
                                                         </div>
                                                     </div>
                                                 )}
+
+                                                {/* Conferido Checkbox - PROMINENT at the end */}
+                                                <div className="pt-4 border-t border-gray-300">
+                                                    <button
+                                                        onClick={() => handleToggleChecked(item.id)}
+                                                        disabled={hasError}
+                                                        className={`w-full flex items-center justify-center gap-3 px-4 py-3 rounded-lg font-semibold transition-all ${hasError
+                                                                ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                                                                : item.is_checked
+                                                                    ? 'bg-green-600 text-white hover:bg-green-700'
+                                                                    : 'bg-blue-600 text-white hover:bg-blue-700'
+                                                            }`}
+                                                    >
+                                                        {hasError ? (
+                                                            <>
+                                                                <X className="w-5 h-5" />
+                                                                <span>Corrija os erros para conferir</span>
+                                                            </>
+                                                        ) : item.is_checked ? (
+                                                            <>
+                                                                <CheckSquare className="w-5 h-5" />
+                                                                <span>✓ CONFERIDO - Clique para desmarcar</span>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <Square className="w-5 h-5" />
+                                                                <span>Marcar como CONFERIDO</span>
+                                                            </>
+                                                        )}
+                                                    </button>
+                                                </div>
                                             </div>
                                         )
                                     })}
@@ -1079,7 +1168,9 @@ const ImportPage = () => {
                                 </button>
                                 <button
                                     onClick={handleConfirmPO}
-                                    className="btn-primary"
+                                    disabled={!canCommit()}
+                                    className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                                    title={!canCommit() ? 'Confira todos os itens e corrija erros antes de confirmar' : 'Confirmar todos os pedidos'}
                                 >
                                     <CheckCircle className="w-5 h-5 mr-2" />
                                     Confirmar Pedido
@@ -1131,31 +1222,49 @@ const ImportPage = () => {
                     <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
                         <div className="p-6">
                             <h3 className="text-xl font-bold text-gray-900 mb-4">
-                                Resumo do Pedido
+                                📋 Resumo da Conferência
                             </h3>
                             <div className="space-y-3 mb-6">
-                                <div className="flex items-center justify-between p-3 bg-green-50 border border-green-200 rounded-lg">
-                                    <span className="text-sm font-medium text-green-900">Itens Válidos</span>
-                                    <span className="text-2xl font-bold text-green-600">{commitSummary.valid}</span>
+                                <div className="flex items-center justify-between p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                                    <span className="text-sm font-medium text-blue-900">Total de Itens</span>
+                                    <span className="text-2xl font-bold text-blue-600">{commitSummary.total}</span>
                                 </div>
-                                {commitSummary.errors > 0 && (
+                                <div className="flex items-center justify-between p-3 bg-green-50 border border-green-200 rounded-lg">
+                                    <span className="text-sm font-medium text-green-900">✓ Itens Conferidos</span>
+                                    <span className="text-2xl font-bold text-green-600">{commitSummary.checked}</span>
+                                </div>
+                                {commitSummary.unchecked > 0 && (
+                                    <div className="flex items-center justify-between p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                                        <span className="text-sm font-medium text-yellow-900">Aguardando Conferência</span>
+                                        <span className="text-2xl font-bold text-yellow-600">{commitSummary.unchecked}</span>
+                                    </div>
+                                )}
+                                {commitSummary.withErrors > 0 && (
                                     <div className="flex items-center justify-between p-3 bg-red-50 border border-red-200 rounded-lg">
-                                        <span className="text-sm font-medium text-red-900">Itens com Erros</span>
-                                        <span className="text-2xl font-bold text-red-600">{commitSummary.errors}</span>
+                                        <span className="text-sm font-medium text-red-900">Com Erros</span>
+                                        <span className="text-2xl font-bold text-red-600">{commitSummary.withErrors}</span>
                                     </div>
                                 )}
                             </div>
 
-                            {commitSummary.errors > 0 ? (
-                                <div className="mb-6 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                                    <p className="text-sm text-yellow-800">
-                                        <strong>⚠️ Atenção:</strong> Alguns itens possuem erros. Você pode confirmar apenas os itens válidos ou corrigir os erros primeiro.
+                            {commitSummary.checked === commitSummary.total && commitSummary.withErrors === 0 ? (
+                                <div className="mb-6 p-4 bg-green-50 border-2 border-green-300 rounded-lg">
+                                    <p className="text-sm text-green-900 font-semibold">
+                                        <strong>✅ Conferência Completa!</strong>
+                                    </p>
+                                    <p className="text-sm text-green-800 mt-1">
+                                        Todos os {commitSummary.total} itens foram conferidos e estão prontos para envio à fábrica.
                                     </p>
                                 </div>
                             ) : (
-                                <div className="mb-6 p-3 bg-green-50 border border-green-200 rounded-lg">
-                                    <p className="text-sm text-green-800">
-                                        <strong>✅ Tudo certo!</strong> Todos os itens estão válidos e prontos para serem confirmados.
+                                <div className="mb-6 p-4 bg-red-50 border-2 border-red-300 rounded-lg">
+                                    <p className="text-sm text-red-900 font-semibold">
+                                        <strong>❌ Conferência Incompleta</strong>
+                                    </p>
+                                    <p className="text-sm text-red-800 mt-1">
+                                        {commitSummary.unchecked > 0 && `${commitSummary.unchecked} item(ns) ainda não conferido(s). `}
+                                        {commitSummary.withErrors > 0 && `${commitSummary.withErrors} item(ns) com erros. `}
+                                        Você deve conferir TODOS os itens antes de enviar à fábrica.
                                     </p>
                                 </div>
                             )}
@@ -1165,14 +1274,14 @@ const ImportPage = () => {
                                     onClick={() => setShowSummaryModal(false)}
                                     className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors"
                                 >
-                                    Voltar e Corrigir
+                                    Voltar
                                 </button>
-                                {commitSummary.valid > 0 && (
+                                {commitSummary.checked === commitSummary.total && commitSummary.withErrors === 0 && (
                                     <button
-                                        onClick={handleCommitValidOnly}
-                                        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                                        onClick={handleCommitAll}
+                                        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-semibold"
                                     >
-                                        Confirmar {commitSummary.errors > 0 ? 'Apenas Válidos' : 'Todos'}
+                                        ✓ Confirmar Todos ({commitSummary.total} itens)
                                     </button>
                                 )}
                             </div>
