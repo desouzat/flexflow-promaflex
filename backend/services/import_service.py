@@ -463,6 +463,40 @@ class ImportService:
                     pass
         
         # ============================================================
+        # NEW: FINANCIAL VALUE FIELDS (22-field structure)
+        # ============================================================
+        
+        # Unit Value (Vl.Unit)
+        if ImportFieldType.UNIT_VALUE in field_to_column:
+            unit_value_col = field_to_column[ImportFieldType.UNIT_VALUE]
+            if not pd.isna(row[unit_value_col]):
+                try:
+                    # Handle string values with currency symbols or commas
+                    value = row[unit_value_col]
+                    if isinstance(value, str):
+                        cleaned = value.strip().replace('R$', '').replace('$', '')
+                        cleaned = cleaned.replace(',', '').replace(' ', '')
+                        value = cleaned
+                    data['unit_value'] = Decimal(str(value))
+                except (InvalidOperation, ValueError):
+                    pass  # Skip invalid values
+        
+        # Item Total Value (Total Item)
+        if ImportFieldType.ITEM_TOTAL_VALUE in field_to_column:
+            item_total_col = field_to_column[ImportFieldType.ITEM_TOTAL_VALUE]
+            if not pd.isna(row[item_total_col]):
+                try:
+                    # Handle string values with currency symbols or commas
+                    value = row[item_total_col]
+                    if isinstance(value, str):
+                        cleaned = value.strip().replace('R$', '').replace('$', '')
+                        cleaned = cleaned.replace(',', '').replace(' ', '')
+                        value = cleaned
+                    data['item_total_value'] = Decimal(str(value))
+                except (InvalidOperation, ValueError):
+                    pass  # Skip invalid values
+        
+        # ============================================================
         # OPTIONAL COST FIELDS (Legacy support or explicit cost imports)
         # ============================================================
         
@@ -562,7 +596,8 @@ class ImportService:
                 po_groups[po_number] = {
                     'po_number': po_number,
                     'client_name': client_name,
-                    'items': []
+                    'items': [],
+                    'po_total_value': row_data.get('po_total_value')  # Capture PO-level total from first row
                 }
             
             # Verify client name consistency within each PO
@@ -600,7 +635,10 @@ class ImportService:
                     payment_terms=row_data.get('payment_terms'),
                     freight=row_data.get('freight'),
                     salesperson=row_data.get('salesperson'),
-                    ipi=row_data.get('ipi')
+                    ipi=row_data.get('ipi'),
+                    # NEW: Financial value fields
+                    unit_value=row_data.get('unit_value'),
+                    item_total_value=row_data.get('item_total_value')
                 )
                 po_groups[po_number]['items'].append(item)
             except Exception as e:
@@ -626,7 +664,8 @@ class ImportService:
                 po_data = ImportPOData(
                     po_number=po_group['po_number'],
                     client_name=po_group['client_name'],
-                    items=po_group['items']
+                    items=po_group['items'],
+                    po_total_value=po_group.get('po_total_value')  # Include PO-level total
                 )
                 po_data_list.append(po_data)
             

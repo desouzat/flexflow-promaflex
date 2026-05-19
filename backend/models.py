@@ -156,6 +156,11 @@ class User(Base):
         back_populates="changed_by_user",
         foreign_keys="AuditLog.changed_by"
     )
+    support_tickets: Mapped[List["SupportTicket"]] = relationship(
+        "SupportTicket",
+        back_populates="user",
+        cascade="all, delete-orphan"
+    )
     
     # Índices e Constraints
     __table_args__ = (
@@ -699,3 +704,63 @@ class GlobalConfig(Base):
     
     def __repr__(self):
         return f"<GlobalConfig(id={self.id}, key={self.config_key}, value={self.config_value})>"
+
+
+# ============================================================================
+# MODELO: SupportTicket (Sistema de Suporte)
+# ============================================================================
+
+class SupportTicket(Base):
+    """
+    Modelo de Ticket de Suporte.
+    Permite que usuários reportem problemas e recebam assistência técnica.
+    """
+    __tablename__ = "support_tickets"
+    
+    # Colunas
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False
+    )
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(50),
+        default="OPEN",
+        nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now()
+    )
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+    
+    # Relacionamentos
+    user: Mapped["User"] = relationship("User", back_populates="support_tickets")
+    
+    # Índices e constraints
+    __table_args__ = (
+        Index('idx_support_ticket_user_id', 'user_id'),
+        Index('idx_support_ticket_status', 'status'),
+        Index('idx_support_ticket_created_at', 'created_at'),
+        CheckConstraint(
+            "status IN ('OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED')",
+            name='ck_support_ticket_status'
+        ),
+    )
+    
+    def __repr__(self):
+        return f"<SupportTicket(id={self.id}, user_id={self.user_id}, status={self.status})>"

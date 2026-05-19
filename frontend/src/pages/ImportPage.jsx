@@ -111,11 +111,23 @@ const ImportPage = () => {
                         client_name: po.client_name,
                         freight_cost: 0,
                         additional_costs: 0,
+                        po_total_value: po.po_total_value || null,  // PO-level total from ONET
+                        has_integrity_error: po.has_integrity_error || false,
+                        integrity_error_message: po.integrity_error_message || null,
                         items: po.items.map((item, index) => ({
                             id: `${po.po_number}-${index + 1}`,
                             sku: item.sku,
+                            description: item.description || null,
                             quantity: item.quantity,
                             price_unit: item.price_unit || 0,
+                            unit_value: item.unit_value || null,  // Vl.Unit from ONET
+                            item_total_value: item.item_total_value || null,  // Total Item from ONET
+                            // Risk fields from ONET
+                            block_status: item.block_status || null,
+                            balance: item.balance || null,
+                            delay: item.delay || null,
+                            payment_terms: item.payment_terms || null,
+                            // Metadata flags
                             is_personalized: false,
                             is_new_client: false,
                             is_export: false,
@@ -150,11 +162,23 @@ const ImportPage = () => {
                             client_name: response.data.client_name,
                             freight_cost: 0,
                             additional_costs: 0,
+                            po_total_value: response.data.po_total_value || null,
+                            has_integrity_error: response.data.has_integrity_error || false,
+                            integrity_error_message: response.data.integrity_error_message || null,
                             items: response.data.items.map((item, index) => ({
                                 id: index + 1,
                                 sku: item.sku,
+                                description: item.description || null,
                                 quantity: item.quantity,
                                 price_unit: item.price_unit || 0,
+                                unit_value: item.unit_value || null,
+                                item_total_value: item.item_total_value || null,
+                                // Risk fields
+                                block_status: item.block_status || null,
+                                balance: item.balance || null,
+                                delay: item.delay || null,
+                                payment_terms: item.payment_terms || null,
+                                // Metadata flags
                                 is_personalized: false,
                                 is_new_client: false,
                                 is_export: false,
@@ -991,6 +1015,62 @@ const ImportPage = () => {
                                                         </p>
                                                     </div>
                                                 </div>
+
+                                                {/* Risk Panel (Painel de Risco) - Credit & Terms Gate */}
+                                                {(item.block_status || item.balance !== null || item.delay !== null || item.payment_terms) && (
+                                                    <div className="mb-4 p-4 bg-yellow-50 border-2 border-yellow-300 rounded-lg">
+                                                        <h4 className="text-sm font-bold text-yellow-900 mb-3 flex items-center gap-2">
+                                                            <AlertCircle className="w-5 h-5" />
+                                                            🚨 Painel de Risco - Gate Financeiro
+                                                        </h4>
+                                                        <div className="grid grid-cols-2 gap-3">
+                                                            {item.block_status && (
+                                                                <div className={`p-3 rounded-lg ${item.block_status === 'BLOQUEADO' ? 'bg-red-100 border-2 border-red-400' : 'bg-green-100 border border-green-300'}`}>
+                                                                    <label className="text-xs font-medium text-gray-700">Bloqueio</label>
+                                                                    <p className={`text-sm font-bold ${item.block_status === 'BLOQUEADO' ? 'text-red-700' : 'text-green-700'}`}>
+                                                                        {item.block_status}
+                                                                    </p>
+                                                                    {item.block_status === 'BLOQUEADO' && (
+                                                                        <p className="text-xs text-red-600 mt-1">
+                                                                            ⚠️ Intervenção do Financeiro necessária
+                                                                        </p>
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                            {item.balance !== null && (
+                                                                <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                                                                    <label className="text-xs font-medium text-gray-700">Saldo</label>
+                                                                    <p className="text-sm font-bold text-blue-700">
+                                                                        R$ {parseFloat(item.balance).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                                    </p>
+                                                                </div>
+                                                            )}
+                                                            {item.delay !== null && (
+                                                                <div className={`p-3 rounded-lg ${item.delay > 0 ? 'bg-orange-100 border-2 border-orange-400' : 'bg-green-100 border border-green-300'}`}>
+                                                                    <label className="text-xs font-medium text-gray-700">Atraso</label>
+                                                                    <p className={`text-sm font-bold ${item.delay > 0 ? 'text-orange-700' : 'text-green-700'}`}>
+                                                                        {item.delay > 0 ? `${item.delay} dias` : 'Em dia'}
+                                                                    </p>
+                                                                </div>
+                                                            )}
+                                                            {item.payment_terms && (
+                                                                <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg">
+                                                                    <label className="text-xs font-medium text-gray-700">Condição Pagamento</label>
+                                                                    <p className="text-sm font-bold text-purple-700">
+                                                                        {item.payment_terms}
+                                                                    </p>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                        {item.block_status === 'BLOQUEADO' && (
+                                                            <div className="mt-3 p-2 bg-red-50 border border-red-300 rounded">
+                                                                <p className="text-xs text-red-800">
+                                                                    <strong>🔒 GATE ATIVO:</strong> Este pedido está bloqueado e requer aprovação do Financeiro antes de prosseguir.
+                                                                </p>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
 
                                                 {/* Status Row */}
                                                 <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-200">
