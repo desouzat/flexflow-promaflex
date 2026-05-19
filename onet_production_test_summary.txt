@@ -1,36 +1,48 @@
-FLEXFLOW - RESUMO DO ARQUIVO DE TESTE DE PRODUÇÃO
+FLEXFLOW - RESUMO DO ARQUIVO DE TESTE DE PRODUÇÃO (22 CAMPOS)
 ================================================================================
 
 Arquivo gerado: onet_production_test_50_rows.xlsx
-Data de geração: 15/05/2026 11:22:58
+Data de geração: 19/05/2026 10:50:03
 Total de linhas: 50
-Total de campos: 19
+Total de campos: 22
+Total de POs únicos: 15
 
 ESTATÍSTICAS:
-  - SKUs existentes: 36
-  - SKUs novos: 14
-  - Crédito bloqueado: 6
-  - Pedidos Replacement: 14
-  - Itens personalizados: 13
-  - Pedidos com atraso: 3
+  - SKUs existentes: 39
+  - SKUs novos: 11
+  - Crédito bloqueado: 5
+  - Pedidos Replacement: 6
+  - Itens personalizados: 15
+  - Pedidos com atraso: 7
 
-CAMPOS (19):
-   1. Pedido
-   2. Cliente
-   3. SKU
-   4. Descrição
-   5. Qtd
-   6. Unidade
-   7. Largura
-   8. Comprimento
-   9. Lead Time
-  10. Data Entrega
-  11. Data Faturamento
-  12. % ICMS
-  13. Bloqueio
-  14. Saldo
-  15. Atraso
-  16. Condição Pagamento
-  17. Frete
-  18. Vendedor
-  19. IPI
+ESTATÍSTICAS FINANCEIRAS:
+  - Valor Total dos Itens: R$ 2,103,025.00
+  - Valor Unitário Médio: R$ 73.99
+
+CAMPOS (22):
+   1. Pedido 
+   2. Cliente 
+   3. SKU 
+   4. Descrição 
+   5. Qtd 
+   6. Unidade 
+   7. Largura 
+   8. Comprimento 
+   9. Lead Time 
+  10. Data Entrega 
+  11. Data Faturamento 
+  12. % ICMS 
+  13. Bloqueio 
+  14. Saldo 
+  15. Atraso 
+  16. Condição Pagamento 
+  17. Frete 
+  18. Vendedor 
+  19. IPI 
+  20. Vl.Unit [NOVO]
+  21. Total Item [NOVO]
+  22. Valor Total do Pedido [NOVO]
+
+INTEGRIDADE FINANCEIRA:
+  ✓ Total Item = Qtd × Vl.Unit (validado)
+  ✓ Valor Total do Pedido = Σ Total Item por PO (validado)

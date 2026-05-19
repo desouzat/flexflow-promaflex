@@ -116,6 +116,9 @@ def generate_onet_mock():
     
     data = []
     po_totals = {}  # Track total value per PO
+    po_clients = {}  # Track client per PO (CONSISTENCY FIX)
+    po_sellers = {}  # Track seller per PO (CONSISTENCY FIX)
+    po_payment_terms = {}  # Track payment terms per PO (CONSISTENCY FIX)
     
     # Gerar 50 linhas com variação realista
     for i in range(50):
@@ -181,11 +184,20 @@ def generate_onet_mock():
         # Track PO totals for Valor Total do Pedido
         if po_number not in po_totals:
             po_totals[po_number] = 0.0
+            # CONSISTENCY FIX: Assign client, seller, and payment terms once per PO
+            po_clients[po_number] = random.choice(clients)
+            po_sellers[po_number] = random.choice(sellers)
+            po_payment_terms[po_number] = random.choice(payment_terms)
         po_totals[po_number] += item_total
+        
+        # Use consistent client, seller, and payment terms for this PO
+        client_name = po_clients[po_number]
+        seller_name = po_sellers[po_number]
+        payment_term = po_payment_terms[po_number]
         
         row = {
             'Pedido': po_number,
-            'Cliente': random.choice(clients),
+            'Cliente': client_name,  # CONSISTENCY FIX: Use PO-specific client
             'SKU': sku,
             'Descrição': description,
             'Qtd': quantity,
@@ -199,9 +211,9 @@ def generate_onet_mock():
             'Bloqueio': credit_status,
             'Saldo': balance,
             'Atraso': delay_days,
-            'Condição Pagamento': random.choice(payment_terms),
+            'Condição Pagamento': payment_term,  # CONSISTENCY FIX: Use PO-specific payment term
             'Frete': freight,
-            'Vendedor': random.choice(sellers),
+            'Vendedor': seller_name,  # CONSISTENCY FIX: Use PO-specific seller
             'IPI': ipi_rate,
             'Vl.Unit': unit_value,
             'Total Item': item_total,
