@@ -78,6 +78,7 @@ const ImportPage = () => {
     const [showFinanceModal, setShowFinanceModal] = useState(false)
     const [selectedFinanceItem, setSelectedFinanceItem] = useState(null)
     const [financeJustification, setFinanceJustification] = useState('')
+    const [financeSubmitting, setFinanceSubmitting] = useState(false)
     const fileInputRef = useRef(null)
     const { refreshNotifications } = useNotifications()
     const { user } = useAuth()
@@ -1723,30 +1724,87 @@ const ImportPage = () => {
                         stagingData?.po_number ||
                         'N/A'
                     }
-                    onApprove={(justification) => {
-                        // Mark item as finance-approved in staging state (UI-only, Step 2)
-                        // Full API call will be wired in Hardening Step 3
-                        console.log('✅ [Finance] APPROVED:', {
-                            sku: selectedFinanceItem.sku,
-                            justification
-                        })
-                        showSuccess(`Item ${selectedFinanceItem.sku || ''} aprovado financeiramente.`)
-                        setShowFinanceModal(false)
-                        setSelectedFinanceItem(null)
-                        setFinanceJustification('')
+                    submitting={financeSubmitting}
+                    onApprove={async (justification) => {
+                        if (!selectedFinanceItem?.id) {
+                            showError('Item sem ID — não é possível registrar a decisão. Faça commit antes de aprovar.')
+                            return
+                        }
+                        setFinanceSubmitting(true)
+                        try {
+                            const resp = await api.post('/api/import/finance-decision', {
+                                item_id: selectedFinanceItem.id,
+                                decision: 'APPROVE',
+                                justification
+                            })
+                            // Optimistic update: reflect new status in staging data immediately
+                            setStagingData(prev => {
+                                if (!prev) return prev
+                                const updatedPoList = (prev.po_list || []).map((po, idx) => {
+                                    if (idx !== selectedPOIndex) return po
+                                    return {
+                                        ...po,
+                                        items: (po.items || []).map(it =>
+                                            it.id === selectedFinanceItem.id
+                                                ? { ...it, status_item: 'FINANCE_APPROVED' }
+                                                : it
+                                        )
+                                    }
+                                })
+                                return { ...prev, po_list: updatedPoList }
+                            })
+                            showSuccess(`✅ Item ${selectedFinanceItem.sku || ''} aprovado. Audit log: ${resp.data?.audit_hash || '...'}...`)
+                            setShowFinanceModal(false)
+                            setSelectedFinanceItem(null)
+                            setFinanceJustification('')
+                        } catch (err) {
+                            const detail = err.response?.data?.detail || err.message || 'Erro desconhecido'
+                            showError(`❌ Falha ao aprovar: ${detail}`)
+                        } finally {
+                            setFinanceSubmitting(false)
+                        }
                     }}
-                    onReject={(justification) => {
-                        // Mark item as finance-rejected in staging state (UI-only, Step 2)
-                        console.log('❌ [Finance] REJECTED:', {
-                            sku: selectedFinanceItem.sku,
-                            justification
-                        })
-                        showError(`Item ${selectedFinanceItem.sku || ''} rejeitado pelo financeiro.`)
-                        setShowFinanceModal(false)
-                        setSelectedFinanceItem(null)
-                        setFinanceJustification('')
+                    onReject={async (justification) => {
+                        if (!selectedFinanceItem?.id) {
+                            showError('Item sem ID — não é possível registrar a decisão. Faça commit antes de rejeitar.')
+                            return
+                        }
+                        setFinanceSubmitting(true)
+                        try {
+                            const resp = await api.post('/api/import/finance-decision', {
+                                item_id: selectedFinanceItem.id,
+                                decision: 'REJECT',
+                                justification
+                            })
+                            // Optimistic update
+                            setStagingData(prev => {
+                                if (!prev) return prev
+                                const updatedPoList = (prev.po_list || []).map((po, idx) => {
+                                    if (idx !== selectedPOIndex) return po
+                                    return {
+                                        ...po,
+                                        items: (po.items || []).map(it =>
+                                            it.id === selectedFinanceItem.id
+                                                ? { ...it, status_item: 'FINANCE_REJECTED' }
+                                                : it
+                                        )
+                                    }
+                                })
+                                return { ...prev, po_list: updatedPoList }
+                            })
+                            showError(`❌ Item ${selectedFinanceItem.sku || ''} rejeitado. Audit: ${resp.data?.audit_hash || '...'}...`)
+                            setShowFinanceModal(false)
+                            setSelectedFinanceItem(null)
+                            setFinanceJustification('')
+                        } catch (err) {
+                            const detail = err.response?.data?.detail || err.message || 'Erro desconhecido'
+                            showError(`❌ Falha ao rejeitar: ${detail}`)
+                        } finally {
+                            setFinanceSubmitting(false)
+                        }
                     }}
                     onClose={() => {
+                        if (financeSubmitting) return // block close during submit
                         setShowFinanceModal(false)
                         setSelectedFinanceItem(null)
                         setFinanceJustification('')

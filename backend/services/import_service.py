@@ -767,6 +767,31 @@ class ImportService:
                     validation_result=validation_result
                 )
             
+            # Step 4a: Mesa de Conferência — Final Financial Integrity Gate
+            # ─────────────────────────────────────────────────────────────────────
+            # For every PO that supplies both po_total_value AND per-item totals,
+            # verify: Σ(item_total_value) ≈ po_total_value (tolerance = R$ 0.01).
+            # If the difference exceeds the tolerance, BLOCK the finalization and
+            # return a clear error to the UI — do NOT silently accept divergent data.
+            integrity_errors = []
+            for po_data in validation_result.po_data_list or []:
+                if po_data.has_integrity_error and po_data.integrity_error_message:
+                    # The ImportPOData validator already ran this check (import_schema.py).
+                    # Here we convert it from a non-blocking flag to a HARD block.
+                    integrity_errors.append(
+                        f"PO {po_data.po_number}: {po_data.integrity_error_message}"
+                    )
+
+            if integrity_errors:
+                return ImportResponse(
+                    success=False,
+                    message=(
+                        "❌ Bloqueio de Integridade Financeira (Mesa de Conferência): "
+                        + " | ".join(integrity_errors)
+                    ),
+                    items_imported=0
+                )
+
             # Step 4: Prepare response with multi-PO support
             po_data_list = validation_result.po_data_list or []
             total_items = sum(len(po.items) for po in po_data_list)

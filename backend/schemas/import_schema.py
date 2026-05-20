@@ -434,3 +434,84 @@ class ImportResponse(BaseModel):
     total_cost: Optional[Decimal] = Field(None, description="Total PO cost")
     margin_global: Optional[Decimal] = Field(None, description="Global margin")
     margin_percentage: Optional[Decimal] = Field(None, description="Margin percentage")
+
+
+# ============================================================================
+# FINANCE APPROVAL SCHEMAS
+# ============================================================================
+
+class FinanceDecision(str, Enum):
+    """
+    Decision type for the Finance Approval workflow.
+    Used by POST /api/import/finance-decision.
+    """
+    APPROVE = "APPROVE"
+    REJECT = "REJECT"
+
+
+class FinanceDecisionRequest(BaseModel):
+    """
+    Request body for the Finance Approval endpoint.
+
+    Business rules enforced here (Pydantic layer):
+      - item_id must be a valid UUID string
+      - decision must be APPROVE or REJECT
+      - justification must be at least 20 characters (prevents empty rubber-stamps)
+
+    An AuditLog v2 entry is created server-side with:
+      - to_status = "FINANCE_APPROVED" or "FINANCE_REJECTED"
+      - extra_data = {"justification": <justification>, "decision": <decision>}
+      - hash_version = 2 (includes tenant_id in SHA-256)
+    """
+    item_id: str = Field(
+        ...,
+        description="UUID of the staging item being reviewed"
+    )
+    decision: FinanceDecision = Field(
+        ...,
+        description="Finance decision: APPROVE or REJECT"
+    )
+    justification: str = Field(
+        ...,
+        min_length=20,
+        max_length=2000,
+        description="Written justification (min 20 chars, required for audit trail)"
+    )
+
+    @field_validator("item_id")
+    @classmethod
+    def validate_item_id_format(cls, v: str) -> str:
+        """Ensure item_id is a valid UUID string to prevent injection."""
+        import uuid as _uuid
+        try:
+            _uuid.UUID(v)
+        except ValueError:
+            raise ValueError(f"item_id must be a valid UUID, got: {v!r}")
+        return v
+
+    @field_validator("justification")
+    @classmethod
+    def validate_justification_not_whitespace(cls, v: str) -> str:
+        """Ensure justification is not just whitespace."""
+        stripped = v.strip()
+        if len(stripped) < 20:
+            raise ValueError(
+                f"Justification must have at least 20 non-whitespace characters "
+                f"(got {len(stripped)} after stripping)"
+            )
+        return stripped
+
+
+class FinanceDecisionResponse(BaseModel):
+    """
+    Response from POST /api/import/finance-decision.
+    Returns the audit log details for frontend confirmation.
+    """
+    success: bool = Field(..., description="Whether the decision was recorded")
+    message: str = Field(..., description="Human-readable confirmation")
+    item_id: str = Field(..., description="UUID of the item that was decided on")
+    decision: FinanceDecision = Field(..., description="The decision that was recorded")
+    new_status: str = Field(..., description="New item status after decision")
+    audit_log_id: Optional[str] = Field(None, description="ID of the created AuditLog entry")
+    audit_hash: Optional[str] = Field(None, description="SHA-256 hash of the audit entry (first 16 chars)")
+

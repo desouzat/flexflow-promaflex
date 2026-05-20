@@ -7,6 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status,
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import json
+import uuid
+from datetime import datetime, timezone
 
 from backend.schemas.import_schema import (
     ImportMapping,
@@ -14,13 +16,17 @@ from backend.schemas.import_schema import (
     ImportRequest,
     ColumnMapping,
     ImportFieldType,
-    ImportItemData
+    ImportItemData,
+    FinanceDecisionRequest,
+    FinanceDecisionResponse,
+    FinanceDecision
 )
 from backend.schemas.auth_schema import UserInfo
 from backend.services.import_service import ImportService
 from backend.services.file_service import FileService
 from backend.database import get_db
 from backend.routers.auth import get_current_user
+from backend.models import OrderItem, AuditLog
 
 router = APIRouter(prefix="/api/import", tags=["Import"])
 
@@ -614,3 +620,128 @@ async def sync_s3_bucket(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erro ao sincronizar com S3: {str(e)}"
         )
+
+
+@router.post("/finance-decision", response_model=FinanceDecisionResponse)
+async def record_finance_decision(
+    request: FinanceDecisionRequest,
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Record a Finance Approval or Rejection decision for a staging item.
+
+    **Business Rules:**
+    - The item must belong to the current user's tenant (enforced).
+    - Justification must be at least 20 characters.
+    - Creates an immutable AuditLog v2 entry with `tenant_id` in the SHA-256 hash.
+    - The `justification` is stored in `extra_data` for full traceability.
+
+    **Status transitions:**
+    - APPROVE → item status becomes `FINANCE_APPROVED`
+    - REJECT  → item status becomes `FINANCE_REJECTED`
+
+    **Returns:**
+    - Decision confirmation with audit log ID and hash prefix
+    """
+    # ─── 1. Resolve item ────────────────────────────────────────────────────────────
+    item_uuid = uuid.UUID(request.item_id)  # already validated by Pydantic
+    tenant_uuid = uuid.UUID(str(current_user.tenant_id))
+    user_uuid = uuid.UUID(str(current_user.id))
+
+    item: OrderItem | None = (
+        db.query(OrderItem)
+        .filter(
+            OrderItem.id == item_uuid,
+            OrderItem.tenant_id == tenant_uuid  # multi-tenant guard
+        )
+        .first()
+    )
+
+    if item is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                f"Item {request.item_id!r} not found or does not belong "
+                f"to this tenant."
+            )
+        )
+
+    # ─── 2. Determine new status ───────────────────────────────────────────────────
+    from_status = item.status_item
+    new_status = (
+        "FINANCE_APPROVED"
+        if request.decision == FinanceDecision.APPROVE
+        else "FINANCE_REJECTED"
+    )
+
+    # ─── 3. Create AuditLog v2 entry ──────────────────────────────────────────────
+    now = datetime.now(timezone.utc)
+
+    # Fetch the previous hash from the most recent audit log for this item (for chaining)
+    previous_log = (
+        db.query(AuditLog)
+        .filter(AuditLog.item_id == item_uuid)
+        .order_by(AuditLog.created_at.desc())
+        .first()
+    )
+    previous_hash: str | None = previous_log.hash if previous_log else None
+
+    # Compute v2 hash — includes tenant_id to prevent cross-tenant collisions
+    computed_hash = AuditLog.calculate_hash_v2(
+        tenant_id=tenant_uuid,
+        item_id=item_uuid,
+        from_status=from_status,
+        to_status=new_status,
+        timestamp=now,
+        previous_hash=previous_hash,
+        changed_by=user_uuid
+    )
+
+    audit_log = AuditLog(
+        id=uuid.uuid4(),
+        item_id=item_uuid,
+        from_status=from_status,
+        to_status=new_status,
+        hash=computed_hash,
+        previous_hash=previous_hash,
+        hash_version=AuditLog.HASH_VERSION_CURRENT,  # v2
+        is_exception=(request.decision == FinanceDecision.REJECT),
+        justification=request.justification,
+        changed_by=user_uuid,
+        extra_data={
+            "decision": request.decision.value,
+            "justification": request.justification,
+            "finance_reviewer_id": str(user_uuid),
+            "finance_reviewer_name": getattr(current_user, 'name', str(user_uuid)),
+            "workflow": "FINANCE_APPROVAL"
+        }
+    )
+
+    # ─── 4. Persist ──────────────────────────────────────────────────────────────
+    try:
+        item.status_item = new_status
+        db.add(audit_log)
+        db.commit()
+        db.refresh(audit_log)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to record finance decision: {str(exc)}"
+        ) from exc
+
+    # ─── 5. Return confirmation ───────────────────────────────────────────────────────
+    action_label = "aprovado" if request.decision == FinanceDecision.APPROVE else "rejeitado"
+    return FinanceDecisionResponse(
+        success=True,
+        message=(
+            f"Item {request.item_id[:8]}... {action_label} financeiramente. "
+            f"Audit log v2 registrado."
+        ),
+        item_id=request.item_id,
+        decision=request.decision,
+        new_status=new_status,
+        audit_log_id=str(audit_log.id),
+        audit_hash=computed_hash[:16]  # prefix only — never expose full hash in response
+    )
