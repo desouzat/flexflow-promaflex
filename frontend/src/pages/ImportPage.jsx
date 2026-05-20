@@ -1,13 +1,20 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { Upload, FileSpreadsheet, AlertCircle, CheckCircle, X, HelpCircle, Paperclip, Trash2, Cloud, ChevronLeft, ChevronRight, Globe, RefreshCw, DollarSign, CheckSquare, Square } from 'lucide-react'
+import { Upload, FileSpreadsheet, AlertCircle, CheckCircle, X, HelpCircle, Paperclip, Trash2, Cloud, ChevronLeft, ChevronRight, Globe, RefreshCw, DollarSign, CheckSquare, Square, Lock, Unlock } from 'lucide-react'
 import api from '../utils/api'
 import { showSuccess, showError, showLoading, dismissToast } from '../utils/toast'
 import { useNotifications } from '../context/NotificationContext'
+import { useAuth } from '../context/AuthContext'
 import HelpModal from '../components/HelpModal'
 import { getHelpForStatus } from '../config/helpConfig'
 
 const ITEMS_PER_PAGE = 10
 const STORAGE_KEY = 'flexflow_staging_session'
+
+// Mock function to send finance notification
+const sendFinanceNotification = (poNumber, itemSku) => {
+    console.log(`📧 EMAIL SENT TO FINANCE: PO [${poNumber}] - Item [${itemSku}] needs approval`)
+    return true
+}
 
 // Brazilian currency formatter
 const formatCurrency = (value) => {
@@ -33,60 +40,87 @@ const ImportPage = () => {
     const [showSummaryModal, setShowSummaryModal] = useState(false)
     const [commitSummary, setCommitSummary] = useState({ valid: 0, errors: 0 })
     const [showRestoreModal, setShowRestoreModal] = useState(false)
+    const [showFinanceModal, setShowFinanceModal] = useState(false)
+    const [selectedFinanceItem, setSelectedFinanceItem] = useState(null)
+    const [financeJustification, setFinanceJustification] = useState('')
     const fileInputRef = useRef(null)
     const { refreshNotifications } = useNotifications()
+    const { user } = useAuth()
 
     // Session persistence: Save to localStorage whenever stagingData changes
     useEffect(() => {
         if (stagingData) {
             try {
+                console.log('💾 [Session] Saving session to localStorage:', {
+                    timestamp: new Date().toISOString(),
+                    selectedPOIndex,
+                    currentPage,
+                    totalPOs: stagingData.po_list?.length || 0
+                })
                 localStorage.setItem(STORAGE_KEY, JSON.stringify({
                     stagingData,
                     selectedPOIndex,
                     currentPage,
                     timestamp: new Date().toISOString()
                 }))
+                console.log('✅ [Session] Session saved successfully')
             } catch (error) {
-                console.error('Failed to save session:', error)
+                console.error('❌ [Session] Failed to save session:', error)
             }
         } else {
+            console.log('🗑️ [Session] Removing session from localStorage')
             localStorage.removeItem(STORAGE_KEY)
         }
     }, [stagingData, selectedPOIndex, currentPage])
 
     // Session restoration: Check for existing session on mount
     useEffect(() => {
+        console.log('🔍 [Session] Checking for saved session on mount...')
         try {
             const savedSession = localStorage.getItem(STORAGE_KEY)
             if (savedSession) {
+                console.log('📦 [Session] Found saved session in localStorage')
                 const parsed = JSON.parse(savedSession)
                 const sessionAge = Date.now() - new Date(parsed.timestamp).getTime()
                 const maxAge = 24 * 60 * 60 * 1000 // 24 hours
+                
+                console.log('⏰ [Session] Session age:', Math.floor(sessionAge / 1000 / 60), 'minutes')
 
                 if (sessionAge < maxAge) {
+                    console.log('✅ [Session] Session is valid, showing restore modal')
                     setShowRestoreModal(true)
                 } else {
+                    console.log('⏳ [Session] Session expired, removing from localStorage')
                     localStorage.removeItem(STORAGE_KEY)
                 }
+            } else {
+                console.log('ℹ️ [Session] No saved session found')
             }
         } catch (error) {
-            console.error('Failed to check for saved session:', error)
+            console.error('❌ [Session] Failed to check for saved session:', error)
             localStorage.removeItem(STORAGE_KEY)
         }
     }, [])
 
     const handleRestoreSession = () => {
+        console.log('🔄 [Session] Restoring session...')
         try {
             const savedSession = localStorage.getItem(STORAGE_KEY)
             if (savedSession) {
                 const parsed = JSON.parse(savedSession)
+                console.log('📥 [Session] Loaded session data:', {
+                    totalPOs: parsed.stagingData?.po_list?.length || 0,
+                    selectedPOIndex: parsed.selectedPOIndex,
+                    currentPage: parsed.currentPage
+                })
                 setStagingData(parsed.stagingData)
                 setSelectedPOIndex(parsed.selectedPOIndex || 0)
                 setCurrentPage(parsed.currentPage || 1)
+                console.log('✅ [Session] Session restored successfully')
                 showSuccess('Sessão restaurada com sucesso!')
             }
         } catch (error) {
-            console.error('Failed to restore session:', error)
+            console.error('❌ [Session] Failed to restore session:', error)
             showError('Erro ao restaurar sessão')
             localStorage.removeItem(STORAGE_KEY)
         }
@@ -94,6 +128,7 @@ const ImportPage = () => {
     }
 
     const handleDiscardSession = () => {
+        console.log('🗑️ [Session] Discarding saved session')
         localStorage.removeItem(STORAGE_KEY)
         setShowRestoreModal(false)
     }
