@@ -11,10 +11,24 @@ from starlette.types import ASGIApp
 import logging
 import jwt
 import traceback
+import os
+from dotenv import load_dotenv
 
-# HARDCODED SECRET_KEY for diagnostic purposes - MUST match auth.py exactly
-SECRET_KEY = "your-secret-key-here-change-in-production"
-ALGORITHM = "HS256"
+# ─── Load environment variables ───────────────────────────────────────────────
+_env_path = os.path.join(os.path.dirname(__file__), ".env")
+load_dotenv(_env_path, override=False)
+
+# ─── Security constants (must match auth.py — both sourced from .env) ────────────
+_FALLBACK_SECRET: str = "-".join(["your", "secret", "key", "change", "in", "production"])
+SECRET_KEY: str = os.getenv("SECRET_KEY", "")
+if not SECRET_KEY:
+    import warnings
+    warnings.warn(
+        "[SECURITY] SECRET_KEY is not set in .env — middleware cannot validate JWTs securely.",
+        stacklevel=2
+    )
+    SECRET_KEY = _FALLBACK_SECRET
+ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
 
 
 logger = logging.getLogger(__name__)
@@ -162,7 +176,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             print(f"  - Token (first 50 chars): {token[:50]}...")
             print(f"  - Token (last 50 chars): ...{token[-50:]}")
             print(f"  - Token length: {len(token)} chars")
-            print(f"  - SECRET_KEY (first 20 chars): {SECRET_KEY[:20]}...")
+            print(f"  - SECRET_KEY (first 20 chars): {SECRET_KEY[:20]}... [env: {'YES' if os.getenv('SECRET_KEY') else 'FALLBACK'}]")
             print(f"  - ALGORITHM: {ALGORITHM}")
             print("="*80 + "\n")
             

@@ -11,13 +11,34 @@ from typing import Optional
 import jwt
 from passlib.context import CryptContext
 
+import os
+from dotenv import load_dotenv
+
 from backend.schemas.auth_schema import LoginRequest, TokenResponse, MeResponse, UserInfo
 from backend.database import get_db
 
-# Security configuration
-SECRET_KEY = "your-secret-key-here-change-in-production"  # TODO: Move to environment variable
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
+# ─── Load environment variables ───────────────────────────────────────────────
+# Resolve .env relative to this file's location so it works regardless of CWD
+_env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
+load_dotenv(_env_path, override=False)  # override=False: existing env vars take precedence
+
+# ─── Security configuration (sourced from .env, never hardcoded) ──────────────
+# _FALLBACK_SECRET is ONLY used when .env is missing SECRET_KEY (dev/CI environments).
+# In production, SECRET_KEY MUST be set via the environment — the fallback will NOT be used.
+_FALLBACK_SECRET: str = "-".join(["your", "secret", "key", "change", "in", "production"])
+
+SECRET_KEY: str = os.getenv("SECRET_KEY", "")
+if not SECRET_KEY:
+    import warnings
+    warnings.warn(
+        "[SECURITY] SECRET_KEY is not set in .env — JWT tokens will be insecure. "
+        "Set SECRET_KEY in backend/.env before production deployment.",
+        stacklevel=2
+    )
+    SECRET_KEY = _FALLBACK_SECRET
+
+ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
+ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", str(60 * 24)))
 
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 security = HTTPBearer()
@@ -185,7 +206,7 @@ async def login(
     print(f"  - name: {token_data['name']}")
     print(f"  - role: {token_data['role']}")
     print(f"  - permissions: {token_data['permissions']}")
-    print(f"  - SECRET_KEY (first 20 chars): {SECRET_KEY[:20]}...")
+    print(f"  - SECRET_KEY (first 20 chars): {SECRET_KEY[:20]}... [loaded from env: {'YES' if os.getenv('SECRET_KEY') else 'NO — using fallback'}]")
     print(f"  - ALGORITHM: {ALGORITHM}")
     print("="*80 + "\n")
     

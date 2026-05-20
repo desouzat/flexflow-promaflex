@@ -459,7 +459,22 @@ class AuditLog(Base):
         nullable=True
     )
     extra_data: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
-    
+
+    # ─── Hash versioning ───────────────────────────────────────────────────────
+    # Version 1 (legacy): hash = SHA256(item_id + statuses + timestamp + prev_hash + user)
+    # Version 2 (current): hash = SHA256(tenant_id + item_id + statuses + timestamp + prev_hash + user)
+    # tenant_id was added in v2 to prevent cross-tenant hash collision attacks.
+    # Existing records (hash_version=1) remain valid and are NOT re-hashed.
+    HASH_VERSION_LEGACY = 1
+    HASH_VERSION_CURRENT = 2
+
+    hash_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=HASH_VERSION_CURRENT,
+        comment="Hash algorithm version: 1=legacy (no tenant_id), 2=includes tenant_id"
+    )
+
     # Relacionamentos
     order_item: Mapped["OrderItem"] = relationship(
         "OrderItem",
@@ -470,7 +485,7 @@ class AuditLog(Base):
         back_populates="audit_logs",
         foreign_keys=[changed_by]
     )
-    
+
     # Índices
     __table_args__ = (
         Index('idx_audit_item_id', 'item_id'),
@@ -478,6 +493,7 @@ class AuditLog(Base):
         Index('idx_audit_hash', 'hash'),
         Index('idx_audit_changed_by', 'changed_by'),
         Index('idx_audit_is_exception', 'is_exception'),
+        Index('idx_audit_hash_version', 'hash_version'),
     )
     
     @staticmethod
@@ -490,8 +506,11 @@ class AuditLog(Base):
         changed_by: Optional[uuid.UUID]
     ) -> str:
         """
-        Calcula o hash SHA-256 para o registro de auditoria.
-        
+        [V1 — LEGACY] Calcula o hash SHA-256 sem incluir tenant_id.
+
+        This method is preserved for backward compatibility.
+        All new records should use calculate_hash_v2().
+
         Args:
             item_id: ID do item
             from_status: Status anterior
@@ -499,9 +518,9 @@ class AuditLog(Base):
             timestamp: Timestamp da mudança
             previous_hash: Hash do registro anterior
             changed_by: ID do usuário que fez a mudança
-            
+
         Returns:
-            Hash SHA-256 em formato hexadecimal
+            Hash SHA-256 em formato hexadecimal (64 chars)
         """
         data = (
             str(item_id) +
@@ -512,9 +531,142 @@ class AuditLog(Base):
             (str(changed_by) if changed_by else "")
         )
         return hashlib.sha256(data.encode()).hexdigest()
-    
+
+    @staticmethod
+    def calculate_hash_v2(
+        tenant_id: uuid.UUID,
+        item_id: uuid.UUID,
+        from_status: Optional[str],
+        to_status: str,
+        timestamp: datetime,
+        previous_hash: Optional[str],
+        changed_by: Optional[uuid.UUID]
+    ) -> str:
+        """
+        [V2 — CURRENT] Calcula o hash SHA-256 incluindo tenant_id.
+
+        Including tenant_id in the hash prevents a theoretical cross-tenant
+        collision attack where records from different tenants could produce
+        identical hashes given the same item_id, statuses, and timestamp.
+
+        V2 Hash input order:
+            tenant_id + item_id + from_status + to_status + timestamp + previous_hash + changed_by
+
+        Args:
+            tenant_id: ID do tenant — binds the hash to this tenant's namespace
+            item_id: ID do item
+            from_status: Status anterior
+            to_status: Novo status
+            timestamp: Timestamp da mudança
+            previous_hash: Hash do registro anterior (None for genesis records)
+            changed_by: ID do usuário que fez a mudança
+
+        Returns:
+            Hash SHA-256 em formato hexadecimal (64 chars)
+        """
+        data = (
+            str(tenant_id) +           # V2: tenant_id anchors the hash to this tenant
+            str(item_id) +
+            (from_status or "") +
+            to_status +
+            timestamp.isoformat() +
+            (previous_hash or "") +
+            (str(changed_by) if changed_by else "")
+        )
+        return hashlib.sha256(data.encode()).hexdigest()
+
+    @staticmethod
+    def calculate_hash_for_version(
+        version: int,
+        item_id: uuid.UUID,
+        from_status: Optional[str],
+        to_status: str,
+        timestamp: datetime,
+        previous_hash: Optional[str],
+        changed_by: Optional[uuid.UUID],
+        tenant_id: Optional[uuid.UUID] = None
+    ) -> str:
+        """
+        Dispatch to the correct hash function based on version.
+
+        This is the preferred entry point for creating new AuditLog records.
+        Always pass tenant_id; it is required for version >= 2.
+
+        Args:
+            version: Hash version to use (1=legacy, 2=current)
+            tenant_id: Required for version 2. Ignored (but accepted) for version 1.
+            ... (other args same as calculate_hash / calculate_hash_v2)
+
+        Returns:
+            Hash SHA-256 em formato hexadecimal (64 chars)
+
+        Raises:
+            ValueError: If version=2 and tenant_id is None.
+            ValueError: If an unknown version is requested.
+        """
+        if version == AuditLog.HASH_VERSION_LEGACY:
+            return AuditLog.calculate_hash(
+                item_id=item_id,
+                from_status=from_status,
+                to_status=to_status,
+                timestamp=timestamp,
+                previous_hash=previous_hash,
+                changed_by=changed_by
+            )
+        elif version == AuditLog.HASH_VERSION_CURRENT:
+            if tenant_id is None:
+                raise ValueError(
+                    "tenant_id is required for AuditLog hash version 2. "
+                    "Pass the tenant's UUID to calculate_hash_for_version()."
+                )
+            return AuditLog.calculate_hash_v2(
+                tenant_id=tenant_id,
+                item_id=item_id,
+                from_status=from_status,
+                to_status=to_status,
+                timestamp=timestamp,
+                previous_hash=previous_hash,
+                changed_by=changed_by
+            )
+        else:
+            raise ValueError(f"Unknown AuditLog hash version: {version}")
+
+    def verify_own_hash(
+        self,
+        tenant_id: Optional[uuid.UUID] = None
+    ) -> bool:
+        """
+        Verify that this record's stored hash matches a fresh calculation.
+
+        Uses hash_version to select the correct algorithm, so both legacy
+        (v1) and current (v2) records can be verified without migration.
+
+        Args:
+            tenant_id: Required for v2 records. Ignored for v1 records.
+
+        Returns:
+            True if the hash is valid, False if the record has been tampered with.
+        """
+        try:
+            expected = AuditLog.calculate_hash_for_version(
+                version=self.hash_version,
+                item_id=self.item_id,
+                from_status=self.from_status,
+                to_status=self.to_status,
+                timestamp=self.created_at,
+                previous_hash=self.previous_hash,
+                changed_by=self.changed_by,
+                tenant_id=tenant_id
+            )
+            return expected == self.hash
+        except (ValueError, TypeError):
+            return False
+
     def __repr__(self):
-        return f"<AuditLog(id={self.id}, item_id={self.item_id}, {self.from_status}->{self.to_status})>"
+        return (
+            f"<AuditLog(id={self.id}, item_id={self.item_id}, "
+            f"{self.from_status}->{self.to_status}, v{self.hash_version})>"
+        )
 
 
 # ============================================================================

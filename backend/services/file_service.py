@@ -4,10 +4,17 @@ Handles file uploads with UUID renaming and validation
 """
 
 import os
+import re
 import uuid
 from pathlib import Path
 from typing import Optional, Tuple
 from fastapi import UploadFile, HTTPException, status
+
+# Pre-compiled regex for UUID validation (security: prevents tenant_id path injection)
+_UUID_RE = re.compile(
+    r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+    re.IGNORECASE
+)
 
 
 class FileService:
@@ -37,12 +44,85 @@ class FileService:
     def _ensure_upload_dir_exists(self):
         """Create upload directory if it doesn't exist"""
         self.upload_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Create .gitkeep if it doesn't exist
         gitkeep_path = self.upload_dir / ".gitkeep"
         if not gitkeep_path.exists():
             gitkeep_path.touch()
-    
+
+    def _assert_valid_tenant_id(self, tenant_id: str) -> None:
+        """
+        Validate that tenant_id is a well-formed UUID string.
+        Prevents path injection via manipulated tenant_id values such as
+        '../../../admin' or absolute paths.
+
+        Raises:
+            HTTPException 400: If tenant_id is not a valid UUID.
+        """
+        if not tenant_id or not _UUID_RE.match(str(tenant_id)):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid tenant identifier format"
+            )
+
+    def _validate_safe_path(
+        self,
+        file_path_str: str,
+        tenant_id: str
+    ) -> Path:
+        """
+        Resolve a file path and assert it is contained within
+        the tenant's upload directory.
+
+        This is the primary defense against directory traversal attacks.
+        Resolving the path first expands any '..' segments; the startswith
+        check then guarantees the result is under the allowed root.
+
+        Examples of blocked inputs:
+            - '../../etc/passwd'
+            - 'uploads/other-tenant-uuid/secret.pdf'
+            - 'C:\\Windows\\System32\\calc.exe'
+            - '/etc/shadow'
+
+        Args:
+            file_path_str: The raw path string to validate.
+            tenant_id: The current tenant's UUID string.
+
+        Returns:
+            Resolved Path object if safe.
+
+        Raises:
+            HTTPException 400: If path traversal or cross-tenant access is detected.
+        """
+        self._assert_valid_tenant_id(tenant_id)
+
+        try:
+            candidate = Path(file_path_str).resolve()
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid file path format"
+            )
+
+        allowed_root = (self.upload_dir / tenant_id).resolve()
+
+        # Path containment check — the critical security assertion
+        # Use os.path.commonpath for reliable cross-platform comparison
+        try:
+            common = os.path.commonpath([str(candidate), str(allowed_root)])
+            is_safe = common == str(allowed_root)
+        except ValueError:
+            # commonpath raises ValueError when paths are on different drives (Windows)
+            is_safe = False
+
+        if not is_safe:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Access denied: path is outside the permitted upload directory"
+            )
+
+        return candidate
+
     def validate_file(self, file: UploadFile) -> Tuple[bool, Optional[str]]:
         """
         Validate file extension and size
@@ -136,39 +216,56 @@ class FileService:
         # Return safe filename (basename only) to avoid exposing client paths
         return relative_path, safe_filename
     
-    def delete_file(self, file_path: str) -> bool:
+    def delete_file(self, file_path: str, tenant_id: str) -> bool:
         """
-        Delete a file from the upload directory
-        
+        Delete a file from the upload directory after verifying it is
+        within the tenant's permitted path.
+
         Args:
-            file_path: Path to the file to delete
-            
+            file_path: Path to the file to delete.
+            tenant_id: The requesting tenant's UUID — scopes the deletion.
+
         Returns:
-            True if file was deleted, False if file didn't exist
+            True if file was deleted, False if file didn't exist.
+
+        Raises:
+            HTTPException 400: If path traversal is detected.
         """
         try:
-            path = Path(file_path)
-            if path.exists() and path.is_file():
-                path.unlink()
+            safe_path = self._validate_safe_path(file_path, tenant_id)
+            if safe_path.exists() and safe_path.is_file():
+                safe_path.unlink()
                 return True
             return False
+        except HTTPException:
+            raise  # Re-raise security violations as-is
         except Exception as e:
             print(f"Error deleting file {file_path}: {e}")
             return False
     
-    def get_file_path(self, file_path: str) -> Optional[Path]:
+    def get_file_path(
+        self,
+        file_path: str,
+        tenant_id: str
+    ) -> Optional[Path]:
         """
-        Get full path to a file
-        
+        Get full path to a file, validated against the tenant's upload root.
+
         Args:
-            file_path: Relative path to the file
-            
+            file_path: Relative or absolute path string from the stored record.
+            tenant_id: The requesting tenant's UUID — used to scope the path check.
+
         Returns:
-            Path object if file exists, None otherwise
+            Resolved Path object if file exists and is within tenant directory.
+            None if the file does not exist.
+
+        Raises:
+            HTTPException 400: If path traversal is detected.
         """
-        path = Path(file_path)
-        if path.exists() and path.is_file():
-            return path
+        # _validate_safe_path raises 400 on traversal; returns resolved safe path
+        safe_path = self._validate_safe_path(file_path, tenant_id)
+        if safe_path.exists() and safe_path.is_file():
+            return safe_path
         return None
     
     @staticmethod
