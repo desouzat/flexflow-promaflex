@@ -10,12 +10,11 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from sqlalchemy import create_engine, text
-from database import get_database_url
+from database import SQLALCHEMY_DATABASE_URL
 
 def run_migration():
     """Add support_tickets table to the database"""
-    database_url = get_database_url()
-    engine = create_engine(database_url)
+    engine = create_engine(SQLALCHEMY_DATABASE_URL)
     
     with engine.begin() as conn:
         try:

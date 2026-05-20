@@ -10,7 +10,7 @@ from fastapi.exceptions import RequestValidationError
 from contextlib import asynccontextmanager
 import time
 
-from backend.routers import auth, import_router, kanban, dashboard, costs, workshop, partition, users
+from backend.routers import auth, import_router, kanban, dashboard, costs, workshop, partition, users, support
 from backend.database import engine, Base
 from backend.middleware import AuthenticationMiddleware, TenantIsolationMiddleware
 
@@ -146,10 +146,11 @@ async def add_process_time_header(request: Request, call_next):
 async def log_requests(request: Request, call_next):
     """Log all requests with method, path, and status code"""
     from datetime import datetime
-    timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-    print(f"{timestamp} [REQUEST] {request.method} {request.url.path}")
+    timestamp_request = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
+    print(f"{timestamp_request} [REQUEST] {request.method} {request.url.path}")
     response = await call_next(request)
-    print(f"{timestamp} [RESPONSE] {request.method} {request.url.path} - Status: {response.status_code}")
+    timestamp_response = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
+    print(f"{timestamp_response} [RESPONSE] {request.method} {request.url.path} - Status: {response.status_code}")
     return response
 
 
@@ -204,6 +205,7 @@ app.include_router(dashboard.router)
 app.include_router(costs.router)
 app.include_router(partition.router)
 app.include_router(users.router)
+app.include_router(support.router)
 
 
 # ============================================================================

@@ -2,6 +2,8 @@ import React, { useState } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useNotifications } from '../context/NotificationContext'
+import api from '../utils/api'
+import { showSuccess, showError, showLoading, dismissToast } from '../utils/toast'
 import {
     LayoutDashboard,
     Kanban,
@@ -36,19 +38,29 @@ const Layout = () => {
         { path: '/users', icon: Users, label: 'Gestão de Equipe', badge: 'users', masterOnly: true },
     ]
 
-    const handleReportProblem = () => {
+    const handleReportProblem = async () => {
         if (!reportDescription.trim()) {
-            alert('Por favor, descreva o problema')
+            showError('Por favor, descreva o problema')
             return
         }
 
-        // Log to console (in production, this would send to backend)
-        const timestamp = new Date().toISOString()
-        console.error(`[${timestamp}] PROBLEM REPORT from ${user?.username}:`, reportDescription)
+        const toastId = showLoading('Enviando relatório...')
 
-        alert('Problema reportado com sucesso! Nossa equipe foi notificada.')
-        setReportDescription('')
-        setShowReportModal(false)
+        try {
+            const response = await api.post('/support/report', {
+                description: reportDescription
+            })
+
+            dismissToast(toastId)
+            showSuccess(`Problema reportado com sucesso! Ticket ID: ${response.data.id.substring(0, 8)}...`)
+
+            setReportDescription('')
+            setShowReportModal(false)
+        } catch (error) {
+            dismissToast(toastId)
+            console.error('Failed to report problem:', error)
+            showError(error.response?.data?.detail || 'Erro ao reportar problema')
+        }
     }
 
     return (

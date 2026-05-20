@@ -97,9 +97,9 @@ const UsersPage = () => {
 
     const getRoleLabel = (role) => {
         const labels = {
-            master: 'Master',
-            admin: 'Admin',
-            user: 'Usuário'
+            master: 'MASTER',
+            admin: 'LÍDER',
+            user: 'OPERADOR'
         }
         return labels[role] || role
     }
@@ -282,10 +282,13 @@ const UsersPage = () => {
                                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                                         required
                                     >
-                                        <option value="user">Usuário</option>
-                                        <option value="admin">Admin</option>
-                                        {user?.role === 'master' && <option value="master">Master</option>}
+                                        <option value="user">OPERADOR</option>
+                                        <option value="admin">LÍDER</option>
+                                        {user?.role === 'master' && <option value="master">MASTER</option>}
                                     </select>
+                                    <p className="mt-1 text-xs text-gray-500">
+                                        OPERADOR: Acesso básico | LÍDER: Gerencia custos | MASTER: Acesso total
+                                    </p>
                                 </div>
 
                                 <div>

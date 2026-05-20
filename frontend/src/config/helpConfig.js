@@ -8,22 +8,33 @@ export const HELP_CONFIG = {
         title: "Mesa de Conferência - Área de Staging",
         description: "Validação e preparação de dados importados antes da confirmação.",
         rules: [
-            "Anexos são obrigatórios apenas para Clientes Novos em pedidos Personalizados",
-            "Descrição da customização é obrigatória para qualquer pedido Personalizado",
-            "Limite de arquivo: 5MB (Otimização de infraestrutura)",
-            "Formatos aceitos: PDF, JPG, PNG",
-            "Todos os erros devem ser corrigidos antes de confirmar o PO"
+            "✅ REGRA 100% CHECADO: Todos os itens devem estar marcados como 'Checado' antes de confirmar o PO",
+            "📎 ANEXOS OBRIGATÓRIOS: Apenas para Clientes Novos em pedidos Personalizados",
+            "📝 DESCRIÇÃO OBRIGATÓRIA: Qualquer pedido Personalizado deve ter descrição da customização",
+            "⚠️ PAINEL DE RISCO: Sistema exibe alertas visuais para itens que precisam de atenção",
+            "📦 LIMITE DE ARQUIVO: 5MB por arquivo (Otimização de infraestrutura)",
+            "📄 FORMATOS ACEITOS: PDF, JPG, PNG",
+            "🔒 BLOQUEIO DE CONFIRMAÇÃO: Não é possível confirmar PO com erros pendentes ou itens não checados"
         ],
         nextSteps: [
-            "Revisar cada item importado",
-            "Marcar itens personalizados e clientes novos",
-            "Adicionar descrições e anexos conforme necessário",
-            "Confirmar PO quando todos os erros forem resolvidos"
+            "Revisar cada item importado no painel de staging",
+            "Marcar itens personalizados e clientes novos conforme necessário",
+            "Adicionar descrições de customização para itens personalizados",
+            "Fazer upload de anexos para clientes novos com itens personalizados (máx 5MB)",
+            "Marcar todos os itens como 'Checado' após validação",
+            "Verificar o Painel de Risco - todos os alertas devem estar resolvidos",
+            "Confirmar PO quando 100% dos itens estiverem checados e sem erros"
         ],
         icon: "📋",
         requiredFields: [
             "Descrição da customização (se Personalizado)",
-            "Anexo (se Personalizado + Cliente Novo)"
+            "Anexo (se Personalizado + Cliente Novo)",
+            "Todos os itens marcados como 'Checado' (100%)"
+        ],
+        criticalRules: [
+            "🚫 REGRA 100%: Impossível confirmar sem todos os itens checados",
+            "⚠️ PAINEL DE RISCO: Monitora erros em tempo real",
+            "📦 LIMITE 5MB: Arquivos maiores serão rejeitados"
         ]
     },
 
