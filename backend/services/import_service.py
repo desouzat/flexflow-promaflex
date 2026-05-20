@@ -123,13 +123,14 @@ class ImportService:
         return True, None
     
     def parse_decimal(
-        self, 
-        value: Any, 
-        field_name: str, 
+        self,
+        value: Any,
+        field_name: str,
         row_number: int
     ) -> Tuple[Optional[Decimal], Optional[ImportRowError]]:
         """
         Parse a value as Decimal with error handling.
+        Handles Brazilian currency format: R$ 13.335,00 (dots as thousands, comma as decimal)
         
         Args:
             value: Value to parse
@@ -150,9 +151,20 @@ class ImportService:
         try:
             # Handle string values with currency symbols or commas
             if isinstance(value, str):
-                # Remove common currency symbols and thousands separators
-                cleaned = value.strip().replace('R$', '').replace('$', '')
-                cleaned = cleaned.replace(',', '').replace(' ', '')
+                # Remove common currency symbols and whitespace
+                cleaned = value.strip().replace('R$', '').replace('$', '').replace(' ', '')
+                
+                # Brazilian format: dots are thousands separators, comma is decimal
+                # Example: "13.335,00" -> "13335.00"
+                if ',' in cleaned:
+                    # Remove dots (thousands separator) and replace comma with dot (decimal)
+                    cleaned = cleaned.replace('.', '').replace(',', '.')
+                # If no comma but has dots, assume it's already in standard format or thousands
+                # Example: "13335.00" (standard) or "13.335" (thousands only)
+                elif cleaned.count('.') > 1:
+                    # Multiple dots means thousands separator format without decimals
+                    cleaned = cleaned.replace('.', '')
+                
                 value = cleaned
             
             decimal_value = Decimal(str(value))

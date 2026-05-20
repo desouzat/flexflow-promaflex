@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { Upload, FileSpreadsheet, AlertCircle, CheckCircle, X, HelpCircle, Paperclip, Trash2, Cloud, ChevronLeft, ChevronRight, Globe, RefreshCw, DollarSign, CheckSquare, Square } from 'lucide-react'
 import api from '../utils/api'
 import { showSuccess, showError, showLoading, dismissToast } from '../utils/toast'
@@ -7,6 +7,20 @@ import HelpModal from '../components/HelpModal'
 import { getHelpForStatus } from '../config/helpConfig'
 
 const ITEMS_PER_PAGE = 10
+const STORAGE_KEY = 'flexflow_staging_session'
+
+// Brazilian currency formatter
+const formatCurrency = (value) => {
+    if (value === null || value === undefined) return 'N/A'
+    const numValue = typeof value === 'string' ? parseFloat(value) : value
+    if (isNaN(numValue)) return 'N/A'
+    return new Intl.NumberFormat('pt-BR', {
+        style: 'currency',
+        currency: 'BRL',
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    }).format(numValue)
+}
 
 const ImportPage = () => {
     const [selectedFile, setSelectedFile] = useState(null)
@@ -18,8 +32,71 @@ const ImportPage = () => {
     const [selectedPOIndex, setSelectedPOIndex] = useState(0) // For multi-PO navigation
     const [showSummaryModal, setShowSummaryModal] = useState(false)
     const [commitSummary, setCommitSummary] = useState({ valid: 0, errors: 0 })
+    const [showRestoreModal, setShowRestoreModal] = useState(false)
     const fileInputRef = useRef(null)
     const { refreshNotifications } = useNotifications()
+
+    // Session persistence: Save to localStorage whenever stagingData changes
+    useEffect(() => {
+        if (stagingData) {
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                    stagingData,
+                    selectedPOIndex,
+                    currentPage,
+                    timestamp: new Date().toISOString()
+                }))
+            } catch (error) {
+                console.error('Failed to save session:', error)
+            }
+        } else {
+            localStorage.removeItem(STORAGE_KEY)
+        }
+    }, [stagingData, selectedPOIndex, currentPage])
+
+    // Session restoration: Check for existing session on mount
+    useEffect(() => {
+        try {
+            const savedSession = localStorage.getItem(STORAGE_KEY)
+            if (savedSession) {
+                const parsed = JSON.parse(savedSession)
+                const sessionAge = Date.now() - new Date(parsed.timestamp).getTime()
+                const maxAge = 24 * 60 * 60 * 1000 // 24 hours
+
+                if (sessionAge < maxAge) {
+                    setShowRestoreModal(true)
+                } else {
+                    localStorage.removeItem(STORAGE_KEY)
+                }
+            }
+        } catch (error) {
+            console.error('Failed to check for saved session:', error)
+            localStorage.removeItem(STORAGE_KEY)
+        }
+    }, [])
+
+    const handleRestoreSession = () => {
+        try {
+            const savedSession = localStorage.getItem(STORAGE_KEY)
+            if (savedSession) {
+                const parsed = JSON.parse(savedSession)
+                setStagingData(parsed.stagingData)
+                setSelectedPOIndex(parsed.selectedPOIndex || 0)
+                setCurrentPage(parsed.currentPage || 1)
+                showSuccess('Sessão restaurada com sucesso!')
+            }
+        } catch (error) {
+            console.error('Failed to restore session:', error)
+            showError('Erro ao restaurar sessão')
+            localStorage.removeItem(STORAGE_KEY)
+        }
+        setShowRestoreModal(false)
+    }
+
+    const handleDiscardSession = () => {
+        localStorage.removeItem(STORAGE_KEY)
+        setShowRestoreModal(false)
+    }
 
     const handleFileSelect = (e) => {
         const file = e.target.files?.[0]
@@ -438,12 +515,23 @@ const ImportPage = () => {
             errors.push('Descrição da customização é obrigatória')
         }
 
-        // Rule 2: Personalized + New Client requires attachment
-        if (item.is_personalized && item.is_new_client && !item.attachment_path) {
-            errors.push('Anexo é obrigatório para clientes novos')
+        // Rule 2: Personalized items require attachment
+        if (item.is_personalized && !item.attachment_path) {
+            errors.push('Anexo é obrigatório para itens personalizados')
         }
 
         return errors
+    }
+
+    const calculatePOTotal = (po) => {
+        if (!po || !Array.isArray(po.items)) return 0
+
+        return po.items.reduce((sum, item) => {
+            const itemTotal = item.item_total_value
+                ? parseFloat(item.item_total_value)
+                : (item.quantity * item.price_unit)
+            return sum + itemTotal
+        }, 0)
     }
 
     const allItemsChecked = () => {
@@ -549,6 +637,9 @@ const ImportPage = () => {
             if (response.status === 200) {
                 dismissToast(toastId)
                 showSuccess(`${validPOs.length} pedido(s) criado(s) com sucesso! Atualizando Kanban...`)
+
+                // Clear session storage
+                localStorage.removeItem(STORAGE_KEY)
 
                 // Reset form first
                 setSelectedFile(null)
@@ -856,7 +947,7 @@ const ImportPage = () => {
                                     <div>
                                         <label className="text-sm font-medium text-gray-700">💰 Valor Total do Pedido</label>
                                         <p className="text-lg font-semibold text-green-600">
-                                            {currentPO.po_total_value ? `R$ ${parseFloat(currentPO.po_total_value).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'N/A'}
+                                            {formatCurrency(currentPO.po_total_value || calculatePOTotal(currentPO))}
                                         </p>
                                     </div>
                                 </div>
@@ -1002,16 +1093,13 @@ const ImportPage = () => {
                                                     <div>
                                                         <label className="text-xs font-medium text-gray-600">Vl.Unit</label>
                                                         <p className="font-semibold text-gray-900">
-                                                            {item.unit_value ? `R$ ${parseFloat(item.unit_value).toFixed(2)}` : `R$ ${item.price_unit.toFixed(2)}`}
+                                                            {formatCurrency(item.unit_value || item.price_unit)}
                                                         </p>
                                                     </div>
                                                     <div>
                                                         <label className="text-xs font-medium text-gray-600">Total Item</label>
                                                         <p className="font-semibold text-green-600">
-                                                            {item.item_total_value
-                                                                ? `R$ ${parseFloat(item.item_total_value).toFixed(2)}`
-                                                                : `R$ ${(item.quantity * item.price_unit).toFixed(2)}`
-                                                            }
+                                                            {formatCurrency(item.item_total_value || (item.quantity * item.price_unit))}
                                                         </p>
                                                     </div>
                                                 </div>
@@ -1159,54 +1247,55 @@ const ImportPage = () => {
                                                     </div>
                                                 )}
 
-                                                {/* Customization Notes */}
+                                                {/* Personalizado: Shows BOTH textarea AND upload */}
                                                 {item.is_personalized && (
-                                                    <div className="mb-4">
-                                                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                                                            Descrição da Customização *
-                                                        </label>
-                                                        <textarea
-                                                            value={item.customization_notes}
-                                                            onChange={(e) => handleNotesChange(item.id, e.target.value)}
-                                                            placeholder="Descreva as especificações da customização..."
-                                                            rows={3}
-                                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                                                        />
-                                                    </div>
-                                                )}
-
-                                                {/* File Upload - Shows when Cliente Novo is checked */}
-                                                {item.is_new_client && (
-                                                    <div className="mb-4">
-                                                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                                                            Anexo (PDF, JPG, PNG - Max 5MB) {item.is_personalized ? '*' : ''}
-                                                        </label>
-                                                        {item.attachment_path ? (
-                                                            <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg">
-                                                                <Paperclip className="w-5 h-5 text-green-600" />
-                                                                <span className="flex-1 text-sm text-green-900">
-                                                                    {item.attachment_filename || 'Arquivo anexado'}
-                                                                </span>
-                                                                <button
-                                                                    onClick={() => handleRemoveAttachment(item.id)}
-                                                                    className="text-red-600 hover:text-red-800"
-                                                                >
-                                                                    <Trash2 className="w-4 h-4" />
-                                                                </button>
-                                                            </div>
-                                                        ) : (
-                                                            <input
-                                                                type="file"
-                                                                accept=".pdf,.jpg,.jpeg,.png"
-                                                                onChange={(e) => {
-                                                                    const file = e.target.files?.[0]
-                                                                    if (file) {
-                                                                        handleFileUpload(item.id, file)
-                                                                    }
-                                                                }}
-                                                                className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100"
+                                                    <div className="mb-4 space-y-4">
+                                                        {/* Customization Notes */}
+                                                        <div>
+                                                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                                Descrição da Customização *
+                                                            </label>
+                                                            <textarea
+                                                                value={item.customization_notes}
+                                                                onChange={(e) => handleNotesChange(item.id, e.target.value)}
+                                                                placeholder="Descreva as especificações da customização..."
+                                                                rows={3}
+                                                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                                                             />
-                                                        )}
+                                                        </div>
+
+                                                        {/* File Upload for Personalized Items */}
+                                                        <div>
+                                                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                                Upload de Anexo (PDF, JPG, PNG - Max 5MB) *
+                                                            </label>
+                                                            {item.attachment_path ? (
+                                                                <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg">
+                                                                    <Paperclip className="w-5 h-5 text-green-600" />
+                                                                    <span className="flex-1 text-sm text-green-900">
+                                                                        {item.attachment_filename || 'Arquivo anexado'}
+                                                                    </span>
+                                                                    <button
+                                                                        onClick={() => handleRemoveAttachment(item.id)}
+                                                                        className="text-red-600 hover:text-red-800"
+                                                                    >
+                                                                        <Trash2 className="w-4 h-4" />
+                                                                    </button>
+                                                                </div>
+                                                            ) : (
+                                                                <input
+                                                                    type="file"
+                                                                    accept=".pdf,.jpg,.jpeg,.png"
+                                                                    onChange={(e) => {
+                                                                        const file = e.target.files?.[0]
+                                                                        if (file) {
+                                                                            handleFileUpload(item.id, file)
+                                                                        }
+                                                                    }}
+                                                                    className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100"
+                                                                />
+                                                            )}
+                                                        </div>
                                                     </div>
                                                 )}
 
@@ -1287,6 +1376,40 @@ const ImportPage = () => {
                                     </div>
                                 )}
                             </div>
+
+                            {/* Multi-PO Navigation - Bottom (Duplicate) */}
+                            {stagingData.isMultiPO && (
+                                <div className="card bg-blue-50 border-blue-200">
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <p className="text-sm font-medium text-blue-900">
+                                                Navegando: PO {selectedPOIndex + 1} de {stagingData.total_pos}
+                                            </p>
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                            <button
+                                                onClick={handlePreviousPO}
+                                                disabled={selectedPOIndex === 0}
+                                                className="p-2 border border-blue-300 rounded-lg hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                title="PO Anterior"
+                                            >
+                                                <ChevronLeft className="w-5 h-5 text-blue-700" />
+                                            </button>
+                                            <span className="text-sm font-medium text-blue-900">
+                                                PO {selectedPOIndex + 1} / {stagingData.total_pos}
+                                            </span>
+                                            <button
+                                                onClick={handleNextPO}
+                                                disabled={selectedPOIndex === stagingData.total_pos - 1}
+                                                className="p-2 border border-blue-300 rounded-lg hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                title="Próximo PO"
+                                            >
+                                                <ChevronRight className="w-5 h-5 text-blue-700" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
 
                             {/* Action Buttons */}
                             <div className="flex justify-between">
@@ -1421,6 +1544,36 @@ const ImportPage = () => {
                                         ✓ Confirmar Todos ({commitSummary.total} itens)
                                     </button>
                                 )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Session Restore Modal */}
+            {showRestoreModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+                        <div className="p-6">
+                            <h3 className="text-xl font-bold text-gray-900 mb-4">
+                                💾 Sessão Anterior Detectada
+                            </h3>
+                            <p className="text-sm text-gray-700 mb-6">
+                                Encontramos uma sessão de conferência não finalizada. Deseja restaurar e continuar de onde parou?
+                            </p>
+                            <div className="flex items-center justify-end gap-3">
+                                <button
+                                    onClick={handleDiscardSession}
+                                    className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors"
+                                >
+                                    Descartar
+                                </button>
+                                <button
+                                    onClick={handleRestoreSession}
+                                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold"
+                                >
+                                    ✓ Restaurar Sessão
+                                </button>
                             </div>
                         </div>
                     </div>
