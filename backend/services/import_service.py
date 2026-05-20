@@ -24,6 +24,7 @@ from backend.schemas.import_schema import (
     ImportRequest,
     ImportResponse
 )
+from backend.utils.number_utils import clean_brazilian_number
 
 
 class ImportService:
@@ -130,13 +131,21 @@ class ImportService:
     ) -> Tuple[Optional[Decimal], Optional[ImportRowError]]:
         """
         Parse a value as Decimal with error handling.
-        Handles Brazilian currency format: R$ 13.335,00 (dots as thousands, comma as decimal)
-        
+        Delegates all Brazilian currency normalization to clean_brazilian_number().
+
+        Handles:
+          - Native floats/ints (passed directly to Decimal)
+          - Brazilian format strings: "R$ 13.335,00" → Decimal("13335.00")
+          - Standard format strings: "13335.00" → Decimal("13335.00")
+          - NaN / None → error record
+          - Negative values → error record
+          - Non-parsable strings → error record
+
         Args:
             value: Value to parse
             field_name: Name of the field (for error reporting)
             row_number: Row number (for error reporting)
-            
+
         Returns:
             Tuple of (parsed_value, error)
         """
@@ -147,44 +156,42 @@ class ImportService:
                 error_message=f"{field_name} is required but is empty",
                 raw_value=None
             )
-        
+
         try:
-            # Handle string values with currency symbols or commas
-            if isinstance(value, str):
-                # Remove common currency symbols and whitespace
-                cleaned = value.strip().replace('R$', '').replace('$', '').replace(' ', '')
-                
-                # Brazilian format: dots are thousands separators, comma is decimal
-                # Example: "13.335,00" -> "13335.00"
-                if ',' in cleaned:
-                    # Remove dots (thousands separator) and replace comma with dot (decimal)
-                    cleaned = cleaned.replace('.', '').replace(',', '.')
-                # If no comma but has dots, assume it's already in standard format or thousands
-                # Example: "13335.00" (standard) or "13.335" (thousands only)
-                elif cleaned.count('.') > 1:
-                    # Multiple dots means thousands separator format without decimals
-                    cleaned = cleaned.replace('.', '')
-                
-                value = cleaned
-            
-            decimal_value = Decimal(str(value))
-            
+            # Normalize via centralized utility (handles R$, BRL format, etc.)
+            cleaned = clean_brazilian_number(value)
+
+            if cleaned is None:
+                # clean_brazilian_number returns None for negatives and invalid inputs
+                return None, ImportRowError(
+                    row_number=row_number,
+                    column_name=field_name,
+                    error_message=(
+                        f"{field_name} must be a valid non-negative number, got: {value!r}"
+                    ),
+                    raw_value=str(value)
+                )
+
+            decimal_value = Decimal(cleaned)
+
+            # Extra guard: clean_brazilian_number already rejects negatives,
+            # but Decimal('-0') edge cases could slip through.
             if decimal_value < 0:
                 return None, ImportRowError(
                     row_number=row_number,
                     column_name=field_name,
                     error_message=f"{field_name} must be non-negative",
-                    raw_value=value
+                    raw_value=str(value)
                 )
-            
+
             return decimal_value, None
-        
+
         except (InvalidOperation, ValueError) as e:
             return None, ImportRowError(
                 row_number=row_number,
                 column_name=field_name,
-                error_message=f"{field_name} must be a valid number, got: {value}",
-                raw_value=value
+                error_message=f"{field_name} must be a valid number, got: {value!r}",
+                raw_value=str(value)
             )
     
     def parse_integer(
@@ -483,28 +490,22 @@ class ImportService:
             unit_value_col = field_to_column[ImportFieldType.UNIT_VALUE]
             if not pd.isna(row[unit_value_col]):
                 try:
-                    # Handle string values with currency symbols or commas
-                    value = row[unit_value_col]
-                    if isinstance(value, str):
-                        cleaned = value.strip().replace('R$', '').replace('$', '')
-                        cleaned = cleaned.replace(',', '').replace(' ', '')
-                        value = cleaned
-                    data['unit_value'] = Decimal(str(value))
+                    # Delegate to centralized utility — correctly handles "13.335,50" → "13335.50"
+                    cleaned = clean_brazilian_number(row[unit_value_col])
+                    if cleaned is not None:
+                        data['unit_value'] = Decimal(cleaned)
                 except (InvalidOperation, ValueError):
                     pass  # Skip invalid values
-        
+
         # Item Total Value (Total Item)
         if ImportFieldType.ITEM_TOTAL_VALUE in field_to_column:
             item_total_col = field_to_column[ImportFieldType.ITEM_TOTAL_VALUE]
             if not pd.isna(row[item_total_col]):
                 try:
-                    # Handle string values with currency symbols or commas
-                    value = row[item_total_col]
-                    if isinstance(value, str):
-                        cleaned = value.strip().replace('R$', '').replace('$', '')
-                        cleaned = cleaned.replace(',', '').replace(' ', '')
-                        value = cleaned
-                    data['item_total_value'] = Decimal(str(value))
+                    # Delegate to centralized utility — correctly handles "13.335,50" → "13335.50"
+                    cleaned = clean_brazilian_number(row[item_total_col])
+                    if cleaned is not None:
+                        data['item_total_value'] = Decimal(cleaned)
                 except (InvalidOperation, ValueError):
                     pass  # Skip invalid values
         

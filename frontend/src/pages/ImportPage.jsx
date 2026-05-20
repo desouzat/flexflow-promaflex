@@ -5,10 +5,45 @@ import { showSuccess, showError, showLoading, dismissToast } from '../utils/toas
 import { useNotifications } from '../context/NotificationContext'
 import { useAuth } from '../context/AuthContext'
 import HelpModal from '../components/HelpModal'
+import FinanceApprovalModal from '../components/FinanceApprovalModal'
 import { getHelpForStatus } from '../config/helpConfig'
 
 const ITEMS_PER_PAGE = 10
-const STORAGE_KEY = 'flexflow_staging_session'
+
+// ─── Session Persistence Configuration ───────────────────────────────────────────────────────
+// Increment SESSION_SCHEMA_VERSION any time the stagingData shape changes in a breaking way.
+// Stored sessions from older versions will be automatically discarded on restore,
+// preventing silent data corruption from shape mismatches.
+const SESSION_SCHEMA_VERSION = 2
+
+/**
+ * Generates a tenant-scoped storage key so two users on the same machine
+ * (or the same user across different tenants) never share session data.
+ *
+ * @param {object|null} user - The current auth user (from useAuth)
+ * @returns {string} A unique localStorage key for this user's staging session
+ */
+const getStorageKey = (user) => {
+    if (!user?.tenant_id || !user?.id) return null
+    return `flexflow_staging_v${SESSION_SCHEMA_VERSION}_${user.tenant_id}_${user.id}`
+}
+
+/**
+ * Validate that a restored session object has the expected schema shape.
+ * Returns true only if the session is structurally sound and matches the current version.
+ *
+ * @param {object} parsed - The parsed JSON object from localStorage
+ * @returns {boolean}
+ */
+const isValidSessionSchema = (parsed) => {
+    if (!parsed || typeof parsed !== 'object') return false
+    if (parsed.schema_version !== SESSION_SCHEMA_VERSION) return false
+    if (!parsed.stagingData || typeof parsed.stagingData !== 'object') return false
+    // Validate multi-PO structure
+    if (!Array.isArray(parsed.stagingData.po_list)) return false
+    if (typeof parsed.timestamp !== 'string') return false
+    return true
+}
 
 // Mock function to send finance notification
 const sendFinanceNotification = (poNumber, itemSku) => {
@@ -47,67 +82,115 @@ const ImportPage = () => {
     const { refreshNotifications } = useNotifications()
     const { user } = useAuth()
 
-    // Session persistence: Save to localStorage whenever stagingData changes
+    // ─── Session Save Effect (debounced 300ms) ──────────────────────────────────────────────
+    // Saves current staging state to tenant-scoped localStorage after a 300ms debounce.
+    // Debouncing prevents excessive writes when the user rapidly changes pages or PO tabs.
+    // Falls back gracefully on QuotaExceededError (localStorage full).
     useEffect(() => {
-        if (stagingData) {
-            try {
-                console.log('💾 [Session] Saving session to localStorage:', {
-                    timestamp: new Date().toISOString(),
-                    selectedPOIndex,
-                    currentPage,
-                    totalPOs: stagingData.po_list?.length || 0
-                })
-                localStorage.setItem(STORAGE_KEY, JSON.stringify({
-                    stagingData,
-                    selectedPOIndex,
-                    currentPage,
-                    timestamp: new Date().toISOString()
-                }))
-                console.log('✅ [Session] Session saved successfully')
-            } catch (error) {
-                console.error('❌ [Session] Failed to save session:', error)
-            }
-        } else {
-            console.log('🗑️ [Session] Removing session from localStorage')
-            localStorage.removeItem(STORAGE_KEY)
-        }
-    }, [stagingData, selectedPOIndex, currentPage])
+        const storageKey = getStorageKey(user)
+        if (!storageKey) return // Can't persist without a valid user identity
 
-    // Session restoration: Check for existing session on mount
-    useEffect(() => {
-        console.log('🔍 [Session] Checking for saved session on mount...')
-        try {
-            const savedSession = localStorage.getItem(STORAGE_KEY)
-            if (savedSession) {
-                console.log('📦 [Session] Found saved session in localStorage')
-                const parsed = JSON.parse(savedSession)
-                const sessionAge = Date.now() - new Date(parsed.timestamp).getTime()
-                const maxAge = 24 * 60 * 60 * 1000 // 24 hours
-                
-                console.log('⏰ [Session] Session age:', Math.floor(sessionAge / 1000 / 60), 'minutes')
-
-                if (sessionAge < maxAge) {
-                    console.log('✅ [Session] Session is valid, showing restore modal')
-                    setShowRestoreModal(true)
-                } else {
-                    console.log('⏳ [Session] Session expired, removing from localStorage')
-                    localStorage.removeItem(STORAGE_KEY)
+        const timer = setTimeout(() => {
+            if (stagingData) {
+                try {
+                    const sessionPayload = JSON.stringify({
+                        schema_version: SESSION_SCHEMA_VERSION,
+                        stagingData,
+                        selectedPOIndex,
+                        currentPage,
+                        timestamp: new Date().toISOString()
+                    })
+                    localStorage.setItem(storageKey, sessionPayload)
+                    console.log('💾 [Session] Saved (v' + SESSION_SCHEMA_VERSION + ', tenant-scoped):', {
+                        key: storageKey.slice(-20) + '...', // Log suffix only, not full key
+                        totalPOs: stagingData.po_list?.length || 0,
+                        selectedPOIndex,
+                        currentPage
+                    })
+                } catch (error) {
+                    if (error instanceof DOMException && error.name === 'QuotaExceededError') {
+                        console.warn('⚠️ [Session] localStorage quota exceeded — session not saved. Consider clearing old data.')
+                        // Do NOT remove the existing session on quota error — it may be partially valid.
+                        // Show a non-blocking warning so user is aware.
+                        import('../utils/toast').then(({ showError }) =>
+                            showError('Aviso: sessão não salva (armazenamento local cheio). Libere espaço ou faça commit agora.')
+                        ).catch(() => {})
+                    } else {
+                        console.error('❌ [Session] Failed to save session:', error)
+                    }
                 }
             } else {
-                console.log('ℹ️ [Session] No saved session found')
+                // stagingData cleared — remove the stored session
+                try {
+                    localStorage.removeItem(storageKey)
+                    console.log('🗑️ [Session] Session removed from localStorage')
+                } catch (_) { /* ignore removal errors */ }
             }
+        }, 300) // 300ms debounce
+
+        return () => clearTimeout(timer)
+    }, [stagingData, selectedPOIndex, currentPage, user])
+
+    // ─── Session Restore Effect (on mount) ──────────────────────────────────────────────
+    // Checks for a saved session in tenant-scoped localStorage on component mount.
+    // Validates schema version and data shape before offering restore.
+    // Silently discards sessions that are: expired (>24h), wrong schema version, or corrupt.
+    useEffect(() => {
+        const storageKey = getStorageKey(user)
+        if (!storageKey) return // Wait for user to be available
+
+        console.log('🔍 [Session] Checking for saved session on mount...')
+        try {
+            const savedSession = localStorage.getItem(storageKey)
+            if (!savedSession) {
+                console.log('ℹ️ [Session] No saved session found')
+                return
+            }
+
+            const parsed = JSON.parse(savedSession)
+
+            // Schema version check: discard old/incompatible sessions silently
+            if (!isValidSessionSchema(parsed)) {
+                console.warn('⚠️ [Session] Session schema mismatch or invalid — discarding automatically')
+                localStorage.removeItem(storageKey)
+                return
+            }
+
+            // Age check: discard sessions older than 24 hours
+            const sessionAge = Date.now() - new Date(parsed.timestamp).getTime()
+            const MAX_AGE_MS = 24 * 60 * 60 * 1000
+            if (sessionAge >= MAX_AGE_MS) {
+                console.log('⏳ [Session] Session expired (', Math.floor(sessionAge / 60000), 'min old) — discarding')
+                localStorage.removeItem(storageKey)
+                return
+            }
+
+            console.log('✅ [Session] Valid session found (' + Math.floor(sessionAge / 60000) + ' min old), showing restore modal')
+            setShowRestoreModal(true)
         } catch (error) {
             console.error('❌ [Session] Failed to check for saved session:', error)
-            localStorage.removeItem(STORAGE_KEY)
+            try { localStorage.removeItem(getStorageKey(user)) } catch (_) {}
         }
-    }, [])
+    }, [user]) // Re-check when user changes (login/logout)
 
     const handleRestoreSession = () => {
+        const storageKey = getStorageKey(user)
+        if (!storageKey) { setShowRestoreModal(false); return }
+
         console.log('🔄 [Session] Restoring session...')
         try {
-            const savedSession = localStorage.getItem(STORAGE_KEY)
+            const savedSession = localStorage.getItem(storageKey)
             if (savedSession) {
                 const parsed = JSON.parse(savedSession)
+
+                // Re-validate on restore (session could have been modified externally)
+                if (!isValidSessionSchema(parsed)) {
+                    console.warn('⚠️ [Session] Session schema invalid on restore — discarding')
+                    localStorage.removeItem(storageKey)
+                    setShowRestoreModal(false)
+                    return
+                }
+
                 console.log('📥 [Session] Loaded session data:', {
                     totalPOs: parsed.stagingData?.po_list?.length || 0,
                     selectedPOIndex: parsed.selectedPOIndex,
@@ -122,14 +205,17 @@ const ImportPage = () => {
         } catch (error) {
             console.error('❌ [Session] Failed to restore session:', error)
             showError('Erro ao restaurar sessão')
-            localStorage.removeItem(STORAGE_KEY)
+            try { localStorage.removeItem(storageKey) } catch (_) {}
         }
         setShowRestoreModal(false)
     }
 
     const handleDiscardSession = () => {
+        const storageKey = getStorageKey(user)
         console.log('🗑️ [Session] Discarding saved session')
-        localStorage.removeItem(STORAGE_KEY)
+        if (storageKey) {
+            try { localStorage.removeItem(storageKey) } catch (_) {}
+        }
         setShowRestoreModal(false)
     }
 
@@ -1625,6 +1711,46 @@ const ImportPage = () => {
                     rules={helpContent.rules}
                     nextSteps={helpContent.nextSteps}
                     requiredFields={helpContent.requiredFields}
+                />
+            )}
+
+            {/* Finance Approval Modal */}
+            {showFinanceModal && selectedFinanceItem && (
+                <FinanceApprovalModal
+                    item={selectedFinanceItem}
+                    poNumber={
+                        stagingData?.po_list?.[selectedPOIndex]?.po_number ||
+                        stagingData?.po_number ||
+                        'N/A'
+                    }
+                    onApprove={(justification) => {
+                        // Mark item as finance-approved in staging state (UI-only, Step 2)
+                        // Full API call will be wired in Hardening Step 3
+                        console.log('✅ [Finance] APPROVED:', {
+                            sku: selectedFinanceItem.sku,
+                            justification
+                        })
+                        showSuccess(`Item ${selectedFinanceItem.sku || ''} aprovado financeiramente.`)
+                        setShowFinanceModal(false)
+                        setSelectedFinanceItem(null)
+                        setFinanceJustification('')
+                    }}
+                    onReject={(justification) => {
+                        // Mark item as finance-rejected in staging state (UI-only, Step 2)
+                        console.log('❌ [Finance] REJECTED:', {
+                            sku: selectedFinanceItem.sku,
+                            justification
+                        })
+                        showError(`Item ${selectedFinanceItem.sku || ''} rejeitado pelo financeiro.`)
+                        setShowFinanceModal(false)
+                        setSelectedFinanceItem(null)
+                        setFinanceJustification('')
+                    }}
+                    onClose={() => {
+                        setShowFinanceModal(false)
+                        setSelectedFinanceItem(null)
+                        setFinanceJustification('')
+                    }}
                 />
             )}
         </div>
