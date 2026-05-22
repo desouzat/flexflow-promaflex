@@ -61,6 +61,65 @@ STATUS_FLOW = {
 }
 
 
+def log_po_status_transition(
+    db: Session,
+    po: PurchaseOrder,
+    from_status: Optional[str],
+    to_status: str,
+    current_user: UserInfo,
+    justification: Optional[str] = None,
+    is_exception: bool = False,
+    extra_data: Optional[dict] = None
+):
+    """
+    Log status transition for all items of a PO into the AuditLog using high-security V2 hashing (with tenant_id).
+    """
+    from backend.models import AuditLog, get_last_audit_hash
+    from datetime import datetime
+    import uuid
+    
+    timestamp = datetime.utcnow()
+    changed_by_uuid = uuid.UUID(str(current_user.id)) if current_user.id else None
+    
+    for item in po.items:
+        previous_hash = get_last_audit_hash(db, item.id)
+        
+        # Calculate new hash using V2
+        audit_hash = AuditLog.calculate_hash_for_version(
+            version=2,
+            item_id=item.id,
+            from_status=from_status,
+            to_status=to_status,
+            timestamp=timestamp,
+            previous_hash=previous_hash,
+            changed_by=changed_by_uuid,
+            tenant_id=po.tenant_id
+        )
+        
+        # Merge extra data
+        log_extra = {
+            "po_id": str(po.id),
+            "po_number": po.po_number,
+            "user_role": current_user.role
+        }
+        if extra_data:
+            log_extra.update(extra_data)
+            
+        audit_entry = AuditLog(
+            item_id=item.id,
+            from_status=from_status,
+            to_status=to_status,
+            hash=audit_hash,
+            previous_hash=previous_hash,
+            is_exception=is_exception,
+            justification=justification,
+            changed_by=changed_by_uuid,
+            extra_data=log_extra,
+            hash_version=2
+        )
+        db.add(audit_entry)
+
+
 def calculate_po_metrics(po: PurchaseOrder) -> dict:
     """Calculate metrics for a Purchase Order"""
     total_value = Decimal("0.00")
@@ -426,6 +485,271 @@ async def get_purchase_order(
     )
 
 
+@router.get("/pos/{po_id}/handoff-history")
+async def get_handoff_history(
+    po_id: str,
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get handoff history and SLA analytics for a specific PO.
+    """
+    import uuid
+    from backend.models import AuditLog
+    
+    try:
+        uuid.UUID(po_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Purchase Order {po_id} not found"
+        )
+
+    po = db.query(PurchaseOrder).filter(
+        PurchaseOrder.id == po_id,
+        PurchaseOrder.tenant_id == current_user.tenant_id
+    ).first()
+    
+    if not po:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Purchase Order {po_id} not found"
+        )
+        
+    # Reconstruct chronological traces
+    logs = []
+    if po.items:
+        logs = db.query(AuditLog).filter(
+            AuditLog.item_id == po.items[0].id
+        ).order_by(AuditLog.created_at.asc()).all()
+        
+    timeline = []
+    initial_status = logs[0].from_status if (logs and logs[0].from_status) else "DRAFT"
+    creator_name = "Sistema"
+    if po.creator:
+        creator_name = po.creator.name or po.creator.email
+        
+    timeline.append({
+        "status": initial_status,
+        "start": po.created_at,
+        "user": creator_name
+    })
+    
+    for log in logs:
+        if timeline:
+            timeline[-1]["end"] = log.created_at
+        user_name = "Sistema"
+        if log.changed_by_user:
+            user_name = log.changed_by_user.name or log.changed_by_user.email
+            
+        timeline.append({
+            "status": log.to_status,
+            "start": log.created_at,
+            "user": user_name
+        })
+        
+    if timeline:
+        timeline[-1]["end"] = None
+        
+    def get_area_name(status_db):
+        status_db = status_db.upper() if status_db else ""
+        if status_db in ["DRAFT", "SUBMITTED", "WAITING_COMMERCIAL_PARTITION"]:
+            return "Comercial"
+        elif status_db in ["APPROVED"]:
+            return "PCP"
+        elif status_db in ["IN_PROGRESS"]:
+            return "Produção"
+        elif status_db in ["WAITING_DISPATCH"]:
+            return "Expedição"
+        elif status_db in ["AUDIT_PENDING", "COMPLETED", "ANALISE_CREDITO"]:
+            return "Financeiro"
+        return "Comercial"
+        
+    grouped_areas = []
+    current_area = None
+    for interval in timeline:
+        area_name = get_area_name(interval["status"])
+        start_time = interval["start"]
+        end_time = interval.get("end")
+        user = interval["user"]
+        
+        if not current_area or current_area["area"] != area_name:
+            if current_area:
+                grouped_areas.append(current_area)
+            current_area = {
+                "area": area_name,
+                "arrival": start_time,
+                "departure": end_time,
+                "users": [user]
+            }
+        else:
+            current_area["departure"] = end_time
+            if user not in current_area["users"]:
+                current_area["users"].append(user)
+                
+    if current_area:
+        grouped_areas.append(current_area)
+        
+    now = datetime.utcnow()
+    
+    def format_duration(td):
+        total_seconds = int(td.total_seconds())
+        if total_seconds < 60:
+            return "< 1m"
+        days = total_seconds // 86400
+        total_seconds %= 86400
+        hours = total_seconds // 3600
+        total_seconds %= 3600
+        minutes = total_seconds // 60
+        
+        parts = []
+        if days > 0:
+            parts.append(f"{days}d")
+        if hours > 0:
+            parts.append(f"{hours}h")
+        if minutes > 0 or (days == 0 and hours == 0):
+            parts.append(f"{minutes}m")
+        return " ".join(parts)
+        
+    formatted_history = []
+    for item in grouped_areas:
+        arrival = item["arrival"]
+        departure = item["departure"]
+        end_for_duration = departure if departure else now
+        
+        if arrival.tzinfo:
+            arrival = arrival.replace(tzinfo=None)
+        if end_for_duration.tzinfo:
+            end_for_duration = end_for_duration.replace(tzinfo=None)
+            
+        duration_td = end_for_duration - arrival
+        duration_str = format_duration(duration_td)
+        
+        arrival_str = arrival.strftime("%d/%m/%Y %H:%M:%S")
+        departure_str = departure.strftime("%d/%m/%Y %H:%M:%S") if departure else "Em andamento"
+        
+        formatted_history.append({
+            "area": item["area"],
+            "arrival": arrival_str,
+            "departure": departure_str,
+            "duration": duration_str,
+            "duration_seconds": int(duration_td.total_seconds()),
+            "user": ", ".join(item["users"])
+        })
+        
+    # Check is_replacement
+    is_replacement = False
+    if po.partition_metadata and po.partition_metadata.get("is_replacement"):
+        is_replacement = True
+    elif po.items:
+        for item in po.items:
+            if item.extra_metadata and item.extra_metadata.get("is_replacement"):
+                is_replacement = True
+                break
+                
+    # SLA multiplier
+    sla_factor = 0.5 if is_replacement else 1.0
+    total_sla_hours = 240.0 * sla_factor
+    
+    # Area SLAs
+    area_slas = {
+        "Comercial": 48.0,
+        "PCP": 24.0,
+        "Produção": 72.0,
+        "Expedição": 48.0,
+        "Financeiro": 48.0
+    }
+    
+    active_area = STATUS_DISPLAY_MAP.get(po.status_macro, "Comercial")
+    current_area_sla_hours = area_slas.get(active_area, 48.0) * sla_factor
+    
+    # Total elapsed
+    po_created_naive = po.created_at.replace(tzinfo=None) if po.created_at.tzinfo else po.created_at
+    total_elapsed_hours = (now - po_created_naive).total_seconds() / 3600.0
+    
+    # Current Area elapsed
+    current_area_elapsed_hours = 0.0
+    if formatted_history:
+        current_area_elapsed_hours = formatted_history[-1]["duration_seconds"] / 3600.0
+        
+    return {
+        "handoff_history": formatted_history,
+        "is_replacement": is_replacement,
+        "total_sla_hours": total_sla_hours,
+        "total_elapsed_hours": total_elapsed_hours,
+        "current_area": active_area,
+        "current_area_sla_hours": current_area_sla_hours,
+        "current_area_elapsed_hours": current_area_elapsed_hours
+    }
+
+
+@router.put("/pos/{po_id}/area-fields")
+async def update_po_area_fields(
+    po_id: str,
+    fields: dict,
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Dynamically merge area-specific custom fields into partition_metadata.
+    """
+    import uuid
+    
+    try:
+        uuid.UUID(po_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Purchase Order {po_id} not found"
+        )
+
+    po = db.query(PurchaseOrder).filter(
+        PurchaseOrder.id == po_id,
+        PurchaseOrder.tenant_id == current_user.tenant_id
+    ).first()
+    
+    if not po:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Purchase Order {po_id} not found"
+        )
+        
+    if po.partition_metadata is None:
+        po.partition_metadata = {}
+        
+    # Merge custom fields
+    meta = dict(po.partition_metadata)
+    meta.update(fields)
+    po.partition_metadata = meta
+    
+    # Synchronize specific properties
+    if "client_name" in fields:
+        po.client_name = fields["client_name"]
+    if "data_programada" in fields:
+        po.expected_delivery_date = fields["data_programada"]
+    elif "expected_delivery_date" in fields:
+        po.expected_delivery_date = fields["expected_delivery_date"]
+        
+    # Special: if is_replacement is passed, sync it to items to keep them aligned
+    if "is_replacement" in fields:
+        is_rep_val = fields["is_replacement"]
+        for item in po.items:
+            if item.extra_metadata is None:
+                item.extra_metadata = {}
+            item_meta = dict(item.extra_metadata)
+            item_meta["is_replacement"] = is_rep_val
+            item.extra_metadata = item_meta
+            
+    po.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(po)
+    
+    return {
+        "success": True,
+        "partition_metadata": po.partition_metadata
+    }
+
+
 @router.post("/move-status", response_model=MoveStatusResponse)
 async def move_po_status(
     request: MoveStatusRequest,
@@ -516,45 +840,20 @@ async def move_po_status(
     po.status_macro = to_status_db
     po.updated_at = datetime.utcnow()
     
-    # Create audit log for exception if applicable
-    if is_exception:
-        from backend.models import AuditLog
-        
-        # Log the exception for each item in the PO
-        for item in po.items:
-            # Get previous hash for blockchain
-            from backend.models import get_last_audit_hash
-            previous_hash = get_last_audit_hash(db, item.id)
-            
-            # Calculate new hash
-            audit_hash = AuditLog.calculate_hash(
-                item_id=item.id,
-                from_status=from_status,
-                to_status=to_status_db,
-                timestamp=datetime.utcnow(),
-                previous_hash=previous_hash,
-                changed_by=current_user.id
-            )
-            
-            # Create audit log entry
-            audit_entry = AuditLog(
-                item_id=item.id,
-                from_status=from_status,
-                to_status=to_status_db,
-                hash=audit_hash,
-                previous_hash=previous_hash,
-                is_exception=True,
-                justification=request.justificativa_lider,
-                changed_by=current_user.id,
-                extra_data={
-                    "po_id": str(po.id),
-                    "po_number": po.po_number,
-                    "user_role": current_user.role,
-                    "reason": request.reason,
-                    "metadata": request.metadata
-                }
-            )
-            db.add(audit_entry)
+    # Always log status transition
+    log_po_status_transition(
+        db=db,
+        po=po,
+        from_status=from_status,
+        to_status=to_status_db,
+        current_user=current_user,
+        justification=request.justificativa_lider if is_exception else None,
+        is_exception=is_exception,
+        extra_data={
+            "reason": request.reason,
+            "metadata": request.metadata
+        }
+    )
     
     db.commit()
     
@@ -971,6 +1270,17 @@ async def advance_po_status(
     # Update status
     po.status_macro = next_status
     po.updated_at = datetime.utcnow()
+    
+    # Log status transition
+    log_po_status_transition(
+        db=db,
+        po=po,
+        from_status=current_status,
+        to_status=next_status,
+        current_user=current_user,
+        is_exception=False
+    )
+    
     db.commit()
     
     return {
@@ -1025,42 +1335,19 @@ async def return_po_status(
     po.updated_at = datetime.utcnow()
     
     # Create audit log for return
-    from backend.models import AuditLog
-    
-    for item in po.items:
-        # Get previous hash for blockchain
-        from backend.models import get_last_audit_hash
-        previous_hash = get_last_audit_hash(db, item.id)
-        
-        # Calculate new hash
-        audit_hash = AuditLog.calculate_hash(
-            item_id=item.id,
-            from_status=from_status,
-            to_status=prev_status,
-            timestamp=datetime.utcnow(),
-            previous_hash=previous_hash,
-            changed_by=current_user.id
-        )
-        
-        # Create audit log entry
-        audit_entry = AuditLog(
-            item_id=item.id,
-            from_status=from_status,
-            to_status=prev_status,
-            hash=audit_hash,
-            previous_hash=previous_hash,
-            is_exception=False,
-            justification=f"DEVOLUÇÃO: {reason}",
-            changed_by=current_user.id,
-            extra_data={
-                "po_id": str(po.id),
-                "po_number": po.po_number,
-                "user_role": current_user.role,
-                "return_reason": reason,
-                "action_type": "RETURN"
-            }
-        )
-        db.add(audit_entry)
+    log_po_status_transition(
+        db=db,
+        po=po,
+        from_status=from_status,
+        to_status=prev_status,
+        current_user=current_user,
+        justification=f"DEVOLUÇÃO: {reason}",
+        is_exception=False,
+        extra_data={
+            "return_reason": reason,
+            "action_type": "RETURN"
+        }
+    )
     
     db.commit()
     
@@ -1116,39 +1403,19 @@ async def suggest_partition(
     po.updated_at = datetime.utcnow()
     
     # Create audit log
-    from backend.models import AuditLog
-    
-    for item in po.items:
-        from backend.models import get_last_audit_hash
-        previous_hash = get_last_audit_hash(db, item.id)
-        
-        audit_hash = AuditLog.calculate_hash(
-            item_id=item.id,
-            from_status=from_status,
-            to_status="WAITING_COMMERCIAL_PARTITION",
-            timestamp=datetime.utcnow(),
-            previous_hash=previous_hash,
-            changed_by=current_user.id
-        )
-        
-        audit_entry = AuditLog(
-            item_id=item.id,
-            from_status=from_status,
-            to_status="WAITING_COMMERCIAL_PARTITION",
-            hash=audit_hash,
-            previous_hash=previous_hash,
-            is_exception=False,
-            justification=f"SUGESTÃO DE PARTIÇÃO: {reason}",
-            changed_by=current_user.id,
-            extra_data={
-                "po_id": str(po.id),
-                "po_number": po.po_number,
-                "user_role": current_user.role,
-                "partition_reason": reason,
-                "action_type": "SUGGEST_PARTITION"
-            }
-        )
-        db.add(audit_entry)
+    log_po_status_transition(
+        db=db,
+        po=po,
+        from_status=from_status,
+        to_status="WAITING_COMMERCIAL_PARTITION",
+        current_user=current_user,
+        justification=f"SUGESTÃO DE PARTIÇÃO: {reason}",
+        is_exception=False,
+        extra_data={
+            "partition_reason": reason,
+            "action_type": "SUGGEST_PARTITION"
+        }
+    )
     
     db.commit()
     

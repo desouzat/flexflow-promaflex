@@ -224,19 +224,6 @@ const MetadataVisualizer = ({ metadata, itemId, onUpdate, readOnly = false }) =>
                 )}
             </div>
 
-            {/* Footer - JSON View Toggle */}
-            {!isEditing && (
-                <div className="p-3 border-t border-gray-200 bg-gray-50">
-                    <details className="text-sm">
-                        <summary className="cursor-pointer text-gray-600 hover:text-gray-900 font-medium">
-                            Ver JSON Completo
-                        </summary>
-                        <pre className="mt-2 p-3 bg-gray-900 text-green-400 rounded-lg overflow-x-auto text-xs">
-                            {JSON.stringify(metadata, null, 2)}
-                        </pre>
-                    </details>
-                </div>
-            )}
         </div>
     )
 }

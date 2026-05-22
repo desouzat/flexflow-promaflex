@@ -28,6 +28,8 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
         ...po
     }
 
+    const isReplacement = safepo.is_replacement || safepo.extra_metadata?.is_replacement || false
+
     const marginInfo = useMemo(() => {
         return calculatePOMargins(safepo)
     }, [safepo.items, safepo.total_value, safepo.payment_terms])
@@ -163,12 +165,27 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
                         {getStatusIcon(safepo.status)}
                     </div>
                 </div>
-                <p className="text-xs text-gray-600 mb-2">{safepo.supplier_name}</p>
+
+                {isReplacement && (
+                    <div className="mb-2">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold bg-cyan-100 text-cyan-800 border border-cyan-300">
+                            🔄 TROCA
+                        </span>
+                    </div>
+                )}
+
+                <p className="text-xs text-gray-700 font-semibold mb-1">
+                    Cliente: {safepo.client_name || safepo.supplier_name || 'Desconhecido'}
+                </p>
+                <p className="text-[10px] text-gray-500 mb-2">
+                    Fornecedor: {safepo.supplier_name}
+                </p>
                 <div className="flex items-center justify-between text-xs">
                     <span className="font-medium text-gray-900">
                         {formatCurrency(safepo.total_value)}
                     </span>
-                    <span className="text-gray-500">
+                    <span className="text-gray-500 font-medium flex items-center gap-1">
+                        <Calendar className="w-3.5 h-3.5 text-gray-400" />
                         {formatDate(safepo.expected_delivery_date)}
                     </span>
                 </div>
@@ -191,10 +208,20 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
                 </div>
             )}
 
+            {/* Cyan Badge for Replacement (Troca) */}
+            {isReplacement && (
+                <div className="mb-3 px-3 py-2 bg-cyan-50 border border-cyan-350 rounded-lg flex items-center gap-2">
+                    <RefreshCw className="w-4 h-4 text-cyan-600 animate-spin-slow" />
+                    <span className="text-xs font-extrabold text-cyan-700">
+                        🔄 CRÉDITO PRÉ-APROVADO (TROCA)
+                    </span>
+                </div>
+            )}
+
             {/* Header */}
             <div className="flex items-start justify-between mb-3">
                 <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
+                    <div className="flex items-center gap-2 mb-1.5">
                         <h3 className="font-semibold text-gray-900 text-sm">
                             PO #{safepo.po_number}
                         </h3>
@@ -216,7 +243,12 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
                             </div>
                         )}
                     </div>
-                    <p className="text-xs text-gray-600">{safepo.supplier_name}</p>
+                    <p className="text-xs text-gray-800 font-semibold mb-0.5">
+                        Cliente: {safepo.client_name || safepo.supplier_name || 'Desconhecido'}
+                    </p>
+                    <p className="text-[11px] text-gray-500">
+                        Fornecedor: {safepo.supplier_name}
+                    </p>
                 </div>
                 <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium border ${getStatusColor(safepo.status)}`}>
                     {getStatusIcon(safepo.status)}

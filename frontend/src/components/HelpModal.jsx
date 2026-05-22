@@ -44,11 +44,8 @@ const HelpModal = ({ isOpen, onClose, status }) => {
                         <span className="text-3xl">{helpConfig.icon}</span>
                         <div>
                             <h2 className="text-2xl font-bold text-gray-900">
-                                {helpConfig.title}
+                                Mesa de Conferência - Sistema de Ajuda Contextual - FlexFlow
                             </h2>
-                            <p className="text-sm text-gray-600 mt-1">
-                                {status === 'Staging' ? 'Mesa de Conferência - FlexFlow' : 'Sistema de Ajuda Contextual - FlexFlow'}
-                            </p>
                         </div>
                     </div>
                     <button
@@ -122,6 +119,31 @@ const HelpModal = ({ isOpen, onClose, status }) => {
                             </ul>
                         </div>
                     )}
+
+                    {/* Glossário / Dicionário de Termos */}
+                    <div className="border-t border-gray-150 pt-6">
+                        <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                            <span>📚</span> Dicionário de Conceitos & Margem
+                        </h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="bg-sky-50 border border-sky-200 rounded-lg p-4">
+                                <h4 className="font-semibold text-sky-950 mb-1 flex items-center gap-1.5">
+                                    <span className="text-sky-600">🔍</span> PENDENTE PCP
+                                </h4>
+                                <p className="text-sm text-sky-850 leading-relaxed">
+                                    Indica que o custo industrial do SKU ainda não foi validado pelo PCP; a margem será calculada após o vínculo técnico.
+                                </p>
+                            </div>
+                            <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
+                                <h4 className="font-semibold text-indigo-950 mb-1 flex items-center gap-1.5">
+                                    <span className="text-indigo-600">📊</span> Manual de Margem
+                                </h4>
+                                <p className="text-sm text-indigo-850 leading-relaxed">
+                                    Frete e Custos Adicionais informados no cabeçalho (Header Freight/Costs) são rateados proporcionalmente entre todos os itens do pedido com base no seu valor relativo, impactando diretamente a composição de suas margens individuais.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 {/* Footer */}

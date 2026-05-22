@@ -335,6 +335,59 @@ class PurchaseOrder(Base):
             self.partition_metadata = {}
         self.partition_metadata["client_name"] = value
 
+    @property
+    def expected_delivery_date(self) -> Optional[datetime]:
+        """
+        Getter para expected_delivery_date. Retorna a data armazenada em partition_metadata
+        ou recupera a data nos itens.
+        """
+        if self.partition_metadata and "expected_delivery_date" in self.partition_metadata:
+            val = self.partition_metadata["expected_delivery_date"]
+            if val:
+                if isinstance(val, datetime):
+                    return val
+                try:
+                    return datetime.fromisoformat(str(val))
+                except ValueError:
+                    try:
+                        return datetime.strptime(str(val), "%Y-%m-%d")
+                    except ValueError:
+                        pass
+                    return None
+        
+        # Fallback para os itens associados
+        if self.items:
+            for item in self.items:
+                if item.extra_metadata:
+                    for key in ["expected_delivery_date", "data_previsao_entrega", "Previsão de Entrega"]:
+                        if key in item.extra_metadata and item.extra_metadata[key]:
+                            val = item.extra_metadata[key]
+                            if isinstance(val, datetime):
+                                return val
+                            try:
+                                return datetime.fromisoformat(str(val))
+                            except ValueError:
+                                try:
+                                    return datetime.strptime(str(val), "%Y-%m-%d")
+                                except ValueError:
+                                    pass
+                                
+        return None
+
+    @expected_delivery_date.setter
+    def expected_delivery_date(self, value):
+        """
+        Setter para expected_delivery_date. Armazena o valor em partition_metadata.
+        """
+        from datetime import date
+        if self.partition_metadata is None:
+            self.partition_metadata = {}
+        
+        if isinstance(value, (datetime, date)):
+            self.partition_metadata["expected_delivery_date"] = value.isoformat()
+        else:
+            self.partition_metadata["expected_delivery_date"] = value
+
     def __repr__(self):
         return f"<PurchaseOrder(id={self.id}, po_number={self.po_number}, status={self.status_macro})>"
 

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import KanbanColumn from '../components/kanban/KanbanColumn'
 import ErrorBoundary from '../components/ErrorBoundary'
 import MetadataVisualizer from '../components/MetadataVisualizer'
+import { calculatePOMargins } from '../utils/marginCalculator'
 import api from '../utils/api'
 import { showSuccess, showError } from '../utils/toast'
 import { useNotifications } from '../context/NotificationContext'
@@ -10,7 +11,8 @@ import {
     RefreshCw, Filter, Search, Maximize2, Minimize2, X,
     Package, DollarSign, Calendar, User, FileText, Globe,
     Star, RefreshCw as RefreshIcon, Zap, AlertCircle, Upload,
-    CheckCircle, Edit2, Save, XCircle, Truck
+    CheckCircle, Edit2, Save, XCircle, Truck, Lock, Unlock,
+    ArrowUpRight, ShieldAlert
 } from 'lucide-react'
 
 const KanbanPage = () => {
@@ -36,6 +38,9 @@ const KanbanPage = () => {
     const [returnReason, setReturnReason] = useState('')
     const [showPartitionModal, setShowPartitionModal] = useState(false)
     const [partitionReason, setPartitionReason] = useState('')
+    const [handoffHistory, setHandoffHistory] = useState(null)
+    const [savingFields, setSavingFields] = useState(false)
+    const [localFields, setLocalFields] = useState({})
     const { refreshNotifications } = useNotifications()
     const { user } = useAuth()
 
@@ -80,18 +85,96 @@ const KanbanPage = () => {
         return () => document.removeEventListener('keydown', handleEscape);
     }, [showDetailsModal, showReturnModal, showPartitionModal]);
 
+    useEffect(() => {
+        if (selectedPO) {
+            setLocalFields(selectedPO.extra_metadata || {})
+        } else {
+            setLocalFields({})
+        }
+    }, [selectedPO])
+
+    const handleChangeLocalField = (key, value) => {
+        setLocalFields(prev => ({ ...prev, [key]: value }))
+    }
+
+    const handleBlurLocalField = (key) => {
+        if (!selectedPO) return
+        const originalValue = selectedPO.extra_metadata?.[key] || ''
+        const currentValue = localFields[key] || ''
+        if (String(originalValue) !== String(currentValue)) {
+            handleSaveAreaFields({ [key]: currentValue })
+        }
+    }
+
+    const handleSelectField = (key, value) => {
+        setLocalFields(prev => ({ ...prev, [key]: value }))
+        handleSaveAreaFields({ [key]: value })
+    }
+
     const handleCardClick = async (po) => {
         setSelectedPO(po)
         setShowDetailsModal(true)
+        setHandoffHistory(null)
 
-        // Load logistics checklist if in Expedição/Faturamento
-        if (po.status === 'Expedição/Faturamento') {
+        // Load handoff history & SLA data
+        try {
+            const response = await api.get(`/kanban/pos/${po.id}/handoff-history`)
+            setHandoffHistory(response.data)
+        } catch (err) {
+            console.error('Error loading handoff history:', err)
+        }
+
+        // Load logistics checklist if in Expedição/Faturamento or Faturamento/Expedição
+        if (po.status === 'Expedição/Faturamento' || po.status === 'Faturamento/Expedição') {
             try {
                 const response = await api.get(`/kanban/pos/${po.id}/logistics-checklist`)
                 setLogisticsChecklist(response.data.checklist)
             } catch (err) {
                 console.error('Error loading logistics checklist:', err)
             }
+        }
+    }
+
+    const handleSaveAreaFields = async (fieldsToUpdate) => {
+        if (!selectedPO) return
+        setSavingFields(true)
+        try {
+            const response = await api.put(`/kanban/pos/${selectedPO.id}/area-fields`, fieldsToUpdate)
+            if (response.data.success) {
+                // Update selectedPO in local state
+                setSelectedPO(prev => ({
+                    ...prev,
+                    extra_metadata: {
+                        ...(prev.extra_metadata || {}),
+                        ...response.data.partition_metadata
+                    }
+                }))
+                // Also update in boardData to reflect changes instantly on the cards
+                setBoardData(prev => {
+                    if (!prev || !prev.columns) return prev
+                    const updatedColumns = prev.columns.map(col => {
+                        const updatedPos = col.pos.map(po => {
+                            if (po.id === selectedPO.id) {
+                                return {
+                                    ...po,
+                                    extra_metadata: {
+                                        ...(po.extra_metadata || {}),
+                                        ...response.data.partition_metadata
+                                    }
+                                }
+                            }
+                            return po
+                        })
+                        return { ...col, pos: updatedPos }
+                    })
+                    return { ...prev, columns: updatedColumns }
+                })
+            }
+        } catch (err) {
+            console.error('Error saving area fields:', err)
+            showError('Falha ao salvar as alterações do setor.')
+        } finally {
+            setSavingFields(false)
         }
     }
 
@@ -417,6 +500,58 @@ const KanbanPage = () => {
         )
     }
 
+    const canAdvanceCurrentArea = () => {
+        if (!selectedPO) return false
+
+        const meta = selectedPO.extra_metadata || {}
+
+        if (selectedPO.status === 'Comercial') {
+            return true
+        }
+
+        if (selectedPO.status === 'PCP') {
+            const packaging = meta.packaging_type || ''
+            const deliveryDate = meta.data_programada || selectedPO.expected_delivery_date || ''
+            return packaging !== '' && deliveryDate !== ''
+        }
+
+        if (selectedPO.status === 'Produção/Embalagem') {
+            const statusProd = meta.status_producao || ''
+            const qReal = parseFloat(meta.qtd_real_produzida)
+            const perda = parseFloat(meta.perda_tecnica)
+            
+            return (
+                (statusProd === 'Finalizado' || statusProd === 'FINISH') &&
+                !isNaN(qReal) && qReal > 0 &&
+                !isNaN(perda) && perda >= 0
+            )
+        }
+
+        if (selectedPO.status === 'Faturamento/Expedição') {
+            const nfe = meta.numero_nfe || ''
+            const accessKey = (meta.chave_acesso || '').replace(/\D/g, '')
+            const carrier = meta.transportadora || ''
+            
+            const checklistDone = 
+                logisticsChecklist.endereco_conferido &&
+                logisticsChecklist.peso_validado &&
+                logisticsChecklist.etiquetas_impressas &&
+                logisticsChecklist.foto_carga_path &&
+                logisticsChecklist.foto_canhoto_path
+
+            const isKeyValid = accessKey.length === 44
+
+            return nfe !== '' && isKeyValid && carrier !== '' && checklistDone
+        }
+
+        if (selectedPO.status === 'Financeiro') {
+            const comment = meta.audit_comment || ''
+            return comment.trim().length > 0
+        }
+
+        return true
+    }
+
     if (loading) {
         return (
             <div className="flex items-center justify-center h-full">
@@ -590,279 +725,825 @@ const KanbanPage = () => {
                                     </div>
                                 </div>
 
-                                {/* Financial Section - Editable Commission */}
-                                <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                                    <div className="flex items-center justify-between mb-3">
-                                        <h3 className="text-lg font-semibold text-gray-900">Dados Financeiros</h3>
-                                        {canEditCommission() && !editingCommission && (
-                                            <button
-                                                onClick={() => setEditingCommission(true)}
-                                                className="flex items-center gap-2 px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
-                                            >
-                                                <Edit2 className="w-4 h-4" />
-                                                Editar Comissão
-                                            </button>
-                                        )}
-                                    </div>
+                                {/* SLA and Performance Control Dashboard */}
+                                {(() => {
+                                    const totalSlaHours = handoffHistory?.total_sla_hours || (selectedPO?.extra_metadata?.is_replacement ? 120 : 240);
+                                    const totalElapsedHours = handoffHistory?.total_elapsed_hours || 0;
+                                    const currentAreaSlaHours = handoffHistory?.current_area_sla_hours || 48;
+                                    const currentAreaElapsedHours = handoffHistory?.current_area_elapsed_hours || 0;
+                                    const isReplacement = handoffHistory?.is_replacement || selectedPO?.extra_metadata?.is_replacement || false;
 
-                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                                        <div>
-                                            <span className="text-xs text-gray-600">Margem (CM)</span>
-                                            <p className="text-lg font-bold text-gray-900">
-                                                 {selectedPO.margin_percentage === 'PENDENTE_PCP' || selectedPO.margin_percentage === 'PENDENTE PCP' ? 'PENDENTE PCP' :
-                                                 (selectedPO.margin_percentage !== undefined && selectedPO.margin_percentage !== null) ? (() => {
-                                                     const marginVal = parseFloat(selectedPO.margin_percentage);
-                                                     return isNaN(marginVal) ? 'N/A' : (marginVal > 1000 ? '> 1000%' : `${marginVal.toFixed(2)}%`);
-                                                 })() : 'N/A'}
-                                            </p>
-                                        </div>
-                                        <div>
-                                            <span className="text-xs text-gray-600">Comissão</span>
-                                            {editingCommission ? (
-                                                <input
-                                                    type="number"
-                                                    step="0.01"
-                                                    min="0"
-                                                    max="100"
-                                                    value={commissionValue}
-                                                    onChange={(e) => setCommissionValue(e.target.value)}
-                                                    placeholder="Taxa %"
-                                                    className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                                                />
-                                            ) : (
-                                                <p className="text-lg font-bold text-gray-900">
-                                                    {selectedPO.commission_rate ? `${parseFloat(selectedPO.commission_rate).toFixed(2)}%` : 'N/A'}
-                                                </p>
-                                            )}
-                                        </div>
-                                        <div>
-                                            <span className="text-xs text-gray-600">Valor Comissão</span>
-                                            <p className="text-lg font-bold text-gray-900">
-                                                {formatCurrency(selectedPO.commission_value || 0)}
-                                            </p>
-                                        </div>
-                                    </div>
+                                    const totalPercent = Math.min((totalElapsedHours / totalSlaHours) * 100, 100);
+                                    const areaPercent = Math.min((currentAreaElapsedHours / currentAreaSlaHours) * 100, 100);
 
-                                    {editingCommission && (
-                                        <div className="mt-4 space-y-3">
-                                            <div>
-                                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                                    Justificativa (mínimo 10 caracteres)
-                                                </label>
-                                                <textarea
-                                                    value={commissionJustification}
-                                                    onChange={(e) => setCommissionJustification(e.target.value)}
-                                                    placeholder="Explique o motivo da alteração manual da comissão..."
-                                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                                                    rows="3"
-                                                />
-                                            </div>
-                                            <div className="flex gap-2">
-                                                <button
-                                                    onClick={handleSaveCommission}
-                                                    className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
-                                                >
-                                                    <Save className="w-4 h-4" />
-                                                    Salvar
-                                                </button>
-                                                <button
-                                                    onClick={() => {
-                                                        setEditingCommission(false)
-                                                        setCommissionValue('')
-                                                        setCommissionJustification('')
-                                                    }}
-                                                    className="flex items-center gap-2 px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors text-sm"
-                                                >
-                                                    <XCircle className="w-4 h-4" />
-                                                    Cancelar
-                                                </button>
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
+                                    const getProgressBarColor = (percent) => {
+                                        if (percent < 60) return 'bg-emerald-500';
+                                        if (percent < 85) return 'bg-amber-500';
+                                        if (percent < 100) return 'bg-orange-500';
+                                        return 'bg-rose-500 animate-pulse';
+                                    };
 
-                                {/* Logistics Checklist - Only for Faturamento/Expedição */}
-                                {selectedPO.status === 'Faturamento/Expedição' && (
-                                    <div className="mb-6 p-4 bg-cyan-50 border border-cyan-200 rounded-lg">
-                                        <div className="flex items-center gap-2 mb-4">
-                                            <Truck className="w-5 h-5 text-cyan-700" />
-                                            <h3 className="text-lg font-semibold text-gray-900">Checklist de Saída</h3>
-                                        </div>
-
-                                        <div className="space-y-3 mb-4">
-                                            <label className="flex items-center gap-3 cursor-pointer">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={logisticsChecklist.endereco_conferido}
-                                                    onChange={(e) => handleChecklistChange('endereco_conferido', e.target.checked)}
-                                                    className="w-5 h-5 text-cyan-600 rounded focus:ring-cyan-500"
-                                                />
-                                                <span className="text-gray-700 font-medium">Endereço Conferido</span>
-                                                {logisticsChecklist.endereco_conferido && (
-                                                    <CheckCircle className="w-5 h-5 text-green-600" />
+                                    return (
+                                        <div className="mb-6 bg-slate-900 text-slate-100 p-5 rounded-xl border border-slate-700 shadow-lg">
+                                            <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-2">
+                                                <h3 className="text-xs font-bold tracking-wide uppercase text-slate-300 flex items-center gap-2">
+                                                    <span>⏱️</span> Controle de SLA e Performance
+                                                </h3>
+                                                {isReplacement && (
+                                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-cyan-950 text-cyan-400 border border-cyan-800 animate-pulse">
+                                                        SLA REDUZIDO (50% - TROCA)
+                                                    </span>
                                                 )}
-                                            </label>
-
-                                            <label className="flex items-center gap-3 cursor-pointer">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={logisticsChecklist.peso_validado}
-                                                    onChange={(e) => handleChecklistChange('peso_validado', e.target.checked)}
-                                                    className="w-5 h-5 text-cyan-600 rounded focus:ring-cyan-500"
-                                                />
-                                                <span className="text-gray-700 font-medium">Peso Validado</span>
-                                                {logisticsChecklist.peso_validado && (
-                                                    <CheckCircle className="w-5 h-5 text-green-600" />
-                                                )}
-                                            </label>
-
-                                            <label className="flex items-center gap-3 cursor-pointer">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={logisticsChecklist.etiquetas_impressas}
-                                                    onChange={(e) => handleChecklistChange('etiquetas_impressas', e.target.checked)}
-                                                    className="w-5 h-5 text-cyan-600 rounded focus:ring-cyan-500"
-                                                />
-                                                <span className="text-gray-700 font-medium">Etiquetas Impressas</span>
-                                                {logisticsChecklist.etiquetas_impressas && (
-                                                    <CheckCircle className="w-5 h-5 text-green-600" />
-                                                )}
-                                            </label>
-                                        </div>
-
-                                        <div className="border-t border-cyan-200 pt-4 mt-4">
-                                            <h4 className="text-md font-semibold text-gray-900 mb-3">Evidências Fotográficas</h4>
-
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                {/* Foto da Carga */}
-                                                <div className="border-2 border-dashed border-gray-300 rounded-lg p-4">
-                                                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                                                        Foto da Carga
-                                                    </label>
-                                                    {logisticsChecklist.foto_carga_path ? (
-                                                        <div className="flex items-center gap-2 text-green-600">
-                                                            <CheckCircle className="w-5 h-5" />
-                                                            <span className="text-sm">Enviada</span>
-                                                        </div>
-                                                    ) : (
-                                                        <div>
-                                                            <input
-                                                                type="file"
-                                                                accept="image/*"
-                                                                onChange={(e) => handleEvidenceUpload('foto_carga_path', e.target.files[0])}
-                                                                className="hidden"
-                                                                id="foto-carga-upload"
-                                                                disabled={uploadingEvidence}
-                                                            />
-                                                            <label
-                                                                htmlFor="foto-carga-upload"
-                                                                className="flex items-center justify-center gap-2 px-4 py-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 cursor-pointer transition-colors"
-                                                            >
-                                                                <Upload className="w-4 h-4" />
-                                                                {uploadingEvidence ? 'Enviando...' : 'Enviar Foto'}
-                                                            </label>
-                                                        </div>
-                                                    )}
-                                                </div>
-
-                                                {/* Foto do Canhoto/NF */}
-                                                <div className="border-2 border-dashed border-gray-300 rounded-lg p-4">
-                                                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                                                        Foto do Canhoto/NF
-                                                    </label>
-                                                    {logisticsChecklist.foto_canhoto_path ? (
-                                                        <div className="flex items-center gap-2 text-green-600">
-                                                            <CheckCircle className="w-5 h-5" />
-                                                            <span className="text-sm">Enviada</span>
-                                                        </div>
-                                                    ) : (
-                                                        <div>
-                                                            <input
-                                                                type="file"
-                                                                accept="image/*"
-                                                                onChange={(e) => handleEvidenceUpload('foto_canhoto_path', e.target.files[0])}
-                                                                className="hidden"
-                                                                id="foto-canhoto-upload"
-                                                                disabled={uploadingEvidence}
-                                                            />
-                                                            <label
-                                                                htmlFor="foto-canhoto-upload"
-                                                                className="flex items-center justify-center gap-2 px-4 py-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 cursor-pointer transition-colors"
-                                                            >
-                                                                <Upload className="w-4 h-4" />
-                                                                {uploadingEvidence ? 'Enviando...' : 'Enviar Foto'}
-                                                            </label>
-                                                        </div>
-                                                    )}
-                                                </div>
                                             </div>
-                                        </div>
-
-                                        {/* Dispatch Button */}
-                                        <div className="mt-4 pt-4 border-t border-cyan-200">
-                                            <button
-                                                disabled={!isDispatchReady()}
-                                                className={`w-full flex items-center justify-center gap-2 px-6 py-3 rounded-lg font-semibold transition-colors ${isDispatchReady()
-                                                    ? 'bg-green-600 text-white hover:bg-green-700'
-                                                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                                                    }`}
-                                            >
-                                                <Truck className="w-5 h-5" />
-                                                {isDispatchReady() ? 'Concluir Despacho' : 'Complete o Checklist e Evidências'}
-                                            </button>
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* Strategic Indicators */}
-                                {selectedPO.extra_metadata && Object.keys(selectedPO.extra_metadata).length > 0 && (
-                                    <div className="mb-6">
-                                        <h3 className="text-lg font-semibold text-gray-900 mb-3">Indicadores Estratégicos</h3>
-                                        <div className="flex flex-wrap gap-2">
-                                            {getStrategicIndicators(selectedPO.extra_metadata).map((indicator, idx) => {
-                                                const IconComponent = indicator.icon
-                                                return (
-                                                    <div
-                                                        key={idx}
-                                                        className={`flex items-center gap-2 px-3 py-2 rounded-lg bg-${indicator.color}-100 text-${indicator.color}-700 border border-${indicator.color}-200`}
-                                                    >
-                                                        <IconComponent className="w-4 h-4" />
-                                                        <span className="text-sm font-medium">{indicator.label}</span>
+                                            
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                                {/* Tempo Total */}
+                                                <div>
+                                                    <div className="flex justify-between text-xs font-semibold mb-1">
+                                                        <span>Tempo Total Acumulado</span>
+                                                        <span className="font-mono text-slate-300">
+                                                            {totalElapsedHours.toFixed(1)}h / {totalSlaHours.toFixed(0)}h ({totalPercent.toFixed(0)}%)
+                                                        </span>
                                                     </div>
-                                                )
-                                            })}
-                                        </div>
-                                    </div>
-                                )}
+                                                    <div className="w-full bg-slate-800 rounded-full h-3 overflow-hidden border border-slate-700">
+                                                        <div 
+                                                            className={`h-full transition-all duration-500 ${getProgressBarColor(totalPercent)}`} 
+                                                            style={{ width: `${totalPercent}%` }}
+                                                        />
+                                                    </div>
+                                                    <p className="text-[10px] text-slate-450 mt-1">
+                                                        Prazo total contratual para o fluxo completo do pedido.
+                                                    </p>
+                                                </div>
 
-                                {/* Production Impediment */}
-                                {selectedPO.extra_metadata?.production_impediment && (
-                                    <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
-                                        <div className="flex items-center gap-2 text-red-700 mb-2">
-                                            <AlertCircle className="w-5 h-5" />
-                                            <h3 className="font-semibold">Impedimento de Produção</h3>
+                                                {/* Tempo na Área Atual */}
+                                                <div>
+                                                    <div className="flex justify-between text-xs font-semibold mb-1">
+                                                        <span>Tempo na Área Atual ({selectedPO.status})</span>
+                                                        <span className="font-mono text-slate-300">
+                                                            {currentAreaElapsedHours.toFixed(1)}h / {currentAreaSlaHours.toFixed(0)}h ({areaPercent.toFixed(0)}%)
+                                                        </span>
+                                                    </div>
+                                                    <div className="w-full bg-slate-800 rounded-full h-3 overflow-hidden border border-slate-700">
+                                                        <div 
+                                                            className={`h-full transition-all duration-500 ${getProgressBarColor(areaPercent)}`} 
+                                                            style={{ width: `${areaPercent}%` }}
+                                                        />
+                                                    </div>
+                                                    <p className="text-[10px] text-slate-455 mt-1">
+                                                        Tempo decorrido neste setor operacional específico.
+                                                    </p>
+                                                </div>
+                                            </div>
                                         </div>
-                                        <p className="text-sm text-red-600">
-                                            {selectedPO.extra_metadata.production_impediment}
-                                        </p>
-                                    </div>
-                                )}
+                                    );
+                                })()}
+
+                                {/* Sector Flow Stepper */}
+                                <div className="space-y-6 mb-6">
+                                    <h3 className="text-lg font-bold text-gray-900 border-b border-gray-150 pb-2 flex items-center gap-2">
+                                        <span>⚙️</span> Esteira BPMS de Operações (Setores de Produção)
+                                    </h3>
+                                    
+                                    {(() => {
+                                        const stages = ['Comercial', 'PCP', 'Produção/Embalagem', 'Faturamento/Expedição', 'Financeiro'];
+                                        const currentStageIndex = stages.indexOf(selectedPO.status);
+
+                                        return stages.map((stageName, idx) => {
+                                            const isCompleted = idx < currentStageIndex;
+                                            const isActive = idx === currentStageIndex;
+                                            const isLocked = idx > currentStageIndex;
+                                            
+                                            let headerColor = 'bg-gray-50 border-gray-200 text-gray-500';
+                                            let leftBorder = 'border-l-4 border-l-gray-300';
+                                            let iconBadge = <Lock className="w-4 h-4 text-gray-400" />;
+                                            let statusLabel = 'Aguardando';
+                                            
+                                            if (isCompleted) {
+                                                headerColor = 'bg-emerald-50 bg-opacity-30 border-emerald-150';
+                                                leftBorder = 'border-l-4 border-l-emerald-500';
+                                                iconBadge = <CheckCircle className="w-5 h-5 text-emerald-500" />;
+                                                statusLabel = 'Concluído';
+                                            } else if (isActive) {
+                                                headerColor = 'bg-blue-50 bg-opacity-40 border-blue-200 shadow-sm';
+                                                leftBorder = 'border-l-4 border-l-blue-500 ring-1 ring-blue-100 rounded-r-lg';
+                                                iconBadge = <Unlock className="w-4 h-4 text-blue-600 animate-pulse" />;
+                                                statusLabel = 'Em Foco';
+                                            }
+                                            
+                                            const displayNames = {
+                                                'Comercial': '1. Mesa Comercial',
+                                                'PCP': '2. Planejamento e Controle de Produção (PCP)',
+                                                'Produção/Embalagem': '3. Execução Industrial & Embalagem',
+                                                'Faturamento/Expedição': '4. Faturamento, Logística & Expedição',
+                                                'Financeiro': '5. Auditoria & Liberação Financeira'
+                                            };
+
+                                            return (
+                                                <div 
+                                                    key={stageName}
+                                                    className={`border rounded-lg overflow-hidden transition-all duration-300 ${headerColor} ${leftBorder}`}
+                                                >
+                                                    {/* Stage Header */}
+                                                    <div className="px-5 py-3.5 flex items-center justify-between border-b border-gray-150">
+                                                        <div className="flex items-center gap-3">
+                                                            {iconBadge}
+                                                            <div>
+                                                                <h4 className="font-bold text-gray-900 text-sm md:text-base">
+                                                                    {displayNames[stageName] || stageName}
+                                                                </h4>
+                                                            </div>
+                                                        </div>
+                                                        <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
+                                                            isCompleted ? 'bg-emerald-100 text-emerald-800' :
+                                                            isActive ? 'bg-blue-100 text-blue-800 animate-pulse' :
+                                                            'bg-gray-100 text-gray-400'
+                                                        }`}>
+                                                            {statusLabel}
+                                                        </span>
+                                                    </div>
+
+                                                    {/* Stage Body */}
+                                                    <div className="p-5 bg-white">
+                                                        {isLocked ? (
+                                                            <div className="flex items-center gap-2 text-gray-400 text-sm italic py-1">
+                                                                <Lock className="w-4 h-4" />
+                                                                Este setor está bloqueado. Conclua as etapas anteriores na esteira para liberar.
+                                                            </div>
+                                                        ) : (
+                                                            <div>
+                                                                {/* Render Stage Specific Content */}
+                                                                {stageName === 'Comercial' && (
+                                                                    <div className="space-y-4">
+                                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                                                                            <div>
+                                                                                <span className="text-xs text-gray-500 font-semibold uppercase block">Cliente</span>
+                                                                                <span className="font-bold text-gray-800">{selectedPO.client_name || 'Não Informado'}</span>
+                                                                            </div>
+                                                                            <div>
+                                                                                <span className="text-xs text-gray-500 font-semibold uppercase block">Fornecedor</span>
+                                                                                <span className="font-semibold text-gray-800">{selectedPO.supplier_name || 'Desconhecido'}</span>
+                                                                            </div>
+                                                                            <div>
+                                                                                <span className="text-xs text-gray-500 font-semibold uppercase block">Condição de Pagamento</span>
+                                                                                <span className="font-medium text-gray-700">{selectedPO.payment_terms || selectedPO.extra_metadata?.payment_terms || 'À vista'}</span>
+                                                                            </div>
+                                                                            <div>
+                                                                                <span className="text-xs text-gray-500 font-semibold uppercase block">Data Limite de Entrega</span>
+                                                                                <span className="font-medium text-gray-700">{formatDate(selectedPO.expected_delivery_date)}</span>
+                                                                            </div>
+                                                                        </div>
+                                                                        
+                                                                        <div>
+                                                                            <span className="text-xs text-gray-500 font-semibold uppercase block mb-1.5">Regras e Indicadores Estratégicos</span>
+                                                                            <div className="flex flex-wrap gap-2">
+                                                                                {selectedPO.extra_metadata?.is_export && (
+                                                                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-sky-100 text-sky-800 border border-sky-200">
+                                                                                        🌐 Exportação
+                                                                                    </span>
+                                                                                )}
+                                                                                {selectedPO.extra_metadata?.is_first_order && (
+                                                                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-200">
+                                                                                        ⭐ Primeiro Pedido
+                                                                                    </span>
+                                                                                )}
+                                                                                {selectedPO.extra_metadata?.is_replacement && (
+                                                                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-extrabold bg-cyan-100 text-cyan-800 border border-cyan-300">
+                                                                                        🔄 CRÉDITO PRÉ-APROVADO (TROCA)
+                                                                                    </span>
+                                                                                )}
+                                                                                {selectedPO.extra_metadata?.is_urgent && (
+                                                                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-100 text-rose-800 border border-rose-200">
+                                                                                        ⚡ Urgente
+                                                                                    </span>
+                                                                                )}
+                                                                                {!selectedPO.extra_metadata?.is_export && 
+                                                                                 !selectedPO.extra_metadata?.is_first_order && 
+                                                                                 !selectedPO.extra_metadata?.is_replacement && 
+                                                                                 !selectedPO.extra_metadata?.is_urgent && (
+                                                                                    <span className="text-xs text-gray-500 italic">Nenhum indicador especial registrado.</span>
+                                                                                )}
+                                                                            </div>
+                                                                        </div>
+
+                                                                        {(() => {
+                                                                            const marginInfo = calculatePOMargins(selectedPO);
+                                                                            return (
+                                                                                <div className="bg-slate-50 border border-gray-200 rounded-lg p-4 mt-2">
+                                                                                    <div className="flex justify-between items-center">
+                                                                                        <div>
+                                                                                            <span className="text-xs text-gray-500 font-semibold uppercase block">Margem de Contribuição Estimada</span>
+                                                                                            <div className="mt-1 flex items-center gap-2">
+                                                                                                {marginInfo.status === 'PENDENTE_PCP' ? (
+                                                                                                    <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-extrabold bg-amber-100 text-amber-800 border border-amber-300 cursor-help" title="Custo ainda não validado pelo PCP">
+                                                                                                        PENDENTE PCP
+                                                                                                    </span>
+                                                                                                ) : (
+                                                                                                    <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-extrabold border ${
+                                                                                                        marginInfo.badgeColor === 'green' ? 'bg-green-100 text-green-800 border-green-300' :
+                                                                                                        marginInfo.badgeColor === 'yellow' ? 'bg-yellow-100 text-yellow-800 border-yellow-300' :
+                                                                                                        marginInfo.badgeColor === 'orange' ? 'bg-orange-100 text-orange-800 border-orange-300' :
+                                                                                                        'bg-red-100 text-red-800 border-red-300'
+                                                                                                    }`}>
+                                                                                                        {marginInfo.formattedMargin}
+                                                                                                    </span>
+                                                                                                )}
+                                                                                            </div>
+                                                                                        </div>
+                                                                                        {marginInfo.status !== 'PENDENTE_PCP' && (
+                                                                                            <div className="text-right text-xs text-gray-500 font-mono">
+                                                                                                <div>VP: {formatCurrency(marginInfo.breakdown.vp)}</div>
+                                                                                                <div>Custos: {formatCurrency(marginInfo.breakdown.costs)}</div>
+                                                                                            </div>
+                                                                                        )}
+                                                                                    </div>
+                                                                                    {marginInfo.status === 'PENDENTE_PCP' && (
+                                                                                        <div className="mt-2.5 p-3 bg-amber-50 border border-amber-250 rounded-lg text-amber-900 text-xs flex items-start gap-2 leading-relaxed shadow-3xs">
+                                                                                            <span className="text-amber-500 font-bold flex-shrink-0 text-sm">💡</span>
+                                                                                            <span>
+                                                                                                <strong>PENDENTE PCP:</strong> Indica que o custo industrial do SKU ainda não foi validado pelo PCP; a margem será calculada após o vínculo técnico.
+                                                                                            </span>
+                                                                                        </div>
+                                                                                    )}
+                                                                                </div>
+                                                                            );
+                                                                        })()}
+                                                                    </div>
+                                                                )}
+
+                                                                {stageName === 'PCP' && (
+                                                                    <div className="space-y-4">
+                                                                        {!isActive ? (
+                                                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                                                                                <div>
+                                                                                    <span className="text-xs text-gray-500 font-semibold uppercase block">Embalagem</span>
+                                                                                    <span className="font-semibold text-gray-800">{selectedPO.extra_metadata?.packaging_type || 'Não selecionado'}</span>
+                                                                                </div>
+                                                                                <div>
+                                                                                    <span className="text-xs text-gray-500 font-semibold uppercase block">Data Programada</span>
+                                                                                    <span className="font-semibold text-gray-800">{selectedPO.extra_metadata?.data_programada ? new Date(selectedPO.extra_metadata.data_programada + 'T00:00:00').toLocaleDateString('pt-BR') : 'Não agendada'}</span>
+                                                                                </div>
+                                                                                <div>
+                                                                                    <span className="text-xs text-gray-500 font-semibold uppercase block">Impedimento de Produção</span>
+                                                                                    <span className="font-medium text-gray-700">{selectedPO.extra_metadata?.production_impediment || 'Nenhum impedimento'}</span>
+                                                                                </div>
+                                                                            </div>
+                                                                        ) : (
+                                                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                                                <div>
+                                                                                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                                                                        Tipo de Embalagem <span className="text-red-500">*</span>
+                                                                                    </label>
+                                                                                    <select
+                                                                                        value={localFields.packaging_type || ''}
+                                                                                        onChange={(e) => handleSelectField('packaging_type', e.target.value)}
+                                                                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-semibold text-gray-800"
+                                                                                    >
+                                                                                        <option value="">Selecione...</option>
+                                                                                        <option value="Palete">Palete</option>
+                                                                                        <option value="Caixa de Papelão">Caixa de Papelão</option>
+                                                                                        <option value="Fardo Plástico">Fardo Plástico</option>
+                                                                                        <option value="Granel">Granel</option>
+                                                                                    </select>
+                                                                                </div>
+
+                                                                                <div>
+                                                                                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                                                                        Data Programada <span className="text-red-500">*</span>
+                                                                                    </label>
+                                                                                    <input
+                                                                                        type="date"
+                                                                                        value={localFields.data_programada || ''}
+                                                                                        onChange={(e) => handleChangeLocalField('data_programada', e.target.value)}
+                                                                                        onBlur={() => handleBlurLocalField('data_programada')}
+                                                                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800 font-medium"
+                                                                                    />
+                                                                                </div>
+
+                                                                                <div className="md:col-span-2">
+                                                                                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                                                                        Impedimento de Produção (Opcional)
+                                                                                    </label>
+                                                                                    <textarea
+                                                                                        value={localFields.production_impediment || ''}
+                                                                                        onChange={(e) => handleChangeLocalField('production_impediment', e.target.value)}
+                                                                                        onBlur={() => handleBlurLocalField('production_impediment')}
+                                                                                        placeholder="Descreva gargalos de matéria-prima ou maquinário..."
+                                                                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-850 font-medium"
+                                                                                        rows="2"
+                                                                                    />
+                                                                                </div>
+
+                                                                                {/* Sugerir Partição Button inside PCP Panel */}
+                                                                                <div className="md:col-span-2 mt-2 p-3.5 bg-purple-50 border border-purple-150 rounded-lg flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+                                                                                    <div className="text-xs text-purple-950 font-medium">
+                                                                                        <strong>Partição Técnica:</strong> Se houver restrições de maquinário ou entrega, proponha o desmembramento técnico deste PO.
+                                                                                    </div>
+                                                                                    <button
+                                                                                        onClick={() => setShowPartitionModal(true)}
+                                                                                        className="flex items-center gap-2 px-3 py-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 cursor-pointer transition-colors text-xs font-semibold flex-shrink-0 shadow-sm"
+                                                                                    >
+                                                                                        <Package className="w-3.5 h-3.5" />
+                                                                                        Sugerir Partição
+                                                                                    </button>
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                )}
+
+                                                                {stageName === 'Produção/Embalagem' && (
+                                                                    <div className="space-y-4">
+                                                                        {!isActive ? (
+                                                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                                                                                <div>
+                                                                                    <span className="text-xs text-gray-500 font-semibold uppercase block">Status de Produção</span>
+                                                                                    <span className="font-semibold text-gray-850">{selectedPO.extra_metadata?.status_producao === 'FINISH' || selectedPO.extra_metadata?.status_producao === 'Finalizado' ? 'Finalizado (FINISH)' : 'Em andamento (START)'}</span>
+                                                                                </div>
+                                                                                <div>
+                                                                                    <span className="text-xs text-gray-500 font-semibold uppercase block">Quantidade Real Produzida</span>
+                                                                                    <span className="font-semibold text-gray-855">{selectedPO.extra_metadata?.qtd_real_produzida || '0'} SKUs</span>
+                                                                                </div>
+                                                                                <div>
+                                                                                    <span className="text-xs text-gray-500 font-semibold uppercase block">Perda Técnica</span>
+                                                                                    <span className="font-semibold text-gray-850">{selectedPO.extra_metadata?.perda_tecnica || '0'} unidades</span>
+                                                                                </div>
+                                                                            </div>
+                                                                        ) : (
+                                                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                                                                <div>
+                                                                                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                                                                        Status da Produção <span className="text-red-500">*</span>
+                                                                                    </label>
+                                                                                    <select
+                                                                                        value={localFields.status_producao || ''}
+                                                                                        onChange={(e) => handleSelectField('status_producao', e.target.value)}
+                                                                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-semibold text-gray-800"
+                                                                                    >
+                                                                                        <option value="">Selecione...</option>
+                                                                                        <option value="START">Em Andamento (START)</option>
+                                                                                        <option value="FINISH">Finalizado (FINISH)</option>
+                                                                                    </select>
+                                                                                </div>
+
+                                                                                <div>
+                                                                                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                                                                        Quantidade Real Produzida <span className="text-red-500">*</span>
+                                                                                    </label>
+                                                                                    <input
+                                                                                        type="number"
+                                                                                        step="1"
+                                                                                        min="1"
+                                                                                        value={localFields.qtd_real_produzida || ''}
+                                                                                        onChange={(e) => handleChangeLocalField('qtd_real_produzida', e.target.value)}
+                                                                                        onBlur={() => handleBlurLocalField('qtd_real_produzida')}
+                                                                                        placeholder="Ex: 500"
+                                                                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800 font-medium"
+                                                                                    />
+                                                                                </div>
+
+                                                                                <div>
+                                                                                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                                                                        Perda Técnica (unidades) <span className="text-red-500">*</span>
+                                                                                    </label>
+                                                                                    <input
+                                                                                        type="number"
+                                                                                        step="1"
+                                                                                        min="0"
+                                                                                        value={localFields.perda_tecnica || ''}
+                                                                                        onChange={(e) => handleChangeLocalField('perda_tecnica', e.target.value)}
+                                                                                        onBlur={() => handleBlurLocalField('perda_tecnica')}
+                                                                                        placeholder="Ex: 12"
+                                                                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800 font-medium"
+                                                                                    />
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                )}
+
+                                                                {stageName === 'Faturamento/Expedição' && (
+                                                                    <div className="space-y-4">
+                                                                        {!isActive ? (
+                                                                            <div className="space-y-3 text-sm">
+                                                                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 border-b border-gray-150 pb-3">
+                                                                                    <div>
+                                                                                        <span className="text-xs text-gray-500 font-semibold uppercase block">Número NF-e</span>
+                                                                                        <span className="font-semibold text-gray-800">{selectedPO.extra_metadata?.numero_nfe || 'Não informado'}</span>
+                                                                                    </div>
+                                                                                    <div>
+                                                                                        <span className="text-xs text-gray-500 font-semibold uppercase block">Chave de Acesso</span>
+                                                                                        <span className="font-mono text-xs text-gray-800">{selectedPO.extra_metadata?.chave_acesso || 'Não informada'}</span>
+                                                                                    </div>
+                                                                                    <div>
+                                                                                        <span className="text-xs text-gray-500 font-semibold uppercase block">Transportadora</span>
+                                                                                        <span className="font-semibold text-gray-800">{selectedPO.extra_metadata?.transportadora || 'Não informada'}</span>
+                                                                                    </div>
+                                                                                </div>
+                                                                                <div className="flex gap-4">
+                                                                                    {logisticsChecklist.foto_carga_path && (
+                                                                                        <a 
+                                                                                            href={`/api/uploads/download?path=${encodeURIComponent(logisticsChecklist.foto_carga_path)}`}
+                                                                                            target="_blank" 
+                                                                                            rel="noreferrer" 
+                                                                                            className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 font-semibold underline"
+                                                                                        >
+                                                                                            Visualizar Foto da Carga
+                                                                                        </a>
+                                                                                    )}
+                                                                                    {logisticsChecklist.foto_canhoto_path && (
+                                                                                        <a 
+                                                                                            href={`/api/uploads/download?path=${encodeURIComponent(logisticsChecklist.foto_canhoto_path)}`}
+                                                                                            target="_blank" 
+                                                                                            rel="noreferrer" 
+                                                                                            className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 font-semibold underline"
+                                                                                        >
+                                                                                            Visualizar Foto do Canhoto/NF
+                                                                                        </a>
+                                                                                    )}
+                                                                                </div>
+                                                                            </div>
+                                                                        ) : (
+                                                                            <div className="space-y-4">
+                                                                                {/* Checklist de Saída */}
+                                                                                <div className="p-4 bg-cyan-50 border border-cyan-100 rounded-lg">
+                                                                                    <h5 className="text-xs font-bold uppercase text-cyan-800 mb-3 tracking-wide flex items-center gap-1.5">
+                                                                                        <Truck className="w-4 h-4" /> Checklist Operacional de Saída (Obrigatório)
+                                                                                    </h5>
+                                                                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                                                                        <label className="flex items-center gap-3 cursor-pointer bg-white p-2.5 border border-cyan-200 rounded-lg shadow-2xs hover:border-cyan-300 transition-all select-none">
+                                                                                            <input
+                                                                                                type="checkbox"
+                                                                                                checked={logisticsChecklist.endereco_conferido || false}
+                                                                                                onChange={(e) => handleChecklistChange('endereco_conferido', e.target.checked)}
+                                                                                                className="w-5 h-5 text-cyan-600 rounded focus:ring-cyan-500 cursor-pointer"
+                                                                                            />
+                                                                                            <span className="text-xs text-gray-700 font-semibold">Endereço Conferido</span>
+                                                                                            {logisticsChecklist.endereco_conferido && (
+                                                                                                <CheckCircle className="w-4 h-4 text-green-600 ml-auto flex-shrink-0" />
+                                                                                            )}
+                                                                                        </label>
+
+                                                                                        <label className="flex items-center gap-3 cursor-pointer bg-white p-2.5 border border-cyan-200 rounded-lg shadow-2xs hover:border-cyan-300 transition-all select-none">
+                                                                                            <input
+                                                                                                type="checkbox"
+                                                                                                checked={logisticsChecklist.peso_validado || false}
+                                                                                                onChange={(e) => handleChecklistChange('peso_validado', e.target.checked)}
+                                                                                                className="w-5 h-5 text-cyan-600 rounded focus:ring-cyan-500 cursor-pointer"
+                                                                                            />
+                                                                                            <span className="text-xs text-gray-700 font-semibold">Peso Validado</span>
+                                                                                            {logisticsChecklist.peso_validado && (
+                                                                                                <CheckCircle className="w-4 h-4 text-green-600 ml-auto flex-shrink-0" />
+                                                                                            )}
+                                                                                        </label>
+
+                                                                                        <label className="flex items-center gap-3 cursor-pointer bg-white p-2.5 border border-cyan-200 rounded-lg shadow-2xs hover:border-cyan-300 transition-all select-none">
+                                                                                            <input
+                                                                                                type="checkbox"
+                                                                                                checked={logisticsChecklist.etiquetas_impressas || false}
+                                                                                                onChange={(e) => handleChecklistChange('etiquetas_impressas', e.target.checked)}
+                                                                                                className="w-5 h-5 text-cyan-600 rounded focus:ring-cyan-500 cursor-pointer"
+                                                                                            />
+                                                                                            <span className="text-xs text-gray-700 font-semibold">Etiquetas Impressas</span>
+                                                                                            {logisticsChecklist.etiquetas_impressas && (
+                                                                                                <CheckCircle className="w-4 h-4 text-green-600 ml-auto flex-shrink-0" />
+                                                                                            )}
+                                                                                        </label>
+                                                                                    </div>
+                                                                                </div>
+
+                                                                                {/* NF, Key and Carrier */}
+                                                                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                                                                    <div>
+                                                                                        <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                                                                            Número da NF-e <span className="text-red-500">*</span>
+                                                                                        </label>
+                                                                                        <input
+                                                                                            type="text"
+                                                                                            value={localFields.numero_nfe || ''}
+                                                                                            onChange={(e) => handleChangeLocalField('numero_nfe', e.target.value)}
+                                                                                            onBlur={() => handleBlurLocalField('numero_nfe')}
+                                                                                            placeholder="Ex: 004123"
+                                                                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800 font-medium"
+                                                                                        />
+                                                                                    </div>
+
+                                                                                    <div>
+                                                                                        <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                                                                            Chave de Acesso NF-e (44 dígitos) <span className="text-red-500">*</span>
+                                                                                        </label>
+                                                                                        <div className="relative">
+                                                                                            <input
+                                                                                                type="text"
+                                                                                                maxLength={44}
+                                                                                                value={localFields.chave_acesso || ''}
+                                                                                                onChange={(e) => handleChangeLocalField('chave_acesso', e.target.value.replace(/\D/g, ''))}
+                                                                                                onBlur={() => handleBlurLocalField('chave_acesso')}
+                                                                                                placeholder="Digite os 44 números..."
+                                                                                                className="w-full pr-10 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800 font-mono font-medium"
+                                                                                            />
+                                                                                            <div className="absolute right-3 top-1/2 transform -translate-y-1/2 flex items-center">
+                                                                                                {(localFields.chave_acesso || '').replace(/\D/g, '').length === 44 ? (
+                                                                                                    <CheckCircle className="w-4 h-4 text-emerald-500" />
+                                                                                                ) : (
+                                                                                                    <span className="text-[10px] text-gray-400 font-semibold font-mono">
+                                                                                                        {(localFields.chave_acesso || '').replace(/\D/g, '').length}/44
+                                                                                                    </span>
+                                                                                                )}
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    </div>
+
+                                                                                    <div>
+                                                                                        <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                                                                            Transportadora <span className="text-red-500">*</span>
+                                                                                        </label>
+                                                                                        <input
+                                                                                            type="text"
+                                                                                            value={localFields.transportadora || ''}
+                                                                                            onChange={(e) => handleChangeLocalField('transportadora', e.target.value)}
+                                                                                            onBlur={() => handleBlurLocalField('transportadora')}
+                                                                                            placeholder="Ex: Braspress"
+                                                                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800 font-medium"
+                                                                                        />
+                                                                                    </div>
+                                                                                </div>
+
+                                                                                {/* File Evidence Uploads */}
+                                                                                <div className="border-t border-gray-150 pt-4 mt-2">
+                                                                                    <h5 className="text-xs font-bold uppercase text-gray-700 mb-3 tracking-wide">
+                                                                                        Upload de Evidências Logísticas (Obrigatório)
+                                                                                    </h5>
+                                                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                                                        {/* Foto da Carga */}
+                                                                                        <div className="border-2 border-dashed border-cyan-200 bg-cyan-50/10 rounded-lg p-4 transition-colors">
+                                                                                            <label className="block text-xs font-bold text-cyan-900 uppercase mb-2">
+                                                                                                Foto da Carga Carregada
+                                                                                            </label>
+                                                                                            {logisticsChecklist.foto_carga_path ? (
+                                                                                                <div className="space-y-2">
+                                                                                                    <div className="flex items-center gap-2 text-green-600 font-semibold text-sm">
+                                                                                                        <CheckCircle className="w-5 h-5 flex-shrink-0" />
+                                                                                                        <span>Evidência da Carga Salva!</span>
+                                                                                                    </div>
+                                                                                                    <a 
+                                                                                                        href={`/api/uploads/download?path=${encodeURIComponent(logisticsChecklist.foto_carga_path)}`}
+                                                                                                        target="_blank" 
+                                                                                                        rel="noreferrer" 
+                                                                                                        className="text-xs text-blue-600 hover:text-blue-800 font-semibold underline block"
+                                                                                                    >
+                                                                                                        Abrir Foto da Carga
+                                                                                                    </a>
+                                                                                                    <div className="pt-1">
+                                                                                                        <input
+                                                                                                            type="file"
+                                                                                                            accept="image/*"
+                                                                                                            onChange={(e) => handleEvidenceUpload('foto_carga_path', e.target.files[0])}
+                                                                                                            className="hidden"
+                                                                                                            id="foto-carga-reupload"
+                                                                                                            disabled={uploadingEvidence}
+                                                                                                        />
+                                                                                                        <label
+                                                                                                            htmlFor="foto-carga-reupload"
+                                                                                                            className="inline-flex items-center gap-1 text-[10px] text-gray-500 bg-gray-100 hover:bg-gray-200 border border-gray-305 rounded px-2 py-0.5 cursor-pointer transition-colors"
+                                                                                                        >
+                                                                                                            Substituir Arquivo
+                                                                                                        </label>
+                                                                                                    </div>
+                                                                                                </div>
+                                                                                            ) : (
+                                                                                                <div>
+                                                                                                    <input
+                                                                                                        type="file"
+                                                                                                        accept="image/*"
+                                                                                                        onChange={(e) => handleEvidenceUpload('foto_carga_path', e.target.files[0])}
+                                                                                                        className="hidden"
+                                                                                                        id="foto-carga-upload"
+                                                                                                        disabled={uploadingEvidence}
+                                                                                                    />
+                                                                                                    <label
+                                                                                                        htmlFor="foto-carga-upload"
+                                                                                                        className="flex items-center justify-center gap-2 px-4 py-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 cursor-pointer transition-colors text-xs font-semibold shadow-xs"
+                                                                                                    >
+                                                                                                        <Upload className="w-4 h-4" />
+                                                                                                        {uploadingEvidence ? 'Enviando...' : 'Enviar Foto da Carga'}
+                                                                                                    </label>
+                                                                                                </div>
+                                                                                            )}
+                                                                                        </div>
+
+                                                                                        {/* Foto do Canhoto/NF */}
+                                                                                        <div className="border-2 border-dashed border-cyan-200 bg-cyan-50/10 rounded-lg p-4 transition-colors">
+                                                                                            <label className="block text-xs font-bold text-cyan-900 uppercase mb-2">
+                                                                                                Canhoto Assinado / Comprovante
+                                                                                            </label>
+                                                                                            {logisticsChecklist.foto_canhoto_path ? (
+                                                                                                <div className="space-y-2">
+                                                                                                    <div className="flex items-center gap-2 text-green-600 font-semibold text-sm">
+                                                                                                        <CheckCircle className="w-5 h-5 flex-shrink-0" />
+                                                                                                        <span>Evidência do Canhoto Salva!</span>
+                                                                                                    </div>
+                                                                                                    <a 
+                                                                                                        href={`/api/uploads/download?path=${encodeURIComponent(logisticsChecklist.foto_canhoto_path)}`}
+                                                                                                        target="_blank" 
+                                                                                                        rel="noreferrer" 
+                                                                                                        className="text-xs text-blue-600 hover:text-blue-800 font-semibold underline block"
+                                                                                                    >
+                                                                                                        Abrir Foto do Canhoto
+                                                                                                    </a>
+                                                                                                    <div className="pt-1">
+                                                                                                        <input
+                                                                                                            type="file"
+                                                                                                            accept="image/*"
+                                                                                                            onChange={(e) => handleEvidenceUpload('foto_canhoto_path', e.target.files[0])}
+                                                                                                            className="hidden"
+                                                                                                            id="foto-canhoto-reupload"
+                                                                                                            disabled={uploadingEvidence}
+                                                                                                        />
+                                                                                                        <label
+                                                                                                            htmlFor="foto-canhoto-reupload"
+                                                                                                            className="inline-flex items-center gap-1 text-[10px] text-gray-500 bg-gray-100 hover:bg-gray-200 border border-gray-305 rounded px-2 py-0.5 cursor-pointer transition-colors"
+                                                                                                        >
+                                                                                                            Substituir Arquivo
+                                                                                                        </label>
+                                                                                                    </div>
+                                                                                                </div>
+                                                                                            ) : (
+                                                                                                <div>
+                                                                                                    <input
+                                                                                                        type="file"
+                                                                                                        accept="image/*"
+                                                                                                        onChange={(e) => handleEvidenceUpload('foto_canhoto_path', e.target.files[0])}
+                                                                                                        className="hidden"
+                                                                                                        id="foto-canhoto-upload"
+                                                                                                        disabled={uploadingEvidence}
+                                                                                                    />
+                                                                                                    <label
+                                                                                                        htmlFor="foto-canhoto-upload"
+                                                                                                        className="flex items-center justify-center gap-2 px-4 py-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 cursor-pointer transition-colors text-xs font-semibold shadow-xs"
+                                                                                                    >
+                                                                                                        <Upload className="w-4 h-4" />
+                                                                                                        {uploadingEvidence ? 'Enviando...' : 'Enviar Foto do Canhoto'}
+                                                                                                    </label>
+                                                                                                </div>
+                                                                                            )}
+                                                                                        </div>
+                                                                                    </div>
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                )}
+
+                                                                {stageName === 'Financeiro' && (
+                                                                    <div className="space-y-4">
+                                                                        {/* Comissão */}
+                                                                        <div className="p-4 bg-slate-50 border border-gray-200 rounded-lg">
+                                                                            <div className="flex items-center justify-between mb-3 border-b border-gray-200 pb-2">
+                                                                                <h5 className="text-xs font-bold text-gray-700 uppercase tracking-wider">
+                                                                                    Taxa de Comissão Comercial
+                                                                                </h5>
+                                                                                {canEditCommission() && !editingCommission && isActive && (
+                                                                                    <button
+                                                                                        onClick={() => {
+                                                                                            setCommissionValue(selectedPO.commission_rate || '')
+                                                                                            setEditingCommission(true)
+                                                                                        }}
+                                                                                        className="flex items-center gap-1 px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-semibold transition-colors cursor-pointer shadow-xs"
+                                                                                    >
+                                                                                        <Edit2 className="w-3.5 h-3.5" />
+                                                                                        Ajustar Taxa Manual
+                                                                                    </button>
+                                                                                )}
+                                                                            </div>
+
+                                                                            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-1">
+                                                                                <div>
+                                                                                    <span className="text-xs text-gray-500 font-semibold block uppercase">Comissão Cadastrada</span>
+                                                                                    <p className="text-lg font-bold text-gray-800">
+                                                                                        {selectedPO.commission_rate ? `${parseFloat(selectedPO.commission_rate).toFixed(2)}%` : 'N/A'}
+                                                                                    </p>
+                                                                                </div>
+                                                                                <div>
+                                                                                    <span className="text-xs text-gray-500 font-semibold block uppercase">Valor Bruto Comissão</span>
+                                                                                    <p className="text-lg font-bold text-emerald-700 font-mono">
+                                                                                        {formatCurrency(selectedPO.commission_value || 0)}
+                                                                                    </p>
+                                                                                </div>
+                                                                                <div>
+                                                                                    <span className="text-xs text-gray-500 font-semibold block uppercase">Margem Operacional CM</span>
+                                                                                    <p className="text-lg font-bold text-gray-800">
+                                                                                        {(() => {
+                                                                                            const marginVal = parseFloat(selectedPO.margin_percentage);
+                                                                                            return isNaN(marginVal) ? 'PENDENTE PCP' : (marginVal > 1000 ? '> 1000%' : `${marginVal.toFixed(2)}%`);
+                                                                                        })()}
+                                                                                    </p>
+                                                                                </div>
+                                                                            </div>
+
+                                                                            {editingCommission && (
+                                                                                <div className="mt-4 p-3 bg-white border border-blue-200 rounded-lg space-y-3 shadow-xs">
+                                                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                                                        <div>
+                                                                                            <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                                                                                Nova Alíquota de Comissão (%)
+                                                                                            </label>
+                                                                                            <input
+                                                                                                type="number"
+                                                                                                step="0.01"
+                                                                                                min="0"
+                                                                                                max="100"
+                                                                                                value={commissionValue}
+                                                                                                onChange={(e) => setCommissionValue(e.target.value)}
+                                                                                                placeholder="Taxa em %"
+                                                                                                className="w-full px-3 py-1.5 border border-gray-300 rounded text-sm text-gray-800 focus:ring-2 focus:ring-blue-500"
+                                                                                            />
+                                                                                        </div>
+                                                                                        <div>
+                                                                                            <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                                                                                Justificativa de Ajuste (mín. 10 chars)
+                                                                                            </label>
+                                                                                            <input
+                                                                                                type="text"
+                                                                                                value={commissionJustification}
+                                                                                                onChange={(e) => setCommissionJustification(e.target.value)}
+                                                                                                placeholder="Explique a alteração da taxa..."
+                                                                                                className="w-full px-3 py-1.5 border border-gray-300 rounded text-sm text-gray-800 focus:ring-2 focus:ring-blue-500"
+                                                                                            />
+                                                                                        </div>
+                                                                                    </div>
+                                                                                    <div className="flex gap-2">
+                                                                                        <button
+                                                                                            onClick={handleSaveCommission}
+                                                                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded text-xs font-semibold cursor-pointer"
+                                                                                        >
+                                                                                            <Save className="w-3.5 h-3.5" />
+                                                                                            Gravar Alteração
+                                                                                        </button>
+                                                                                        <button
+                                                                                            onClick={() => {
+                                                                                                setEditingCommission(false)
+                                                                                                setCommissionValue('')
+                                                                                                setCommissionJustification('')
+                                                                                            }}
+                                                                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-200 hover:bg-gray-350 text-gray-700 rounded text-xs font-semibold cursor-pointer"
+                                                                                        >
+                                                                                            <XCircle className="w-3.5 h-3.5" />
+                                                                                            Cancelar
+                                                                                        </button>
+                                                                                    </div>
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+
+                                                                        {/* Comentário de Auditoria Financeira */}
+                                                                        <div>
+                                                                            <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                                                                Comentários e Parecer de Auditoria Financeira <span className="text-red-500">*</span>
+                                                                            </label>
+                                                                            {!isActive ? (
+                                                                                <p className="text-sm text-gray-800 bg-gray-50 p-3 rounded-lg border border-gray-200 font-medium">
+                                                                                    {selectedPO.extra_metadata?.audit_comment || 'Nenhum comentário registrado.'}
+                                                                                </p>
+                                                                            ) : (
+                                                                                <textarea
+                                                                                    value={localFields.audit_comment || ''}
+                                                                                    onChange={(e) => handleChangeLocalField('audit_comment', e.target.value)}
+                                                                                    onBlur={() => handleBlurLocalField('audit_comment')}
+                                                                                    placeholder="Descreva observações de auditoria, conferência de frete ou margem para liberação..."
+                                                                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-850 font-medium"
+                                                                                    rows="3"
+                                                                                />
+                                                                            )}
+                                                                        </div>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            );
+                                        });
+                                    })()}
+                                </div>
 
                                 {/* Items List */}
                                 {selectedPO.items && selectedPO.items.length > 0 && (
                                     <div className="mb-6">
-                                        <h3 className="text-lg font-semibold text-gray-900 mb-3">Itens do Pedido</h3>
+                                        <h3 className="text-lg font-bold text-gray-900 border-b border-gray-150 pb-2 mb-3 flex items-center gap-2">
+                                            <span>📦</span> Itens do Pedido (Itens e Especificações)
+                                        </h3>
                                         <div className="space-y-4">
                                             {selectedPO.items.map((item, idx) => (
-                                                <div key={item.id || idx} className="border border-gray-200 rounded-lg p-4">
+                                                <div key={item.id || idx} className="border border-gray-200 rounded-lg p-4 bg-white shadow-3xs">
                                                     <div className="flex items-start justify-between mb-3">
                                                         <div>
-                                                            <h4 className="font-semibold text-gray-900">{item.sku}</h4>
-                                                            <p className="text-sm text-gray-600">
-                                                                Quantidade: {item.quantity} | Preço: {formatCurrency(item.price)}
+                                                            <h4 className="font-bold text-gray-900">{item.sku}</h4>
+                                                            <p className="text-sm text-gray-600 font-medium">
+                                                                Quantidade: {item.quantity} | Preço Unitário: {formatCurrency(item.price_unit || item.price || item.unit_value)}
                                                             </p>
                                                         </div>
-                                                        <span className="px-2 py-1 bg-blue-100 text-blue-700 text-xs font-medium rounded">
+                                                        <span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-xs font-semibold rounded-full border border-blue-150 uppercase">
                                                             {item.status_item || 'PENDING'}
                                                         </span>
                                                     </div>
@@ -884,18 +1565,64 @@ const KanbanPage = () => {
                                     </div>
                                 )}
 
-                                {/* PO-level Metadata */}
-                                {selectedPO.extra_metadata && Object.keys(selectedPO.extra_metadata).length > 0 && (
-                                    <div>
-                                        <h3 className="text-lg font-semibold text-gray-900 mb-3">Metadata do Pedido</h3>
-                                        <MetadataVisualizer
-                                            metadata={selectedPO.extra_metadata}
-                                            itemId={selectedPO.id}
-                                            onUpdate={null}
-                                            readOnly={true}
-                                        />
+                                {/* Chronological Handoff Timeline Table (Task 5) */}
+                                <div className="mt-8 border-t border-gray-200 pt-6">
+                                    <div className="flex items-center gap-2 mb-4">
+                                        <span className="text-xl">⏱️</span>
+                                        <h3 className="text-lg font-bold text-gray-900">Histórico de Movimentação (Handoff Timeline)</h3>
                                     </div>
-                                )}
+                                    
+                                    {!handoffHistory ? (
+                                        <div className="flex justify-center items-center py-6 text-gray-500 text-sm gap-2 bg-slate-50 border border-gray-200 rounded-lg">
+                                            <RefreshCw className="w-4 h-4 animate-spin text-gray-400" />
+                                            Carregando histórico do fluxo...
+                                        </div>
+                                    ) : (!handoffHistory.handoff_history || handoffHistory.handoff_history.length === 0) ? (
+                                        <p className="text-sm text-gray-500 italic py-4 text-center bg-slate-50 border border-gray-200 rounded-lg">Nenhum registro de movimentação disponível para este pedido.</p>
+                                    ) : (
+                                        <div className="overflow-hidden border border-gray-200 rounded-lg shadow-2xs">
+                                            <table className="min-w-full divide-y divide-gray-200 text-sm text-left">
+                                                <thead className="bg-slate-50 text-slate-700 font-bold uppercase tracking-wider text-[10px]">
+                                                    <tr>
+                                                        <th className="px-4 py-3">Área Operacional</th>
+                                                        <th className="px-4 py-3">Data de Entrada</th>
+                                                        <th className="px-4 py-3">Data de Saída</th>
+                                                        <th className="px-4 py-3">Duração</th>
+                                                        <th className="px-4 py-3">Responsáveis</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-gray-100 bg-white text-gray-700 font-medium">
+                                                    {handoffHistory.handoff_history.map((record, index) => (
+                                                        <tr key={index} className="hover:bg-slate-50 transition-colors">
+                                                            <td className="px-4 py-3 font-semibold text-gray-900">
+                                                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                                                    record.area === 'Comercial' ? 'bg-yellow-100 text-yellow-800' :
+                                                                    record.area === 'PCP' ? 'bg-blue-100 text-blue-800' :
+                                                                    record.area === 'Produção' ? 'bg-purple-100 text-purple-800' :
+                                                                    record.area === 'Expedição' ? 'bg-cyan-100 text-cyan-800' :
+                                                                    'bg-green-100 text-green-800'
+                                                                }`}>
+                                                                    {record.area}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-4 py-3 font-mono text-xs text-gray-650">{record.arrival}</td>
+                                                            <td className="px-4 py-3 font-mono text-xs">
+                                                                {record.departure === 'Em andamento' ? (
+                                                                    <span className="text-blue-600 font-bold flex items-center gap-1">
+                                                                        <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-ping" />
+                                                                        Em andamento
+                                                                    </span>
+                                                                ) : record.departure}
+                                                            </td>
+                                                            <td className="px-4 py-3 font-mono text-xs text-gray-900">{record.duration}</td>
+                                                            <td className="px-4 py-3 text-xs text-gray-600">{record.user || 'Sistema'}</td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
 
                             {/* Modal Footer */}
@@ -905,21 +1632,10 @@ const KanbanPage = () => {
                                     {canReturn(selectedPO) && (
                                         <button
                                             onClick={() => setShowReturnModal(true)}
-                                            className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors"
+                                            className="flex items-center gap-2 px-4 py-2 bg-orange-650 text-white rounded-lg hover:bg-orange-700 transition-colors font-semibold text-sm cursor-pointer shadow-sm"
                                         >
                                             <RefreshCw className="w-4 h-4" />
                                             Devolver para {getPreviousStatus(selectedPO.status)}
-                                        </button>
-                                    )}
-
-                                    {/* PCP Partition Suggestion Button */}
-                                    {canSuggestPartition(selectedPO) && (
-                                        <button
-                                            onClick={() => setShowPartitionModal(true)}
-                                            className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
-                                        >
-                                            <Package className="w-4 h-4" />
-                                            Sugerir Partição
                                         </button>
                                     )}
                                 </div>
@@ -929,7 +1645,13 @@ const KanbanPage = () => {
                                     {canAdvance(selectedPO) && (
                                         <button
                                             onClick={handleAdvanceStatus}
-                                            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                                            disabled={!canAdvanceCurrentArea()}
+                                            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition-colors shadow-sm text-sm ${
+                                                canAdvanceCurrentArea()
+                                                    ? 'bg-green-600 text-white hover:bg-green-700 cursor-pointer'
+                                                    : 'bg-gray-300 text-gray-500 cursor-not-allowed border border-gray-310'
+                                            }`}
+                                            title={!canAdvanceCurrentArea() ? "Preencha todos os campos obrigatórios deste setor para avançar" : `Avançar para ${getNextStatus(selectedPO.status)}`}
                                         >
                                             Avançar para {getNextStatus(selectedPO.status)}
                                             <Zap className="w-4 h-4" />
