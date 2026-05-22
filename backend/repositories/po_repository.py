@@ -11,7 +11,19 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, or_, func
 from datetime import datetime
 
-from backend.models import PurchaseOrder, POItem, POStatus
+import enum
+from backend.models import PurchaseOrder, OrderItem
+
+class POStatus(str, enum.Enum):
+    DRAFT = "DRAFT"
+    SUBMITTED = "SUBMITTED"
+    APPROVED = "APPROVED"
+    WAITING_DISPATCH = "WAITING_DISPATCH"
+    COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
+    WAITING_COMMERCIAL_PARTITION = "WAITING_COMMERCIAL_PARTITION"
+    ANALISE_CREDITO = "ANALISE_CREDITO"
+
 from backend.repositories.base_repository import BaseRepository
 
 
@@ -287,7 +299,7 @@ class PORepository(BaseRepository[PurchaseOrder]):
         # Create item instances
         items = []
         for item_data in items_data:
-            item = POItem(**item_data)
+            item = OrderItem(**item_data)
             item.tenant_id = self.tenant_id
             items.append(item)
         
@@ -337,7 +349,7 @@ class PORepository(BaseRepository[PurchaseOrder]):
             # Create new items
             new_items = []
             for item_data in items_data:
-                item = POItem(**item_data)
+                item = OrderItem(**item_data)
                 item.tenant_id = self.tenant_id
                 item.purchase_order_id = po.id
                 new_items.append(item)

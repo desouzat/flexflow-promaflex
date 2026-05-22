@@ -9,7 +9,7 @@ Execute estes comandos em sequência para limpar e recriar tudo:
 ```bash
 # 1. Conectar ao banco via Cloud SQL Proxy (se não estiver rodando)
 # Abra um terminal separado e execute:
-cloud_sql_proxy --port 5432 flexflow-botcase:us-central1:flexflow-db
+cloud_sql_proxy --port 5433 flexflow-promaflex:us-central1:flexflow-db --credentials-file=.\backend\gcp-key.json
 
 # 2. Limpar todas as tabelas (em outro terminal)
 python -c "from backend.database import engine, Base; from backend.models import *; Base.metadata.drop_all(bind=engine); print('✅ Tabelas removidas')"

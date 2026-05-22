@@ -25,6 +25,37 @@ from backend.schemas.import_schema import (
     ImportResponse
 )
 from backend.utils.number_utils import clean_brazilian_number
+from backend.schemas.import_schema import ImportFieldType
+
+UNIT_VALUE_ALIASES = ["Vl.Unit", "Vl Unit", "Preço Unitário", "Preco Unitario", "Unit Price", "Unit Value"]
+ITEM_TOTAL_VALUE_ALIASES = ["Total Item", "Total do Item", "Item Total", "Valor do Item", "Valor Total Item", "Item Total Value"]
+PO_TOTAL_VALUE_ALIASES = ["Valor Total do Pedido", "Total do Pedido", "Valor Total Pedido", "Total Pedido", "PO Total", "PO Total Value"]
+
+FIELD_ALIASES = {
+    ImportFieldType.PO_NUMBER: ["Pedido", "Nº Pedido", "Num Pedido", "PO Number", "PO_Number"],
+    ImportFieldType.CLIENT_NAME: ["Cliente", "Nome Cliente", "Client Name", "Client"],
+    ImportFieldType.SKU: ["SKU", "Código", "Cod", "Product SKU", "Item SKU"],
+    ImportFieldType.QUANTITY: ["Qtd", "Quantidade", "Qty", "Quantity"],
+    ImportFieldType.DESCRIPTION: ["Descrição", "Descricao", "Description", "Desc"],
+    ImportFieldType.UNIT: ["Unidade", "Un", "Unit"],
+    ImportFieldType.WIDTH: ["Largura", "Width"],
+    ImportFieldType.LENGTH: ["Comprimento", "Length"],
+    ImportFieldType.LEAD_TIME: ["Lead Time", "LeadTime", "Prazo"],
+    ImportFieldType.DELIVERY_DATE: ["Data Entrega", "Delivery Date", "Dt Entrega"],
+    ImportFieldType.BILLING_DATE: ["Data Faturamento", "Billing Date", "Dt Faturamento"],
+    ImportFieldType.ICMS_PERCENT: ["% ICMS", "ICMS", "ICMS%"],
+    ImportFieldType.IPI: ["IPI"],
+    ImportFieldType.FREIGHT: ["Frete", "Freight"],
+    ImportFieldType.PAYMENT_TERMS: ["Condição Pagamento", "Condicao Pagamento", "Payment Terms", "Pagamento"],
+    ImportFieldType.UNIT_VALUE: UNIT_VALUE_ALIASES,
+    ImportFieldType.ITEM_TOTAL_VALUE: ITEM_TOTAL_VALUE_ALIASES,
+    ImportFieldType.PO_TOTAL_VALUE: PO_TOTAL_VALUE_ALIASES,
+    ImportFieldType.BLOCK_STATUS: ["Bloqueio", "Status Bloqueio", "Block Status", "Block"],
+    ImportFieldType.BALANCE: ["Saldo", "Balance"],
+    ImportFieldType.DELAY: ["Atraso", "Delay"],
+    ImportFieldType.SALESPERSON: ["Vendedor", "Salesperson", "Sales Person"]
+}
+
 
 
 class ImportService:
@@ -47,6 +78,30 @@ class ImportService:
             db: SQLAlchemy database session
         """
         self.db = db
+    
+    def resolve_aliases(self, df: pd.DataFrame, mapping: ImportMapping) -> None:
+        """
+        Dynamically resolve missing columns in mapping using aliases.
+        If a mapped column does not exist in the dataframe, search the dataframe's
+        headers for any aliases matching the field type, and update the mapping.
+        
+        Note: Restricted to financial fields to avoid overriding explicit user/test mappings
+        for identifier fields.
+        """
+        allowed_fields = {
+            ImportFieldType.UNIT_VALUE,
+            ImportFieldType.ITEM_TOTAL_VALUE,
+            ImportFieldType.PO_TOTAL_VALUE
+        }
+        df_columns = list(df.columns)
+        for m in mapping.mappings:
+            if m.field_type in allowed_fields and m.column_name not in df_columns:
+                aliases = FIELD_ALIASES.get(m.field_type, [])
+                for col in df_columns:
+                    col_str = str(col).strip()
+                    if col_str in aliases or col_str.lower() in [a.lower() for a in aliases]:
+                        m.column_name = col
+                        break
     
     def read_file(self, file_content: bytes, file_name: str) -> pd.DataFrame:
         """
@@ -162,13 +217,26 @@ class ImportService:
             cleaned = clean_brazilian_number(value)
 
             if cleaned is None:
-                # clean_brazilian_number returns None for negatives and invalid inputs
+                # clean_brazilian_number returns None for negatives and invalid inputs.
+                # Let's check if the input represents a negative number to throw a specific error.
+                is_negative = False
+                if value is not None and not pd.isna(value):
+                    if isinstance(value, (int, float, Decimal)):
+                        is_negative = value < 0
+                    else:
+                        s = str(value).strip().replace("R$", "").replace(" ", "")
+                        if s.startswith("-"):
+                            is_negative = True
+
+                if is_negative:
+                    error_message = f"{field_name} must be non-negative"
+                else:
+                    error_message = f"{field_name} must be a valid number, got: {value!r}"
+
                 return None, ImportRowError(
                     row_number=row_number,
                     column_name=field_name,
-                    error_message=(
-                        f"{field_name} must be a valid non-negative number, got: {value!r}"
-                    ),
+                    error_message=error_message,
                     raw_value=str(value)
                 )
 
@@ -302,6 +370,15 @@ class ImportService:
         
         # Reverse mapping: field_type -> column_name
         field_to_column = {v: k for k, v in mapping_dict.items()}
+        
+        for field_type, aliases in FIELD_ALIASES.items():
+            if field_type not in field_to_column:
+                # Search the series/row index (column headers) for matches
+                for col in row.index:
+                    col_str = str(col).strip()
+                    if col_str in aliases or col_str.lower() in [a.lower() for a in aliases]:
+                        field_to_column[field_type] = col
+                        break
         
         # ============================================================
         # REQUIRED FIELDS (Must be present in all imports)
@@ -508,6 +585,18 @@ class ImportService:
                         data['item_total_value'] = Decimal(cleaned)
                 except (InvalidOperation, ValueError):
                     pass  # Skip invalid values
+
+        # PO Total Value (Valor Total do Pedido)
+        if ImportFieldType.PO_TOTAL_VALUE in field_to_column:
+            po_total_col = field_to_column[ImportFieldType.PO_TOTAL_VALUE]
+            if not pd.isna(row[po_total_col]):
+                try:
+                    # Delegate to centralized utility — correctly handles "13.335,50" → "13335.50"
+                    cleaned = clean_brazilian_number(row[po_total_col])
+                    if cleaned is not None:
+                        data['po_total_value'] = Decimal(cleaned)
+                except (InvalidOperation, ValueError):
+                    pass  # Skip invalid values
         
         # ============================================================
         # OPTIONAL COST FIELDS (Legacy support or explicit cost imports)
@@ -518,7 +607,9 @@ class ImportService:
             price_col = field_to_column[ImportFieldType.PRICE_UNIT]
             if not pd.isna(row[price_col]):
                 price_unit, error = self.parse_decimal(row[price_col], "Unit Price", row_number)
-                if not error:
+                if error:
+                    errors.append(error)
+                else:
                     data['price_unit'] = price_unit
         
         # Cost MP (optional - will be looked up from material_costs if not provided)
@@ -526,7 +617,9 @@ class ImportService:
             cost_mp_col = field_to_column[ImportFieldType.COST_MP]
             if not pd.isna(row[cost_mp_col]):
                 cost_mp, error = self.parse_decimal(row[cost_mp_col], "Material Cost", row_number)
-                if not error:
+                if error:
+                    errors.append(error)
+                else:
                     data['cost_mp'] = cost_mp
         
         # Cost MO (optional)
@@ -534,7 +627,9 @@ class ImportService:
             cost_mo_col = field_to_column[ImportFieldType.COST_MO]
             if not pd.isna(row[cost_mo_col]):
                 cost_mo, error = self.parse_decimal(row[cost_mo_col], "Labor Cost", row_number)
-                if not error:
+                if error:
+                    errors.append(error)
+                else:
                     data['cost_mo'] = cost_mo
         
         # Cost Energy (optional)
@@ -542,7 +637,9 @@ class ImportService:
             cost_energy_col = field_to_column[ImportFieldType.COST_ENERGY]
             if not pd.isna(row[cost_energy_col]):
                 cost_energy, error = self.parse_decimal(row[cost_energy_col], "Energy Cost", row_number)
-                if not error:
+                if error:
+                    errors.append(error)
+                else:
                     data['cost_energy'] = cost_energy
         
         # Cost Gas (optional)
@@ -550,7 +647,9 @@ class ImportService:
             cost_gas_col = field_to_column[ImportFieldType.COST_GAS]
             if not pd.isna(row[cost_gas_col]):
                 cost_gas, error = self.parse_decimal(row[cost_gas_col], "Gas Cost", row_number)
-                if not error:
+                if error:
+                    errors.append(error)
+                else:
                     data['cost_gas'] = cost_gas
         
         # If we have critical errors (missing required fields), return early
@@ -575,6 +674,7 @@ class ImportService:
         Returns:
             ImportValidationResult with validated data or errors
         """
+        self.resolve_aliases(df, mapping)
         mapping_dict = mapping.get_mapping_dict()
         all_errors = []
         rows_data = []
@@ -735,6 +835,7 @@ class ImportService:
                 )
             
             # Step 2: Validate mapping
+            self.resolve_aliases(df, request.mapping)
             is_valid, error_msg = self.validate_mapping(df, request.mapping)
             if not is_valid:
                 return ImportResponse(
@@ -806,7 +907,10 @@ class ImportService:
                     'total_value': float(po_data.total_value) if po_data.total_value else None,
                     'total_cost': float(po_data.total_cost) if po_data.total_cost else None,
                     'margin_global': float(po_data.margin_global) if po_data.margin_global else None,
-                    'margin_percentage': float(po_data.margin_percentage) if po_data.margin_percentage else None
+                    'margin_percentage': float(po_data.margin_percentage) if po_data.margin_percentage else None,
+                    'po_total_value': float(po_data.po_total_value) if po_data.po_total_value is not None else None,
+                    'has_integrity_error': po_data.has_integrity_error,
+                    'integrity_error_message': po_data.integrity_error_message
                 })
             
             # For backward compatibility with single PO

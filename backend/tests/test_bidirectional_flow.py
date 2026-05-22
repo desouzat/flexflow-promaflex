@@ -20,10 +20,12 @@ def test_status_flow_mapping():
     expected_forward = {
         "DRAFT": "SUBMITTED",
         "SUBMITTED": "APPROVED",
-        "APPROVED": "WAITING_DISPATCH",
-        "WAITING_DISPATCH": "COMPLETED",
+        "APPROVED": "IN_PROGRESS",
+        "IN_PROGRESS": "WAITING_DISPATCH",
+        "WAITING_DISPATCH": "AUDIT_PENDING",
+        "AUDIT_PENDING": "COMPLETED",
         "COMPLETED": None,
-        "WAITING_COMMERCIAL_PARTITION": "SUBMITTED"
+        "WAITING_COMMERCIAL_PARTITION": "APPROVED"
     }
     
     for status, expected_next in expected_forward.items():
@@ -43,8 +45,10 @@ def test_status_flow_mapping():
         "DRAFT": None,
         "SUBMITTED": "DRAFT",
         "APPROVED": "SUBMITTED",
-        "WAITING_DISPATCH": "APPROVED",
-        "COMPLETED": "WAITING_DISPATCH",
+        "IN_PROGRESS": "APPROVED",
+        "WAITING_DISPATCH": "IN_PROGRESS",
+        "AUDIT_PENDING": "WAITING_DISPATCH",
+        "COMPLETED": "AUDIT_PENDING",
         "WAITING_COMMERCIAL_PARTITION": None
     }
     
@@ -73,11 +77,15 @@ def test_display_name_mapping():
     
     expected_mappings = {
         "DRAFT": "Comercial",
-        "SUBMITTED": "PCP",
-        "APPROVED": "Produção/Embalagem",
-        "WAITING_DISPATCH": "Expedição/Faturamento",
-        "COMPLETED": "Concluído",
-        "WAITING_COMMERCIAL_PARTITION": "Aguardando Partição"
+        "SUBMITTED": "Comercial",
+        "WAITING_COMMERCIAL_PARTITION": "Comercial",
+        "APPROVED": "PCP",
+        "IN_PROGRESS": "Produção/Embalagem",
+        "WAITING_DISPATCH": "Faturamento/Expedição",
+        "AUDIT_PENDING": "Financeiro",
+        "COMPLETED": "Financeiro",
+        "ANALISE_CREDITO": "Financeiro",
+        "CANCELLED": "Cancelado"
     }
     
     print("\n[DB STATUS → DISPLAY NAME]")
@@ -90,12 +98,12 @@ def test_display_name_mapping():
             assert False, f"Display mapping mismatch for {db_status}"
     
     print("\n[DISPLAY NAME → DB STATUS]")
-    for db_status, display_name in expected_mappings.items():
-        actual_db = DISPLAY_TO_DB_STATUS.get(display_name)
-        if actual_db == db_status:
-            print(f"  ✓ {display_name} → {actual_db}")
+    for display_name, db_status in DISPLAY_TO_DB_STATUS.items():
+        actual_display = STATUS_DISPLAY_MAP.get(db_status)
+        if actual_display == display_name:
+            print(f"  ✓ {display_name} → {db_status}")
         else:
-            print(f"  ✗ {display_name}: Expected '{db_status}', got '{actual_db}'")
+            print(f"  ✗ {display_name}: Expected '{display_name}' to map back from '{db_status}', got '{actual_display}'")
             assert False, f"Reverse mapping mismatch for {display_name}"
     
     print("\n✓ ALL DISPLAY NAME MAPPINGS VERIFIED")
@@ -116,7 +124,9 @@ def test_valid_transitions():
         "DRAFT",
         "SUBMITTED",
         "APPROVED",
+        "IN_PROGRESS",
         "WAITING_DISPATCH",
+        "AUDIT_PENDING",
         "COMPLETED"
     ]
     
@@ -131,12 +141,15 @@ def test_valid_transitions():
             print(f"  ✗ Step {i+1}: {current} expected {expected_next}, got {actual_next}")
             assert False, f"Lifecycle path broken at {current}"
     
-    # Test rejection path (PCP → Comercial)
+    # Test rejection path
     print("\n[REJECTION PATH]")
     rejection_tests = [
         ("SUBMITTED", "DRAFT", "PCP can reject to Comercial"),
         ("APPROVED", "SUBMITTED", "Production can return to PCP"),
-        ("WAITING_DISPATCH", "APPROVED", "Dispatch can return to Production"),
+        ("IN_PROGRESS", "APPROVED", "Dispatch can return to Production"),
+        ("WAITING_DISPATCH", "IN_PROGRESS", "Dispatch can return to Production"),
+        ("AUDIT_PENDING", "WAITING_DISPATCH", "Finance can return to Dispatch"),
+        ("COMPLETED", "AUDIT_PENDING", "Completed can return to Finance"),
     ]
     
     for current, expected_prev, description in rejection_tests:
@@ -150,10 +163,10 @@ def test_valid_transitions():
     # Test partition suggestion path
     print("\n[PARTITION SUGGESTION PATH]")
     partition_next = STATUS_FLOW.get("WAITING_COMMERCIAL_PARTITION", {}).get("next")
-    if partition_next == "SUBMITTED":
-        print(f"  ✓ Partition suggestion returns to PCP: WAITING_COMMERCIAL_PARTITION → SUBMITTED")
+    if partition_next == "APPROVED":
+        print(f"  ✓ Partition suggestion returns to PCP: WAITING_COMMERCIAL_PARTITION → APPROVED")
     else:
-        print(f"  ✗ Partition suggestion: Expected SUBMITTED, got {partition_next}")
+        print(f"  ✗ Partition suggestion: Expected APPROVED, got {partition_next}")
         assert False, "Partition suggestion path incorrect"
     
     print("\n✓ ALL VALID TRANSITIONS VERIFIED")

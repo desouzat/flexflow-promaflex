@@ -41,6 +41,7 @@ STATUS_DISPLAY_MAP = {
     "WAITING_DISPATCH": "Faturamento/Expedição",
     "AUDIT_PENDING": "Financeiro",
     "COMPLETED": "Financeiro",
+    "ANALISE_CREDITO": "Financeiro",
     "CANCELLED": "Cancelado"
 }
 
@@ -111,7 +112,7 @@ async def get_kanban_board(
         ("PCP", ["APPROVED"]),
         ("Produção/Embalagem", ["IN_PROGRESS"]),
         ("Faturamento/Expedição", ["WAITING_DISPATCH"]),
-        ("Financeiro", ["AUDIT_PENDING", "COMPLETED"])
+        ("Financeiro", ["AUDIT_PENDING", "COMPLETED", "ANALISE_CREDITO"])
     ]
     
     # Group POs by status
@@ -336,6 +337,15 @@ async def get_purchase_order(
     - Purchase Order details with items
     """
     
+    import uuid
+    try:
+        uuid.UUID(po_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Purchase Order {po_id} not found"
+        )
+
     # Query database
     po = db.query(PurchaseOrder).filter(
         PurchaseOrder.id == po_id,

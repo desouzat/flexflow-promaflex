@@ -274,11 +274,36 @@ class TestPartitionService:
 
 
 # Fixtures
-@pytest.fixture
-def db_session():
-    """Create a test database session"""
-    # This would be implemented with your test database setup
-    pass
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+from backend.database import Base
+
+@pytest.fixture(scope="function")
+def db_engine():
+    """Create an in-memory SQLite database for testing."""
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(bind=engine)
+    yield engine
+    Base.metadata.drop_all(bind=engine)
+
+@pytest.fixture(scope="function")
+def db_session(db_engine):
+    """Create a new database session for a test."""
+    TestingSessionLocal = sessionmaker(
+        autocommit=False,
+        autoflush=False,
+        bind=db_engine
+    )
+    session = TestingSessionLocal()
+    try:
+        yield session
+    finally:
+        session.close()
 
 
 @pytest.fixture

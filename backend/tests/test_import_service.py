@@ -432,8 +432,8 @@ def test_validate_import_data_with_empty_required_field(import_service, valid_ma
     assert any("cannot be empty" in error.error_message for error in result.errors)
 
 
-def test_validate_import_data_multiple_pos_fails(import_service, valid_mapping):
-    """Test that multiple PO numbers in one file fails"""
+def test_validate_import_data_multiple_pos_succeeds(import_service, valid_mapping):
+    """Test that multiple PO numbers in one file succeeds"""
     df = pd.DataFrame({
         'PO Number': ['PO-001', 'PO-002'],  # Different PO numbers
         'Client': ['Acme Corp', 'Beta Inc'],
@@ -448,8 +448,9 @@ def test_validate_import_data_multiple_pos_fails(import_service, valid_mapping):
     
     result = import_service.validate_import_data(df, valid_mapping)
     
-    assert not result.success
-    assert any("Multiple PO numbers" in error.error_message for error in result.errors)
+    assert result.success
+    assert result.po_data_list is not None
+    assert len(result.po_data_list) == 2
 
 
 def test_validate_import_data_inconsistent_client_name(import_service, valid_mapping):

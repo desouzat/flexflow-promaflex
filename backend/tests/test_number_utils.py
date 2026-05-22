@@ -153,6 +153,11 @@ class TestCleanBrazilianNumberEdgeCases:
         result = clean_brazilian_number("R$  13.335,00  ")
         assert result == "13335.00", f"Got {result!r}"
 
+    def test_r_dollar_space_comma(self):
+        """'R$ 17,57' → '17.57' — space after R$ and comma decimal."""
+        result = clean_brazilian_number("R$ 17,57")
+        assert result == "17.57", f"Expected '17.57', got {result!r}"
+
     def test_float_inf_rejected(self):
         """float('inf') → None."""
         result = clean_brazilian_number(float("inf"))

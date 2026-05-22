@@ -265,7 +265,7 @@ class TestMesaDeConferencia:
         assert po.has_integrity_error is True
         assert po.integrity_error_message is not None
         assert "Divergência" in po.integrity_error_message or "divergência" in po.integrity_error_message.lower()
-        print(f"\n✅ H-02 Integrity message: {po.integrity_error_message}")
+        print(f"\n[OK] H-02 Integrity message: {po.integrity_error_message}")
 
     def test_h03_tolerance_boundary_1_cent(self):
         """Difference of exactly 0.01 (1 cent) is WITHIN tolerance — no error."""
@@ -364,7 +364,7 @@ class TestMesaDeConferencia:
         assert len(integrity_errors) == 1
         assert "PO-BAD" in integrity_errors[0]
         assert "R$" in integrity_errors[0] or "diferença" in integrity_errors[0].lower() or "Divergência" in integrity_errors[0]
-        print(f"\n✅ H-07 Integrity block message: {integrity_errors[0]}")
+        print(f"\n[OK] H-07 Integrity block message: {integrity_errors[0]}")
 
     def test_h08_multi_po_both_must_pass(self):
         """With two POs, both must pass integrity. One failing blocks the whole import."""
@@ -504,6 +504,309 @@ class TestSchemaSmokeTests:
         assert hasattr(m, "AuditLog")
         assert hasattr(m, "OrderItem")
         assert hasattr(m, "PurchaseOrder")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GROUP F — Task G/H/I: Confirm Staging Endpoint Integration Tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestConfirmStagingEndpoint:
+    """
+    Task G/H/I: Integration tests for /api/import/confirm-staging.
+    Verifies transaction persistence, cascade deletions, ANALISE_CREDITO state,
+    v2 chained AuditLogs, and preservation of all 22 ONET fields.
+    """
+
+    @pytest.fixture(scope="class")
+    def db(self):
+        """Get database session."""
+        from backend.database import SessionLocal, Base, engine
+        # Ensure tables exist
+        Base.metadata.create_all(bind=engine)
+        session = SessionLocal()
+        yield session
+        session.close()
+
+    @pytest.fixture(scope="class")
+    def test_tenant(self, db):
+        """Create a clean tenant for isolation."""
+        from backend.models import Tenant
+        
+        # Self-healing: Purge any left-over test tenants from previous aborted runs
+        leftovers = db.query(Tenant).filter(
+            (Tenant.cnpj == "99.999.999/9999-99") | 
+            (Tenant.name == "Staging Test Company Ltd")
+        ).all()
+        for t in leftovers:
+            db.delete(t)
+        db.commit()
+
+        tenant = Tenant(
+            id=uuid.uuid4(),
+            name="Staging Test Company Ltd",
+            cnpj="99.999.999/9999-99",
+            is_active=True
+        )
+        db.add(tenant)
+        db.commit()
+        db.refresh(tenant)
+        yield tenant
+        # Cleanup
+        db.delete(tenant)
+        db.commit()
+
+    @pytest.fixture(scope="class")
+    def test_user(self, db, test_tenant):
+        """Create a clean test user."""
+        from backend.models import User
+        from backend.routers.auth import get_password_hash
+        user = User(
+            id=uuid.uuid4(),
+            tenant_id=test_tenant.id,
+            name="Staging Integrator",
+            email=f"stagetest-{uuid.uuid4().hex[:6]}@example.com",
+            hashed_password=get_password_hash("securepass123"),
+            role="OPERATOR",
+            is_active=True
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        yield user
+        # Cleanup
+        db.delete(user)
+        db.commit()
+
+    @pytest.mark.asyncio
+    async def test_confirm_staging_flow_success(self, db, test_tenant, test_user):
+        """
+        Verify that confirm_staging route works, cascade deletes existing POs,
+        sets ANALISE_CREDITO statuses, writes chained v2 audit logs, and preserves all 22 ONET fields.
+        """
+        from backend.models import PurchaseOrder, OrderItem, AuditLog
+        from backend.routers.import_router import confirm_staging
+        from backend.schemas.import_schema import ConfirmStagingPayload
+        from backend.schemas.auth_schema import UserInfo
+        
+        po_num = f"PO-CONFIRM-TEST-{uuid.uuid4().hex[:6]}"
+        
+        # 1. Create a pre-existing PO to verify cascade deletion works
+        existing_po = PurchaseOrder(
+            id=uuid.uuid4(),
+            tenant_id=test_tenant.id,
+            po_number=po_num,
+            status_macro="DRAFT",
+            created_by=test_user.id,
+            shipping_cost=0.0,
+            po_total_value=100.0,
+            partition_metadata={"client_name": "Old Client"}
+        )
+        db.add(existing_po)
+        db.commit()
+        
+        existing_item = OrderItem(
+            id=uuid.uuid4(),
+            po_id=existing_po.id,
+            tenant_id=test_tenant.id,
+            sku="OLD-SKU",
+            quantity=1,
+            price=100.0,
+            status_item="PENDING"
+        )
+        db.add(existing_item)
+        db.commit()
+
+        # 2. Build the payload with 1 blocked item (VIP credit analysis) and 1 normal item
+        payload_data = {
+            "pos": [
+                {
+                  "po_number": po_num,
+                  "client_name": "Nova Promaflex SA",
+                  "freight_cost": 150.0,
+                  "additional_costs": 50.0,
+                  "po_total_value": 1200.0,
+                  "items": [
+                    {
+                      "sku": "SKU-BLOCKED-999",
+                      "quantity": 10,
+                      "price_unit": 100.0,
+                      "unit_value": 100.0,
+                      "item_total_value": 1000.0,
+                      "block_status": "BLOQUEADO",
+                      "balance": 100.0,
+                      "delay": 2,
+                      "payment_terms": "30 dias",
+                      "description": "Item de Teste Bloqueado",
+                      "unit": "UN",
+                      "width": 1.5,
+                      "length": 2.0,
+                      "lead_time": 15,
+                      "delivery_date": "2026-06-01",
+                      "billing_date": "2026-06-05",
+                      "icms_percent": 18.0,
+                      "freight": 50.0,
+                      "salesperson": "Vendedor Teste",
+                      "ipi": 5.0,
+                      "extra_metadata": {
+                        "is_personalized": True,
+                        "is_new_client": False,
+                        "is_export": False,
+                        "is_replacement": False,
+                        "customization_notes": "Gravação a laser",
+                        "attachment_path": "/uploads/test.pdf",
+                        "attachment_filename": "test.pdf",
+                        "apply_sla_reduction": True,
+                        "finance_justification": "Cliente VIP com alta capacidade de pagamento, aprovado pela diretoria."
+                      }
+                    },
+                    {
+                      "sku": "SKU-NORMAL-999",
+                      "quantity": 2,
+                      "price_unit": 100.0,
+                      "unit_value": 100.0,
+                      "item_total_value": 200.0,
+                      "block_status": "LIBERADO",
+                      "balance": 200.0,
+                      "delay": 0,
+                      "payment_terms": "A vista",
+                      "description": "Item Normal",
+                      "unit": "UN",
+                      "width": 1.0,
+                      "length": 1.0,
+                      "lead_time": 5,
+                      "delivery_date": "2026-05-25",
+                      "billing_date": "2026-05-25",
+                      "icms_percent": 12.0,
+                      "freight": 10.0,
+                      "salesperson": "Outro Vendedor",
+                      "ipi": 0.0,
+                      "extra_metadata": {
+                        "is_personalized": False,
+                        "is_new_client": False,
+                        "is_export": False,
+                        "is_replacement": False,
+                        "customization_notes": None,
+                        "attachment_path": None,
+                        "attachment_filename": None,
+                        "apply_sla_reduction": False,
+                        "finance_justification": None
+                      }
+                    }
+                  ]
+                }
+            ]
+        }
+
+        # 3. Call endpoint directly
+        payload_obj = ConfirmStagingPayload(**payload_data)
+        user_info = UserInfo(
+            id=str(test_user.id),
+            tenant_id=str(test_user.tenant_id),
+            email=test_user.email,
+            name=test_user.name,
+            role=test_user.role,
+            permissions=[],
+            is_active=test_user.is_active
+        )
+        res_dict = await confirm_staging(payload=payload_obj, current_user=user_info, db=db)
+        assert res_dict["success"] is True
+        assert "confirmada com sucesso" in res_dict["message"]
+
+        # 4. Assert cascade deletion: the old PO with ID existing_po.id must be gone
+        old_po_exists = db.query(PurchaseOrder).filter(PurchaseOrder.id == existing_po.id).first()
+        assert old_po_exists is None, "Cascade delete did not purge old PurchaseOrder"
+
+        old_item_exists = db.query(OrderItem).filter(OrderItem.id == existing_item.id).first()
+        assert old_item_exists is None, "Cascade delete did not purge old OrderItem"
+
+        # 5. Fetch the newly created PurchaseOrder
+        new_po = (
+            db.query(PurchaseOrder)
+            .filter(
+                PurchaseOrder.po_number == po_num,
+                PurchaseOrder.tenant_id == test_tenant.id
+            )
+            .first()
+        )
+        assert new_po is not None
+        # Assert macro status is ANALISE_CREDITO because of the blocked item with justification
+        assert new_po.status_macro == "ANALISE_CREDITO"
+        # Assert client_name dynamic property is correctly populated via partition_metadata
+        assert new_po.client_name == "Nova Promaflex SA"
+        # Assert shipping cost matches freight + additional costs
+        assert new_po.shipping_cost == 200.0  # 150.0 + 50.0
+
+        # 6. Verify items
+        items = db.query(OrderItem).filter(OrderItem.po_id == new_po.id).all()
+        assert len(items) == 2
+
+        blocked_item = next(i for i in items if i.sku == "SKU-BLOCKED-999")
+        normal_item = next(i for i in items if i.sku == "SKU-NORMAL-999")
+
+        # Assert status
+        assert blocked_item.status_item == "ANALISE_CREDITO"
+        assert normal_item.status_item == "PENDING"
+
+        # Assert 22 fields are fully preserved in attributes or extra_metadata JSONB
+        # (Standard columns verified)
+        assert blocked_item.price == Decimal("100.00")
+        assert blocked_item.quantity == 10
+        assert blocked_item.unit_value == Decimal("100.00")
+        assert blocked_item.item_total_value == Decimal("1000.00")
+        assert blocked_item.is_personalized is True
+        assert blocked_item.is_new_client is False
+        assert blocked_item.customization_notes == "Gravação a laser"
+        assert blocked_item.attachment_path == "/uploads/test.pdf"
+
+        # (Extra metadata JSONB verified - checking all 22 ONET mapping fields)
+        em = blocked_item.extra_metadata
+        assert em["block_status"] == "BLOQUEADO"
+        assert em["balance"] == 100.0
+        assert em["delay"] == 2
+        assert em["payment_terms"] == "30 dias"
+        assert em["description"] == "Item de Teste Bloqueado"
+        assert em["unit"] == "UN"
+        assert em["width"] == 1.5
+        assert em["length"] == 2.0
+        assert em["lead_time"] == 15
+        assert em["delivery_date"] == "2026-06-01"
+        assert em["billing_date"] == "2026-06-05"
+        assert em["icms_percent"] == 18.0
+        assert em["freight"] == 50.0
+        assert em["salesperson"] == "Vendedor Teste"
+        assert em["ipi"] == 5.0
+        assert em["finance_justification"] == "Cliente VIP com alta capacidade de pagamento, aprovado pela diretoria."
+        assert em["client_name"] == "Nova Promaflex SA"
+
+        # 7. Assert v2 blockchain hash audit log is correctly chained and written
+        audit_log = db.query(AuditLog).filter(AuditLog.item_id == blocked_item.id).first()
+        assert audit_log is not None
+        assert audit_log.to_status == "ANALISE_CREDITO"
+        assert audit_log.from_status is None
+        assert audit_log.hash_version == 2
+        assert audit_log.is_exception is True
+        assert audit_log.justification == "Cliente VIP com alta capacidade de pagamento, aprovado pela diretoria."
+        
+        # Verify hash matches calculate_hash_v2 output
+        expected_hash = AuditLog.calculate_hash_v2(
+            tenant_id=test_tenant.id,
+            item_id=blocked_item.id,
+            from_status=None,
+            to_status="ANALISE_CREDITO",
+            timestamp=audit_log.created_at,  # use exact same timestamp
+            previous_hash=None,
+            changed_by=test_user.id
+        )
+        assert audit_log.hash == expected_hash, "Chained v2 audit hash mismatch!"
+
+        # 8. Clean up created POs/items for this test explicitly (since DB is shared/persistent)
+        db.delete(audit_log)
+        db.delete(blocked_item)
+        db.delete(normal_item)
+        db.delete(new_po)
+        db.commit()
+
+
 
 
 if __name__ == "__main__":

@@ -16,16 +16,18 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 import pytest
 import hashlib
-from datetime import datetime, timedelta
+import uuid
+from datetime import datetime, timedelta, timezone
+from typing import Tuple, List
 from decimal import Decimal
 from sqlalchemy.orm import Session
 
-from database import Base, engine, SessionLocal
-from models import (
+from backend.database import Base, engine, SessionLocal
+from backend.models import (
     Tenant, User, PurchaseOrder, OrderItem, AuditLog,
     get_last_audit_hash
 )
-from security import get_password_hash
+from backend.routers.auth import get_password_hash
 
 
 class TestFullLifecycleIntegrity:
@@ -34,7 +36,7 @@ class TestFullLifecycleIntegrity:
     @pytest.fixture(scope="function")
     def db(self):
         """Create a fresh database session for each test"""
-        # Create tables
+        # Ensure tables exist
         Base.metadata.create_all(bind=engine)
         
         # Create session
@@ -44,20 +46,32 @@ class TestFullLifecycleIntegrity:
         
         # Cleanup
         db.close()
-        Base.metadata.drop_all(bind=engine)
     
     @pytest.fixture
     def test_tenant(self, db: Session):
         """Create a test tenant"""
+        # Self-healing: Purge any left-over test tenants from previous aborted runs
+        leftovers = db.query(Tenant).filter(
+            (Tenant.cnpj == "88.888.888/8888-88") | 
+            (Tenant.name == "Lifecycle Test Company Ltd")
+        ).all()
+        for t in leftovers:
+            db.delete(t)
+        db.commit()
+
         tenant = Tenant(
-            name="Test Company",
-            cnpj="12.345.678/0001-90",
+            name="Lifecycle Test Company Ltd",
+            cnpj="88.888.888/8888-88",
             is_active=True
         )
         db.add(tenant)
         db.commit()
         db.refresh(tenant)
-        return tenant
+        yield tenant
+
+        # Cleanup
+        db.delete(tenant)
+        db.commit()
     
     @pytest.fixture
     def test_users(self, db: Session, test_tenant):
@@ -125,7 +139,7 @@ class TestFullLifecycleIntegrity:
         items = [
             OrderItem(
                 tenant_id=test_tenant.id,
-                purchase_order_id=po.id,
+                po_id=po.id,
                 sku=f"SKU-{i:03d}",
                 quantity=10 + i,
                 price=Decimal("100.00") + Decimal(i * 10),
@@ -157,16 +171,22 @@ class TestFullLifecycleIntegrity:
         extra_data: dict = None
     ):
         """Helper to create audit log with proper hash chain"""
+        from backend.models import OrderItem
+        item = db.query(OrderItem).filter(OrderItem.id == item_id).first()
+        tenant_id = item.tenant_id if item else None
+
         previous_hash = get_last_audit_hash(db, item_id)
-        timestamp = datetime.utcnow()
+        timestamp = datetime.now(timezone.utc)
         
-        audit_hash = AuditLog.calculate_hash(
+        audit_hash = AuditLog.calculate_hash_for_version(
+            version=AuditLog.HASH_VERSION_CURRENT,
             item_id=item_id,
             from_status=from_status,
             to_status=to_status,
             timestamp=timestamp,
             previous_hash=previous_hash,
-            changed_by=user_id
+            changed_by=user_id,
+            tenant_id=tenant_id
         )
         
         audit_entry = AuditLog(
@@ -178,14 +198,20 @@ class TestFullLifecycleIntegrity:
             is_exception=is_exception,
             justification=justification,
             changed_by=user_id,
+            hash_version=AuditLog.HASH_VERSION_CURRENT,
+            created_at=timestamp,
             extra_data=extra_data or {}
         )
         
         db.add(audit_entry)
         return audit_entry
     
-    def verify_hash_chain(self, db: Session, item_id) -> tuple[bool, list]:
+    def verify_hash_chain(self, db: Session, item_id: uuid.UUID) -> Tuple[bool, List[str]]:
         """Verify the complete hash chain for an item"""
+        from backend.models import OrderItem
+        item = db.query(OrderItem).filter(OrderItem.id == item_id).first()
+        tenant_id = item.tenant_id if item else None
+
         logs = db.query(AuditLog).filter(
             AuditLog.item_id == item_id
         ).order_by(AuditLog.created_at).all()
@@ -194,13 +220,15 @@ class TestFullLifecycleIntegrity:
         
         for i, log in enumerate(logs):
             # Verify hash calculation
-            expected_hash = AuditLog.calculate_hash(
+            expected_hash = AuditLog.calculate_hash_for_version(
+                version=log.hash_version,
                 item_id=log.item_id,
                 from_status=log.from_status,
                 to_status=log.to_status,
                 timestamp=log.created_at,
                 previous_hash=log.previous_hash,
-                changed_by=log.changed_by
+                changed_by=log.changed_by,
+                tenant_id=tenant_id
             )
             
             if log.hash != expected_hash:

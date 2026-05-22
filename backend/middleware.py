@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 import logging
-import jwt
+from jose import jwt
 import traceback
 import os
 from dotenv import load_dotenv

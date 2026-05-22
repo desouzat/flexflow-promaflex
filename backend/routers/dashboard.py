@@ -492,7 +492,8 @@ async def get_dashboard_alerts(
     ).all()
     
     for po in stuck_pos:
-        days_stuck = (datetime.utcnow() - po.created_at).days
+        now = datetime.now(po.created_at.tzinfo) if po.created_at.tzinfo is not None else datetime.utcnow()
+        days_stuck = (now - po.created_at).days
         alerts.append({
             "id": f"alert-stuck-{po.id}",
             "severity": "medium",

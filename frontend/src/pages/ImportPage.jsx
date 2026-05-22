@@ -64,6 +64,26 @@ const formatCurrency = (value) => {
     }).format(numValue)
 }
 
+// Robust Brazilian/Standard number parser
+const parseBrazilianNumber = (value) => {
+    if (value === null || value === undefined) return 0
+    if (typeof value === 'number') return value
+    
+    let cleaned = String(value).replace(/R\$/gi, '').replace(/\s+/g, '').trim()
+    if (!cleaned) return 0
+
+    const hasComma = cleaned.includes(',')
+    const dotCount = (cleaned.match(/\./g) || []).length
+
+    if (hasComma) {
+        cleaned = cleaned.replace(/\./g, '').replace(',', '.')
+    } else if (dotCount > 1) {
+        cleaned = cleaned.replace(/\./g, '')
+    }
+    
+    return parseFloat(cleaned) || 0
+}
+
 const ImportPage = () => {
     const [selectedFile, setSelectedFile] = useState(null)
     const [uploading, setUploading] = useState(false)
@@ -79,6 +99,7 @@ const ImportPage = () => {
     const [selectedFinanceItem, setSelectedFinanceItem] = useState(null)
     const [financeJustification, setFinanceJustification] = useState('')
     const [financeSubmitting, setFinanceSubmitting] = useState(false)
+    const [sessionChecked, setSessionChecked] = useState(false) // Race-condition guard for session restoration
     const fileInputRef = useRef(null)
     const { refreshNotifications } = useNotifications()
     const { user } = useAuth()
@@ -90,6 +111,7 @@ const ImportPage = () => {
     useEffect(() => {
         const storageKey = getStorageKey(user)
         if (!storageKey) return // Can't persist without a valid user identity
+        if (!sessionChecked) return // Guard: wait until mount restore offer has been settled
 
         const timer = setTimeout(() => {
             if (stagingData) {
@@ -130,7 +152,7 @@ const ImportPage = () => {
         }, 300) // 300ms debounce
 
         return () => clearTimeout(timer)
-    }, [stagingData, selectedPOIndex, currentPage, user])
+    }, [stagingData, selectedPOIndex, currentPage, user, sessionChecked])
 
     // ─── Session Restore Effect (on mount) ──────────────────────────────────────────────
     // Checks for a saved session in tenant-scoped localStorage on component mount.
@@ -145,6 +167,7 @@ const ImportPage = () => {
             const savedSession = localStorage.getItem(storageKey)
             if (!savedSession) {
                 console.log('ℹ️ [Session] No saved session found')
+                setSessionChecked(true)
                 return
             }
 
@@ -154,6 +177,7 @@ const ImportPage = () => {
             if (!isValidSessionSchema(parsed)) {
                 console.warn('⚠️ [Session] Session schema mismatch or invalid — discarding automatically')
                 localStorage.removeItem(storageKey)
+                setSessionChecked(true)
                 return
             }
 
@@ -163,20 +187,23 @@ const ImportPage = () => {
             if (sessionAge >= MAX_AGE_MS) {
                 console.log('⏳ [Session] Session expired (', Math.floor(sessionAge / 60000), 'min old) — discarding')
                 localStorage.removeItem(storageKey)
+                setSessionChecked(true)
                 return
             }
 
             console.log('✅ [Session] Valid session found (' + Math.floor(sessionAge / 60000) + ' min old), showing restore modal')
             setShowRestoreModal(true)
+            // Note: we leave sessionChecked=false here because the user is deciding whether to restore or discard
         } catch (error) {
             console.error('❌ [Session] Failed to check for saved session:', error)
             try { localStorage.removeItem(getStorageKey(user)) } catch (_) {}
+            setSessionChecked(true)
         }
     }, [user]) // Re-check when user changes (login/logout)
 
     const handleRestoreSession = () => {
         const storageKey = getStorageKey(user)
-        if (!storageKey) { setShowRestoreModal(false); return }
+        if (!storageKey) { setShowRestoreModal(false); setSessionChecked(true); return }
 
         console.log('🔄 [Session] Restoring session...')
         try {
@@ -189,6 +216,7 @@ const ImportPage = () => {
                     console.warn('⚠️ [Session] Session schema invalid on restore — discarding')
                     localStorage.removeItem(storageKey)
                     setShowRestoreModal(false)
+                    setSessionChecked(true)
                     return
                 }
 
@@ -208,6 +236,7 @@ const ImportPage = () => {
             showError('Erro ao restaurar sessão')
             try { localStorage.removeItem(storageKey) } catch (_) {}
         }
+        setSessionChecked(true)
         setShowRestoreModal(false)
     }
 
@@ -217,6 +246,7 @@ const ImportPage = () => {
         if (storageKey) {
             try { localStorage.removeItem(storageKey) } catch (_) {}
         }
+        setSessionChecked(true)
         setShowRestoreModal(false)
     }
 
@@ -326,6 +356,16 @@ const ImportPage = () => {
                             balance: item.balance || null,
                             delay: item.delay || null,
                             payment_terms: item.payment_terms || null,
+                            unit: item.unit || null,
+                            width: item.width || null,
+                            length: item.length || null,
+                            lead_time: item.lead_time || null,
+                            delivery_date: item.delivery_date || null,
+                            billing_date: item.billing_date || null,
+                            icms_percent: item.icms_percent || null,
+                            freight: item.freight || null,
+                            salesperson: item.salesperson || null,
+                            ipi: item.ipi || null,
                             // Metadata flags
                             is_personalized: false,
                             is_new_client: false,
@@ -334,7 +374,10 @@ const ImportPage = () => {
                             customization_notes: '',
                             attachment_path: null,
                             needs_mapping: false,
-                            is_checked: false  // Human review flag
+                            is_checked: false,  // Human review flag
+                            extra_metadata: {
+                                finance_justification: null
+                            }
                         }))
                     }))
 
@@ -377,6 +420,16 @@ const ImportPage = () => {
                                 balance: item.balance || null,
                                 delay: item.delay || null,
                                 payment_terms: item.payment_terms || null,
+                                unit: item.unit || null,
+                                width: item.width || null,
+                                length: item.length || null,
+                                lead_time: item.lead_time || null,
+                                delivery_date: item.delivery_date || null,
+                                billing_date: item.billing_date || null,
+                                icms_percent: item.icms_percent || null,
+                                freight: item.freight || null,
+                                salesperson: item.salesperson || null,
+                                ipi: item.ipi || null,
                                 // Metadata flags
                                 is_personalized: false,
                                 is_new_client: false,
@@ -385,7 +438,10 @@ const ImportPage = () => {
                                 customization_notes: '',
                                 attachment_path: null,
                                 needs_mapping: false,
-                                is_checked: false  // Human review flag
+                                is_checked: false,  // Human review flag
+                                extra_metadata: {
+                                    finance_justification: null
+                                }
                             }))
                         }],
                         total_pos: 1
@@ -628,7 +684,10 @@ const ImportPage = () => {
         }
 
         // Rule 0.2: Price must be positive
-        if (!item.price_unit || item.price_unit <= 0) {
+        const rawPrice = item.unit_value !== null && item.unit_value !== undefined ? item.unit_value : item.price_unit
+        const parsedPrice = parseBrazilianNumber(rawPrice)
+
+        if (parsedPrice <= 0) {
             errors.push('Preço unitário deve ser maior que zero')
         }
 
@@ -648,10 +707,13 @@ const ImportPage = () => {
     const calculatePOTotal = (po) => {
         if (!po || !Array.isArray(po.items)) return 0
 
+        const parseBRL = parseBrazilianNumber
+
         return po.items.reduce((sum, item) => {
-            const itemTotal = item.item_total_value
-                ? parseFloat(item.item_total_value)
-                : (item.quantity * item.price_unit)
+            const parsedUnit = parseBRL(item.unit_value !== null && item.unit_value !== undefined ? item.unit_value : item.price_unit)
+            const parsedTotal = item.item_total_value ? parseBRL(item.item_total_value) : 0
+
+            const itemTotal = parsedTotal > 0 ? parsedTotal : (item.quantity * parsedUnit)
             return sum + itemTotal
         }, 0)
     }
@@ -726,29 +788,52 @@ const ImportPage = () => {
                 items: po.items.filter(item => item.is_checked && validateItem(item).length === 0)
             })).filter(po => po.items.length > 0)
 
-            // Prepare payload with all 19 fields + metadata
+            const parseBRL = parseBrazilianNumber
+
+            // Prepare payload with all 22 fields + metadata
             const payload = {
                 pos: validPOs.map(po => ({
                     po_number: po.po_number,
                     client_name: po.client_name,
                     freight_cost: po.freight_cost || 0,
                     additional_costs: po.additional_costs || 0,
-                    items: po.items.map(item => ({
-                        sku: item.sku,
-                        quantity: item.quantity,
-                        price_unit: item.price_unit,
-                        extra_metadata: {
-                            is_personalized: item.is_personalized,
-                            is_new_client: item.is_new_client,
-                            is_export: item.is_export,
-                            is_replacement: item.is_replacement,
-                            customization_notes: item.customization_notes,
-                            attachment_path: item.attachment_path,
-                            attachment_filename: item.attachment_filename,
-                            // SLA reduction flag for backend
-                            apply_sla_reduction: item.is_replacement
+                    po_total_value: po.po_total_value !== undefined && po.po_total_value !== null ? parseFloat(po.po_total_value) : null,
+                    items: po.items.map(item => {
+                        const parsedPrice = parseBRL(item.unit_value !== null && item.unit_value !== undefined ? item.unit_value : item.price_unit)
+                        return {
+                            sku: item.sku,
+                            quantity: item.quantity,
+                            price_unit: parsedPrice,
+                            unit_value: item.unit_value !== null && item.unit_value !== undefined ? parseBRL(item.unit_value) : null,
+                            item_total_value: item.item_total_value !== null && item.item_total_value !== undefined ? parseBRL(item.item_total_value) : null,
+                            block_status: item.block_status || null,
+                            balance: item.balance !== null && item.balance !== undefined ? parseBRL(item.balance) : null,
+                            delay: item.delay !== null && item.delay !== undefined ? parseInt(item.delay, 10) : null,
+                            payment_terms: item.payment_terms || null,
+                            description: item.description || null,
+                            unit: item.unit || null,
+                            width: item.width !== null && item.width !== undefined ? parseBRL(item.width) : null,
+                            length: item.length !== null && item.length !== undefined ? parseBRL(item.length) : null,
+                            lead_time: item.lead_time !== null && item.lead_time !== undefined ? parseInt(item.lead_time, 10) : null,
+                            delivery_date: item.delivery_date || null,
+                            billing_date: item.billing_date || null,
+                            icms_percent: item.icms_percent !== null && item.icms_percent !== undefined ? parseBRL(item.icms_percent) : null,
+                            freight: item.freight !== null && item.freight !== undefined ? parseBRL(item.freight) : null,
+                            salesperson: item.salesperson || null,
+                            ipi: item.ipi !== null && item.ipi !== undefined ? parseBRL(item.ipi) : null,
+                            extra_metadata: {
+                                is_personalized: item.is_personalized || false,
+                                is_new_client: item.is_new_client || false,
+                                is_export: item.is_export || false,
+                                is_replacement: item.is_replacement || false,
+                                customization_notes: item.customization_notes || '',
+                                attachment_path: item.attachment_path || null,
+                                attachment_filename: item.attachment_filename || null,
+                                apply_sla_reduction: item.is_replacement || false,
+                                finance_justification: item.extra_metadata?.finance_justification || null
+                            }
                         }
-                    }))
+                    })
                 }))
             }
 
@@ -760,8 +845,13 @@ const ImportPage = () => {
                 dismissToast(toastId)
                 showSuccess(`${validPOs.length} pedido(s) criado(s) com sucesso! Atualizando Kanban...`)
 
-                // Clear session storage
-                localStorage.removeItem(STORAGE_KEY)
+                // Clear session storage dynamically using tenant-scoped key
+                const storageKey = getStorageKey(user)
+                if (storageKey) {
+                    try {
+                        localStorage.removeItem(storageKey)
+                    } catch (_) {}
+                }
 
                 // Reset form first
                 setSelectedFile(null)
@@ -898,7 +988,16 @@ const ImportPage = () => {
             <div className="bg-white border-b border-gray-200 px-6 py-4">
                 <div className="flex items-center justify-between">
                     <div>
-                        <h1 className="text-2xl font-bold text-gray-900">Mesa de Conferência</h1>
+                        <div className="flex items-center gap-2">
+                            <h1 className="text-2xl font-bold text-gray-900">Mesa de Conferência</h1>
+                            <button
+                                onClick={() => setShowHelp(true)}
+                                className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100 transition-colors"
+                                title="Ver regras de negócio de Staging"
+                            >
+                                <HelpCircle className="w-5 h-5" />
+                            </button>
+                        </div>
                         <p className="text-sm text-gray-600 mt-1">
                             Importar e validar pedidos de compra (campos ONET)
                         </p>
@@ -1437,33 +1536,93 @@ const ImportPage = () => {
 
                                                 {/* Conferido Checkbox - PROMINENT at the end */}
                                                 <div className="pt-4 border-t border-gray-300">
-                                                    <button
-                                                        onClick={() => handleToggleChecked(item.id)}
-                                                        disabled={hasError}
-                                                        className={`w-full flex items-center justify-center gap-3 px-4 py-3 rounded-lg font-semibold transition-all ${hasError
-                                                            ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                                                            : item.is_checked
-                                                                ? 'bg-green-600 text-white hover:bg-green-700'
-                                                                : 'bg-blue-600 text-white hover:bg-blue-700'
-                                                            }`}
-                                                    >
-                                                        {hasError ? (
-                                                            <>
-                                                                <X className="w-5 h-5" />
-                                                                <span>Corrija os erros para conferir</span>
-                                                            </>
-                                                        ) : item.is_checked ? (
-                                                            <>
-                                                                <CheckSquare className="w-5 h-5" />
-                                                                <span>✓ CONFERIDO - Clique para desmarcar</span>
-                                                            </>
-                                                        ) : (
-                                                            <>
-                                                                <Square className="w-5 h-5" />
-                                                                <span>Marcar como CONFERIDO</span>
-                                                            </>
-                                                        )}
-                                                    </button>
+                                                    {item.block_status === 'BLOQUEADO' ? (
+                                                        <button
+                                                            onClick={() => {
+                                                                if (item.is_checked) {
+                                                                    // Desmarcar / clique para desfazer
+                                                                    setStagingData(prev => {
+                                                                        if (!prev || !prev.po_list || !Array.isArray(prev.po_list)) return prev;
+                                                                        return {
+                                                                            ...prev,
+                                                                            po_list: prev.po_list.map(po => ({
+                                                                                ...po,
+                                                                                items: Array.isArray(po.items) ? po.items.map(it => {
+                                                                                    if (it.id === item.id) {
+                                                                                        return {
+                                                                                            ...it,
+                                                                                            is_checked: false,
+                                                                                            extra_metadata: {
+                                                                                                ...(it.extra_metadata || {}),
+                                                                                                finance_justification: null
+                                                                                            }
+                                                                                        };
+                                                                                    }
+                                                                                    return it;
+                                                                                }) : []
+                                                                            }))
+                                                                        };
+                                                                    });
+                                                                } else {
+                                                                    // Solicitar liberação
+                                                                    setSelectedFinanceItem(item);
+                                                                    setShowFinanceModal(true);
+                                                                }
+                                                            }}
+                                                            disabled={hasError}
+                                                            className={`w-full flex items-center justify-center gap-3 px-4 py-3 rounded-lg font-semibold transition-all ${hasError
+                                                                ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                                                                : item.is_checked
+                                                                    ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                                                                    : 'bg-amber-500 text-white hover:bg-amber-600'
+                                                                }`}
+                                                        >
+                                                            {hasError ? (
+                                                                <>
+                                                                    <X className="w-5 h-5" />
+                                                                    <span>Corrija os erros para conferir</span>
+                                                                </>
+                                                            ) : item.is_checked ? (
+                                                                <>
+                                                                    <CheckSquare className="w-5 h-5 text-white" />
+                                                                    <span>✓ Liberação Solicitada - Clique para desfazer</span>
+                                                                </>
+                                                            ) : (
+                                                                <>
+                                                                    <DollarSign className="w-5 h-5 text-white" />
+                                                                    <span>Solicitar Liberação Financeira</span>
+                                                                </>
+                                                            )}
+                                                        </button>
+                                                    ) : (
+                                                        <button
+                                                            onClick={() => handleToggleChecked(item.id)}
+                                                            disabled={hasError}
+                                                            className={`w-full flex items-center justify-center gap-3 px-4 py-3 rounded-lg font-semibold transition-all ${hasError
+                                                                ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                                                                : item.is_checked
+                                                                    ? 'bg-green-600 text-white hover:bg-green-700'
+                                                                    : 'bg-blue-600 text-white hover:bg-blue-700'
+                                                                }`}
+                                                        >
+                                                            {hasError ? (
+                                                                <>
+                                                                    <X className="w-5 h-5" />
+                                                                    <span>Corrija os erros para conferir</span>
+                                                                </>
+                                                            ) : item.is_checked ? (
+                                                                <>
+                                                                    <CheckSquare className="w-5 h-5" />
+                                                                    <span>✓ CONFERIDO - Clique para desmarcar</span>
+                                                                </>
+                                                            ) : (
+                                                                <>
+                                                                    <Square className="w-5 h-5" />
+                                                                    <span>Marcar como CONFERIDO</span>
+                                                                </>
+                                                            )}
+                                                        </button>
+                                                    )}
                                                 </div>
                                             </div>
                                         )
@@ -1707,11 +1866,7 @@ const ImportPage = () => {
                 <HelpModal
                     isOpen={showHelp}
                     onClose={() => setShowHelp(false)}
-                    title={helpContent.title}
-                    description={helpContent.description}
-                    rules={helpContent.rules}
-                    nextSteps={helpContent.nextSteps}
-                    requiredFields={helpContent.requiredFields}
+                    status="Staging"
                 />
             )}
 
@@ -1725,89 +1880,69 @@ const ImportPage = () => {
                         'N/A'
                     }
                     submitting={financeSubmitting}
-                    onApprove={async (justification) => {
-                        if (!selectedFinanceItem?.id) {
-                            showError('Item sem ID — não é possível registrar a decisão. Faça commit antes de aprovar.')
-                            return
-                        }
-                        setFinanceSubmitting(true)
-                        try {
-                            const resp = await api.post('/api/import/finance-decision', {
-                                item_id: selectedFinanceItem.id,
-                                decision: 'APPROVE',
-                                justification
-                            })
-                            // Optimistic update: reflect new status in staging data immediately
-                            setStagingData(prev => {
-                                if (!prev) return prev
-                                const updatedPoList = (prev.po_list || []).map((po, idx) => {
-                                    if (idx !== selectedPOIndex) return po
-                                    return {
-                                        ...po,
-                                        items: (po.items || []).map(it =>
-                                            it.id === selectedFinanceItem.id
-                                                ? { ...it, status_item: 'FINANCE_APPROVED' }
-                                                : it
-                                        )
-                                    }
-                                })
-                                return { ...prev, po_list: updatedPoList }
-                            })
-                            showSuccess(`✅ Item ${selectedFinanceItem.sku || ''} aprovado. Audit log: ${resp.data?.audit_hash || '...'}...`)
-                            setShowFinanceModal(false)
-                            setSelectedFinanceItem(null)
-                            setFinanceJustification('')
-                        } catch (err) {
-                            const detail = err.response?.data?.detail || err.message || 'Erro desconhecido'
-                            showError(`❌ Falha ao aprovar: ${detail}`)
-                        } finally {
-                            setFinanceSubmitting(false)
-                        }
+                    onApprove={(justification) => {
+                        // In staging/local mode, we don't call the API.
+                        // Perform a purely local state update:
+                        setStagingData(prev => {
+                            if (!prev || !prev.po_list || !Array.isArray(prev.po_list)) return prev;
+                            const updatedPoList = prev.po_list.map((po, idx) => {
+                                if (idx !== selectedPOIndex) return po;
+                                return {
+                                    ...po,
+                                    items: (po.items || []).map(it =>
+                                        it.id === selectedFinanceItem.id
+                                            ? {
+                                                  ...it,
+                                                  is_checked: true,
+                                                  extra_metadata: {
+                                                      ...(it.extra_metadata || {}),
+                                                      finance_justification: justification
+                                                  }
+                                              }
+                                            : it
+                                    )
+                                };
+                            });
+                            return { ...prev, po_list: updatedPoList };
+                        });
+                        showSuccess(`✅ Liberação financeira registrada localmente para o item ${selectedFinanceItem.sku || ''}`);
+                        setShowFinanceModal(false);
+                        setSelectedFinanceItem(null);
+                        setFinanceJustification('');
                     }}
-                    onReject={async (justification) => {
-                        if (!selectedFinanceItem?.id) {
-                            showError('Item sem ID — não é possível registrar a decisão. Faça commit antes de rejeitar.')
-                            return
-                        }
-                        setFinanceSubmitting(true)
-                        try {
-                            const resp = await api.post('/api/import/finance-decision', {
-                                item_id: selectedFinanceItem.id,
-                                decision: 'REJECT',
-                                justification
-                            })
-                            // Optimistic update
-                            setStagingData(prev => {
-                                if (!prev) return prev
-                                const updatedPoList = (prev.po_list || []).map((po, idx) => {
-                                    if (idx !== selectedPOIndex) return po
-                                    return {
-                                        ...po,
-                                        items: (po.items || []).map(it =>
-                                            it.id === selectedFinanceItem.id
-                                                ? { ...it, status_item: 'FINANCE_REJECTED' }
-                                                : it
-                                        )
-                                    }
-                                })
-                                return { ...prev, po_list: updatedPoList }
-                            })
-                            showError(`❌ Item ${selectedFinanceItem.sku || ''} rejeitado. Audit: ${resp.data?.audit_hash || '...'}...`)
-                            setShowFinanceModal(false)
-                            setSelectedFinanceItem(null)
-                            setFinanceJustification('')
-                        } catch (err) {
-                            const detail = err.response?.data?.detail || err.message || 'Erro desconhecido'
-                            showError(`❌ Falha ao rejeitar: ${detail}`)
-                        } finally {
-                            setFinanceSubmitting(false)
-                        }
+                    onReject={(justification) => {
+                        // In staging/local mode, reject clears justification and sets is_checked = false
+                        setStagingData(prev => {
+                            if (!prev || !prev.po_list || !Array.isArray(prev.po_list)) return prev;
+                            const updatedPoList = prev.po_list.map((po, idx) => {
+                                if (idx !== selectedPOIndex) return po;
+                                return {
+                                    ...po,
+                                    items: (po.items || []).map(it =>
+                                        it.id === selectedFinanceItem.id
+                                            ? {
+                                                  ...it,
+                                                  is_checked: false,
+                                                  extra_metadata: {
+                                                      ...(it.extra_metadata || {}),
+                                                      finance_justification: null
+                                                  }
+                                              }
+                                            : it
+                                    )
+                                };
+                            });
+                            return { ...prev, po_list: updatedPoList };
+                        });
+                        showSuccess(`❌ Liberação financeira rejeitada localmente.`);
+                        setShowFinanceModal(false);
+                        setSelectedFinanceItem(null);
+                        setFinanceJustification('');
                     }}
                     onClose={() => {
-                        if (financeSubmitting) return // block close during submit
-                        setShowFinanceModal(false)
-                        setSelectedFinanceItem(null)
-                        setFinanceJustification('')
+                        setShowFinanceModal(false);
+                        setSelectedFinanceItem(null);
+                        setFinanceJustification('');
                     }}
                 />
             )}

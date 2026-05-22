@@ -19,16 +19,18 @@ from backend.schemas.import_schema import (
     ImportItemData,
     FinanceDecisionRequest,
     FinanceDecisionResponse,
-    FinanceDecision
+    FinanceDecision,
+    ConfirmStagingPayload
 )
 from backend.schemas.auth_schema import UserInfo
 from backend.services.import_service import ImportService
 from backend.services.file_service import FileService
 from backend.database import get_db
 from backend.routers.auth import get_current_user
-from backend.models import OrderItem, AuditLog
+from backend.models import OrderItem, AuditLog, PurchaseOrder
 
 router = APIRouter(prefix="/api/import", tags=["Import"])
+
 
 
 # In-memory storage for import configurations (replace with database in production)
@@ -709,6 +711,7 @@ async def record_finance_decision(
         is_exception=(request.decision == FinanceDecision.REJECT),
         justification=request.justification,
         changed_by=user_uuid,
+        created_at=now,
         extra_data={
             "decision": request.decision.value,
             "justification": request.justification,
@@ -745,3 +748,168 @@ async def record_finance_decision(
         audit_log_id=str(audit_log.id),
         audit_hash=computed_hash[:16]  # prefix only — never expose full hash in response
     )
+
+
+@router.post("/confirm-staging")
+async def confirm_staging(
+    payload: ConfirmStagingPayload,
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Confirm and persist staging items to the production database.
+    
+    **Business Rules:**
+    - Cleanly deletes any existing PO for the tenant with matching `po_number` to prevent unique constraint failures.
+    - If any item in the PO is BLOQUEADO and has a justification, the PO's macro status transitions to 'ANALISE_CREDITO'.
+    - Implements blockchain-hash chained v2 AuditLogs for items placed under credit analysis.
+    - Packs non-column ONET spreadsheet fields into JSONB extra_metadata.
+    """
+    tenant_uuid = uuid.UUID(str(current_user.tenant_id))
+    user_uuid = uuid.UUID(str(current_user.id))
+
+    try:
+        for po in payload.pos:
+            # 1. Cleanly delete existing PO with identical po_number under this tenant
+            existing_po = (
+                db.query(PurchaseOrder)
+                .filter(
+                    PurchaseOrder.po_number == po.po_number,
+                    PurchaseOrder.tenant_id == tenant_uuid
+                )
+                .first()
+            )
+            if existing_po:
+                db.delete(existing_po)
+                db.flush()
+
+            # 2. Determine macro status
+            has_blocked_item = any(
+                item.block_status == "BLOQUEADO"
+                and item.extra_metadata
+                and item.extra_metadata.finance_justification
+                for item in po.items
+            )
+            po_status_macro = "ANALISE_CREDITO" if has_blocked_item else "DRAFT"
+
+            # 3. Create new PurchaseOrder
+            new_po = PurchaseOrder(
+                id=uuid.uuid4(),
+                tenant_id=tenant_uuid,
+                po_number=po.po_number,
+                status_macro=po_status_macro,
+                created_by=user_uuid,
+                shipping_cost=po.freight_cost + po.additional_costs,
+                po_total_value=po.po_total_value,
+                partition_metadata={"client_name": po.client_name}
+            )
+            db.add(new_po)
+            db.flush()
+
+            # 4. Process each item
+            for item in po.items:
+                is_item_blocked = (
+                    item.block_status == "BLOQUEADO"
+                    and item.extra_metadata
+                    and item.extra_metadata.finance_justification
+                )
+                item_status = "ANALISE_CREDITO" if is_item_blocked else "PENDING"
+
+                # Merge all ONET fields into a single extra_metadata dictionary
+                extra_metadata_dict = {
+                    "is_personalized": item.extra_metadata.is_personalized if item.extra_metadata else False,
+                    "is_new_client": item.extra_metadata.is_new_client if item.extra_metadata else False,
+                    "is_export": item.extra_metadata.is_export if item.extra_metadata else False,
+                    "is_replacement": item.extra_metadata.is_replacement if item.extra_metadata else False,
+                    "customization_notes": item.extra_metadata.customization_notes if item.extra_metadata else None,
+                    "attachment_path": item.extra_metadata.attachment_path if item.extra_metadata else None,
+                    "attachment_filename": item.extra_metadata.attachment_filename if item.extra_metadata else None,
+                    "apply_sla_reduction": item.extra_metadata.apply_sla_reduction if item.extra_metadata else False,
+                    "finance_justification": item.extra_metadata.finance_justification if item.extra_metadata else None,
+                    
+                    "block_status": item.block_status,
+                    "balance": item.balance,
+                    "delay": item.delay,
+                    "payment_terms": item.payment_terms,
+                    "description": item.description,
+                    "unit": item.unit,
+                    "width": item.width,
+                    "length": item.length,
+                    "lead_time": item.lead_time,
+                    "delivery_date": item.delivery_date,
+                    "billing_date": item.billing_date,
+                    "icms_percent": item.icms_percent,
+                    "freight": item.freight,
+                    "salesperson": item.salesperson,
+                    "ipi": item.ipi,
+                    
+                    "client_name": po.client_name
+                }
+
+                new_item = OrderItem(
+                    id=uuid.uuid4(),
+                    po_id=new_po.id,
+                    tenant_id=tenant_uuid,
+                    sku=item.sku,
+                    quantity=item.quantity,
+                    price=item.price_unit,
+                    status_item=item_status,
+                    unit_value=item.unit_value,
+                    item_total_value=item.item_total_value,
+                    is_personalized=item.extra_metadata.is_personalized if item.extra_metadata else False,
+                    is_new_client=item.extra_metadata.is_new_client if item.extra_metadata else False,
+                    customization_notes=item.extra_metadata.customization_notes if item.extra_metadata else None,
+                    attachment_path=item.extra_metadata.attachment_path if item.extra_metadata else None,
+                    extra_metadata=extra_metadata_dict
+                )
+                db.add(new_item)
+                db.flush()
+
+                # 5. Create chained AuditLog if item is blocked
+                if is_item_blocked:
+                    now = datetime.now(timezone.utc)
+                    computed_hash = AuditLog.calculate_hash_v2(
+                        tenant_id=tenant_uuid,
+                        item_id=new_item.id,
+                        from_status=None,
+                        to_status="ANALISE_CREDITO",
+                        timestamp=now,
+                        previous_hash=None,
+                        changed_by=user_uuid
+                    )
+
+                    audit_log = AuditLog(
+                        id=uuid.uuid4(),
+                        item_id=new_item.id,
+                        from_status=None,
+                        to_status="ANALISE_CREDITO",
+                        hash=computed_hash,
+                        previous_hash=None,
+                        hash_version=AuditLog.HASH_VERSION_CURRENT,
+                        is_exception=True,
+                        justification=item.extra_metadata.finance_justification,
+                        changed_by=user_uuid,
+                        created_at=now,
+                        extra_data={
+                            "decision": "BLOCKED_ON_IMPORT",
+                            "justification": item.extra_metadata.finance_justification,
+                            "initiator_id": str(user_uuid),
+                            "workflow": "FINANCE_BLOCK_ON_IMPORT"
+                        }
+                    )
+                    db.add(audit_log)
+
+        db.commit()
+
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao salvar staging no banco: {str(exc)}"
+        ) from exc
+
+    return {
+        "success": True,
+        "message": f"Mesa de conferência confirmada com sucesso. {len(payload.pos)} pedido(s) importado(s)."
+    }
+

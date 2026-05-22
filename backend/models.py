@@ -11,11 +11,20 @@ import enum
 
 from sqlalchemy import (
     Column, String, Boolean, Integer, Numeric, DateTime,
-    ForeignKey, CheckConstraint, Index, Text, JSON, Enum
+    ForeignKey, CheckConstraint, Index, Text, JSON, Enum, UUID
 )
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from sqlalchemy.sql import func
+from sqlalchemy.ext.compiler import compiles
+
+@compiles(UUID, "sqlite")
+def compile_uuid_sqlite(type_, compiler, **kw):
+    return "CHAR(32)"
+
+@compiles(JSONB, "sqlite")
+def compile_jsonb_sqlite(type_, compiler, **kw):
+    return "JSON"
 
 try:
     from backend.database import Base
@@ -194,11 +203,12 @@ class PurchaseOrder(Base):
     STATUS_COMPLETED = "COMPLETED"  # Concluído
     STATUS_CANCELLED = "CANCELLED"
     STATUS_WAITING_COMMERCIAL_PARTITION = "WAITING_COMMERCIAL_PARTITION"
+    STATUS_ANALISE_CREDITO = "ANALISE_CREDITO"
     
     VALID_STATUSES = [
         STATUS_DRAFT, STATUS_SUBMITTED, STATUS_APPROVED,
         STATUS_WAITING_DISPATCH, STATUS_COMPLETED, STATUS_CANCELLED,
-        STATUS_WAITING_COMMERCIAL_PARTITION
+        STATUS_WAITING_COMMERCIAL_PARTITION, STATUS_ANALISE_CREDITO
     ]
     
     # Colunas
@@ -299,8 +309,35 @@ class PurchaseOrder(Base):
         ),
     )
     
+    @property
+    def client_name(self) -> str:
+        """
+        Getter para client_name. Retorna o nome do cliente armazenado em partition_metadata
+        ou recupera o valor correspondente nos itens.
+        """
+        if self.partition_metadata and "client_name" in self.partition_metadata:
+            return self.partition_metadata["client_name"]
+        
+        # Fallback para os itens associados
+        if self.items:
+            for item in self.items:
+                if item.extra_metadata and "client_name" in item.extra_metadata:
+                    return item.extra_metadata["client_name"]
+                    
+        return "Cliente Desconhecido"
+
+    @client_name.setter
+    def client_name(self, value: str):
+        """
+        Setter para client_name. Armazena o valor em partition_metadata.
+        """
+        if self.partition_metadata is None:
+            self.partition_metadata = {}
+        self.partition_metadata["client_name"] = value
+
     def __repr__(self):
         return f"<PurchaseOrder(id={self.id}, po_number={self.po_number}, status={self.status_macro})>"
+
 
 
 # ============================================================================
@@ -322,10 +359,14 @@ class OrderItem(Base):
     STATUS_APPROVED = "APPROVED"
     STATUS_REJECTED = "REJECTED"
     STATUS_CANCELLED = "CANCELLED"
+    STATUS_ANALISE_CREDITO = "ANALISE_CREDITO"
+    STATUS_FINANCE_APPROVED = "FINANCE_APPROVED"
+    STATUS_FINANCE_REJECTED = "FINANCE_REJECTED"
     
     VALID_STATUSES = [
         STATUS_PENDING, STATUS_ORDERED, STATUS_RECEIVED,
-        STATUS_QUALITY_CHECK, STATUS_APPROVED, STATUS_REJECTED, STATUS_CANCELLED
+        STATUS_QUALITY_CHECK, STATUS_APPROVED, STATUS_REJECTED, STATUS_CANCELLED,
+        STATUS_ANALISE_CREDITO, STATUS_FINANCE_APPROVED, STATUS_FINANCE_REJECTED
     ]
     
     # Colunas

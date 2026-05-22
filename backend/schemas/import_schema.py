@@ -204,6 +204,10 @@ class ImportItemData(BaseModel):
     @model_validator(mode='after')
     def calculate_margins(self):
         """Calculate item margin and total cost if cost fields are provided"""
+        # If price_unit is None but unit_value is present, copy it
+        if self.price_unit is None and self.unit_value is not None:
+            self.price_unit = float(self.unit_value)
+
         # Only calculate if we have cost data
         if all([self.cost_mp is not None, self.cost_mo is not None,
                 self.cost_energy is not None, self.cost_gas is not None]):
@@ -514,4 +518,54 @@ class FinanceDecisionResponse(BaseModel):
     new_status: str = Field(..., description="New item status after decision")
     audit_log_id: Optional[str] = Field(None, description="ID of the created AuditLog entry")
     audit_hash: Optional[str] = Field(None, description="SHA-256 hash of the audit entry (first 16 chars)")
+
+
+class ConfirmStagingItemExtra(BaseModel):
+    is_personalized: bool = False
+    is_new_client: bool = False
+    is_export: bool = False
+    is_replacement: bool = False
+    customization_notes: Optional[str] = None
+    attachment_path: Optional[str] = None
+    attachment_filename: Optional[str] = None
+    apply_sla_reduction: bool = False
+    finance_justification: Optional[str] = None
+
+
+class ConfirmStagingItem(BaseModel):
+    sku: str
+    quantity: int
+    price_unit: float
+    unit_value: Optional[float] = None
+    item_total_value: Optional[float] = None
+    block_status: Optional[str] = None
+    balance: Optional[float] = None
+    delay: Optional[int] = None
+    payment_terms: Optional[str] = None
+    description: Optional[str] = None
+    unit: Optional[str] = None
+    width: Optional[float] = None
+    length: Optional[float] = None
+    lead_time: Optional[int] = None
+    delivery_date: Optional[str] = None
+    billing_date: Optional[str] = None
+    icms_percent: Optional[float] = None
+    freight: Optional[float] = None
+    salesperson: Optional[str] = None
+    ipi: Optional[float] = None
+    extra_metadata: ConfirmStagingItemExtra
+
+
+class ConfirmStagingPO(BaseModel):
+    po_number: str
+    client_name: str
+    freight_cost: float = 0.0
+    additional_costs: float = 0.0
+    po_total_value: Optional[float] = None
+    items: List[ConfirmStagingItem]
+
+
+class ConfirmStagingPayload(BaseModel):
+    pos: List[ConfirmStagingPO]
+
 
