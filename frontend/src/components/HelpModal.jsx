@@ -47,7 +47,7 @@ const HelpModal = ({ isOpen, onClose, status }) => {
                                 {helpConfig.title}
                             </h2>
                             <p className="text-sm text-gray-600 mt-1">
-                                Sistema de Ajuda Contextual - The Compass
+                                {status === 'Staging' ? 'Mesa de Conferência - FlexFlow' : 'Sistema de Ajuda Contextual - FlexFlow'}
                             </p>
                         </div>
                     </div>

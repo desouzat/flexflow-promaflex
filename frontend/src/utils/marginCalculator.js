@@ -68,6 +68,7 @@ export function calculateDynamicMargin({
             status: 'PENDENTE_PCP',
             margin: null,
             badgeColor: 'gray',
+            formattedMargin: 'PENDENTE PCP',
             breakdown: null
         };
     }
@@ -109,10 +110,13 @@ export function calculateDynamicMargin({
         badgeColor = 'yellow';
     }
 
+    const formattedMargin = marginPercentage > 1000 ? '> 1000%' : `${marginPercentage.toFixed(2)}%`;
+
     return {
         status: 'OK',
         margin: marginPercentage, // internal high precision
         badgeColor,
+        formattedMargin,
         breakdown: {
             gross: parseFloat(parsedGross.toFixed(4)),
             vp: vp,
@@ -139,6 +143,7 @@ export function calculatePOMargins(po) {
             status: 'PENDENTE_PCP',
             margin: null,
             badgeColor: 'gray',
+            formattedMargin: 'PENDENTE PCP',
             breakdown: null
         };
     }
@@ -205,6 +210,7 @@ export function calculatePOMargins(po) {
             status: 'PENDENTE_PCP',
             margin: null,
             badgeColor: 'gray',
+            formattedMargin: 'PENDENTE PCP',
             breakdown: null
         };
     }
@@ -214,6 +220,14 @@ export function calculatePOMargins(po) {
     totalVP = parseFloat(totalVP.toFixed(4));
     totalTaxes = parseFloat(totalTaxes.toFixed(4));
     totalCommission = parseFloat(totalCommission.toFixed(4));
+    
+    // Add header values to totals
+    const headerFreight = parseFloat(po.freight_cost) || parseFloat(po.extra_metadata?.freight_cost) || 0;
+    const headerAdditionalCosts = parseFloat(po.additional_costs) || parseFloat(po.extra_metadata?.additional_costs) || 0;
+    
+    totalFreight += headerFreight;
+    totalCosts += headerAdditionalCosts;
+
     totalFreight = parseFloat(totalFreight.toFixed(4));
     totalCosts = parseFloat(totalCosts.toFixed(4));
 
@@ -230,10 +244,13 @@ export function calculatePOMargins(po) {
         badgeColor = 'yellow';
     }
 
+    const formattedMargin = marginPercentage > 1000 ? '> 1000%' : `${marginPercentage.toFixed(2)}%`;
+
     return {
         status: 'OK',
         margin: marginPercentage,
         badgeColor,
+        formattedMargin,
         breakdown: {
             gross: totalGross,
             vp: totalVP,

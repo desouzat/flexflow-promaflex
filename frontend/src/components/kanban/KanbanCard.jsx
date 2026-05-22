@@ -265,7 +265,7 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
                             marginInfo.badgeColor === 'orange' ? 'bg-orange-100 text-orange-800 border-orange-300' :
                             'bg-red-100 text-red-800 border-red-300'
                         }`}>
-                            {marginInfo.margin.toFixed(2)}%
+                            {marginInfo.formattedMargin}
                         </span>
                         
                         {/* Premium Popover "O Extrato" */}
@@ -320,7 +320,7 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
                                         marginInfo.badgeColor === 'orange' ? 'text-orange-400' :
                                         'text-red-400'
                                     }`}>
-                                        {marginInfo.margin.toFixed(2)}%
+                                        {marginInfo.formattedMargin}
                                     </span>
                                 </div>
                             </div>

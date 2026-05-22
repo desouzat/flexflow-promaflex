@@ -5,7 +5,7 @@
 
 export const HELP_CONFIG = {
     Staging: {
-        title: "Mesa de Conferência - Área de Staging",
+        title: "Mesa de Conferência - Sistema de Ajuda Contextual - FlexFlow",
         description: "Validação e preparação de dados importados antes da confirmação.",
         rules: [
             "✅ REGRA 100% CHECADO: Todos os itens devem estar marcados como 'Checado' antes de confirmar o PO",
@@ -17,7 +17,10 @@ export const HELP_CONFIG = {
             "⚠️ PAINEL DE RISCO: Sistema exibe alertas visuais para itens que precisam de atenção",
             "📦 LIMITE DE ARQUIVO: 5MB por arquivo (Otimização de infraestrutura)",
             "📄 FORMATOS ACEITOS: PDF, JPG, PNG",
-            "🔒 BLOQUEIO DE CONFIRMAÇÃO: Não é possível confirmar PO com erros pendentes ou itens não checados"
+            "🔒 BLOQUEIO DE CONFIRMAÇÃO: Não é possível confirmar PO com erros pendentes ou itens não checados",
+            "🚚 RATEIO DE CUSTOS ADICIONAIS: Frete e Custos Adicionais informados no cabeçalho são rateados proporcionalmente entre todos os itens para o cálculo da margem individual.",
+            "💸 REGRA DO FINANCIAL GATE: Pedidos que excedem o limite de crédito do cliente são bloqueados automaticamente pelo Financial Gate, necessitando de liberação manual.",
+            "🔄 BYPASS DE TROCA/REPOSIÇÃO: Itens bloqueados marcados com a flag de 'Troca/Reposição' ativam o bypass financeiro e recebem o status 'CRÉDITO PRÉ-APROVADO (TROCA)'."
         ],
         nextSteps: [
             "Revisar cada item importado no painel de staging",

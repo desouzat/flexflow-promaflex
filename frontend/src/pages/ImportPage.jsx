@@ -7,7 +7,7 @@ import { useAuth } from '../context/AuthContext'
 import HelpModal from '../components/HelpModal'
 import FinanceApprovalModal from '../components/FinanceApprovalModal'
 import { getHelpForStatus } from '../config/helpConfig'
-import { calculateDynamicMargin, parsePaymentTermsToDays } from '../utils/marginCalculator'
+import { calculateDynamicMargin, calculatePOMargins, parsePaymentTermsToDays } from '../utils/marginCalculator'
 
 const ITEMS_PER_PAGE = 10
 
@@ -580,14 +580,27 @@ const ImportPage = () => {
         })
     }
 
-    const handlePOFieldChange = (field, value) => {
+    const handlePOFieldChange = (field, value, e) => {
         setStagingData(prev => {
             if (!prev || !prev.po_list || !Array.isArray(prev.po_list)) return prev
 
             const updatedPoList = [...prev.po_list]
+            let cleanedVal = value;
+            if (typeof value === 'string') {
+                cleanedVal = value.replace(/^0+(?=\d)/, '');
+                if (cleanedVal.startsWith('0') && cleanedVal.length > 1 && cleanedVal[1] !== '.') {
+                    cleanedVal = cleanedVal.replace(/^0+/, '');
+                }
+            }
+            
+            // Force DOM update to bypass React's type="number" virtual DOM issue
+            if (e && e.target) {
+                e.target.value = cleanedVal;
+            }
+
             updatedPoList[selectedPOIndex] = {
                 ...updatedPoList[selectedPOIndex],
-                [field]: parseFloat(value) || 0
+                [field]: cleanedVal
             }
 
             return {
@@ -597,9 +610,22 @@ const ImportPage = () => {
         })
     }
 
-    const handleItemFieldChange = (itemId, field, value) => {
+    const handleItemFieldChange = (itemId, field, value, e) => {
         setStagingData(prev => {
             if (!prev || !prev.po_list || !Array.isArray(prev.po_list)) return prev
+
+            let cleanedVal = value;
+            if ((field === 'freight' || field === 'total_cost') && typeof value === 'string') {
+                cleanedVal = value.replace(/^0+(?=\d)/, '');
+                if (cleanedVal.startsWith('0') && cleanedVal.length > 1 && cleanedVal[1] !== '.') {
+                    cleanedVal = cleanedVal.replace(/^0+/, '');
+                }
+            }
+
+            // Force DOM update to bypass React's type="number" virtual DOM issue
+            if (e && e.target && (field === 'freight' || field === 'total_cost')) {
+                e.target.value = cleanedVal;
+            }
 
             return {
                 ...prev,
@@ -607,7 +633,7 @@ const ImportPage = () => {
                     ...po,
                     items: Array.isArray(po.items) ? po.items.map(item =>
                         item.id === itemId
-                            ? { ...item, [field]: value }
+                            ? { ...item, [field]: cleanedVal }
                             : item
                     ) : []
                 }))
@@ -1175,7 +1201,7 @@ const ImportPage = () => {
                                 <h3 className="text-lg font-semibold text-gray-900 mb-4">
                                     Informações do Pedido {stagingData.isMultiPO ? `(${selectedPOIndex + 1}/${stagingData.total_pos})` : ''}
                                 </h3>
-                                <div className="grid grid-cols-3 gap-4 mb-4">
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
                                     <div>
                                         <label className="text-sm font-medium text-gray-700">Número PO</label>
                                         <p className="text-lg font-semibold text-gray-900">{currentPO.po_number}</p>
@@ -1189,6 +1215,33 @@ const ImportPage = () => {
                                         <p className="text-lg font-semibold text-green-600">
                                             {formatCurrency(currentPO.po_total_value || calculatePOTotal(currentPO))}
                                         </p>
+                                    </div>
+                                    <div>
+                                        <label className="text-sm font-medium text-gray-700">📊 Margem Global PO</label>
+                                        {(() => {
+                                            const poMarginInfo = calculatePOMargins(currentPO);
+                                            if (poMarginInfo.status === 'PENDENTE_PCP') {
+                                                return (
+                                                    <div>
+                                                        <p className="text-xs font-bold text-gray-500 mt-1 uppercase bg-gray-100 border border-gray-300 px-2.5 py-0.5 rounded-full inline-block">
+                                                            PENDENTE PCP
+                                                        </p>
+                                                    </div>
+                                                );
+                                            }
+                                            return (
+                                                <div className="mt-1">
+                                                     <span className={`inline-flex items-center px-3 py-0.5 rounded-full text-sm font-bold border shadow-sm ${
+                                                         poMarginInfo.badgeColor === 'green' ? 'bg-green-100 text-green-800 border-green-300' :
+                                                         poMarginInfo.badgeColor === 'yellow' ? 'bg-yellow-100 text-yellow-800 border-yellow-300' :
+                                                         poMarginInfo.badgeColor === 'orange' ? 'bg-orange-100 text-orange-800 border-orange-300' :
+                                                         'bg-red-100 text-red-800 border-red-300'
+                                                     }`}>
+                                                         {poMarginInfo.formattedMargin}
+                                                     </span>
+                                                </div>
+                                            );
+                                        })()}
                                     </div>
                                 </div>
 
@@ -1223,8 +1276,9 @@ const ImportPage = () => {
                                             type="number"
                                             step="0.01"
                                             min="0"
-                                            value={currentPO.freight_cost || 0}
-                                            onChange={(e) => handlePOFieldChange('freight_cost', e.target.value)}
+                                            value={currentPO.freight_cost !== undefined && currentPO.freight_cost !== null ? currentPO.freight_cost : 0}
+                                            onChange={(e) => handlePOFieldChange('freight_cost', e.target.value, e)}
+                                            onFocus={(e) => e.target.select()}
                                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                                             placeholder="0.00"
                                         />
@@ -1238,8 +1292,9 @@ const ImportPage = () => {
                                             type="number"
                                             step="0.01"
                                             min="0"
-                                            value={currentPO.additional_costs || 0}
-                                            onChange={(e) => handlePOFieldChange('additional_costs', e.target.value)}
+                                            value={currentPO.additional_costs !== undefined && currentPO.additional_costs !== null ? currentPO.additional_costs : 0}
+                                            onChange={(e) => handlePOFieldChange('additional_costs', e.target.value, e)}
+                                            onFocus={(e) => e.target.select()}
                                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                                             placeholder="0.00"
                                         />
@@ -1304,11 +1359,13 @@ const ImportPage = () => {
                                                 key={item.id}
                                                 className={`border rounded-lg p-4 transition-all duration-300 ${hasError
                                                     ? 'border-red-300 bg-red-50'
-                                                    : item.is_checked
-                                                        ? item.is_replacement
-                                                            ? 'border-cyan-300 bg-cyan-50 shadow-md'
-                                                            : 'border-green-300 bg-green-50 shadow-md'
-                                                        : 'border-gray-300 bg-gray-50'
+                                                    : (item.block_status === 'BLOQUEADO' && item.is_replacement)
+                                                        ? 'border-cyan-300 bg-cyan-50 shadow-md'
+                                                        : item.is_checked
+                                                            ? item.is_replacement
+                                                                ? 'border-cyan-300 bg-cyan-50 shadow-md'
+                                                                : 'border-green-300 bg-green-50 shadow-md'
+                                                            : 'border-gray-300 bg-gray-50'
                                                     }`}
                                             >
                                                 {/* Item Header with Conferido Status */}
@@ -1320,11 +1377,24 @@ const ImportPage = () => {
                                                     const itemFreight = parseFloat(item.freight) || 0;
                                                     const commRate = parseFloat(item.manual_commission_rate) || parseFloat(currentPO.commission_rate) || 0;
 
+                                                    // Proportional rate apportionment
+                                                    const poTotalGross = (currentPO.items || []).reduce((sum, it) => {
+                                                        const pVal = parseBrazilianNumber(it.unit_value !== null && it.unit_value !== undefined ? it.unit_value : it.price_unit);
+                                                        return sum + (pVal * (parseInt(it.quantity) || 0));
+                                                    }, 0);
+                                                    const itemProportion = poTotalGross > 0 ? (itemGross / poTotalGross) : 0;
+
+                                                    const headerFreightCost = parseFloat(currentPO.freight_cost) || 0;
+                                                    const proportionalFreight = itemProportion * headerFreightCost;
+
+                                                    const headerAdditionalCostsVal = parseFloat(currentPO.additional_costs) || 0;
+                                                    const proportionalAdditional = itemProportion * headerAdditionalCostsVal;
+
                                                     const marginResult = calculateDynamicMargin({
                                                         gross: itemGross,
-                                                        freight: itemFreight,
+                                                        freight: itemFreight + proportionalFreight,
                                                         commissionRate: commRate,
-                                                        costs: itemCost,
+                                                        costs: (itemCost * item.quantity) + proportionalAdditional,
                                                         paymentDays: paymentDays,
                                                         taxRate: 22.25
                                                     });
@@ -1376,7 +1446,7 @@ const ImportPage = () => {
                                                                             marginResult.badgeColor === 'orange' ? 'bg-orange-100 text-orange-800 border-orange-300' :
                                                                             'bg-red-100 text-red-800 border-red-300'
                                                                         }`}>
-                                                                            {marginResult.margin.toFixed(2)}%
+                                                                            {marginResult.formattedMargin}
                                                                         </span>
                                                                         
                                                                         {/* Tooltip Popover "O Extrato" */}
@@ -1431,7 +1501,7 @@ const ImportPage = () => {
                                                                                         marginResult.badgeColor === 'orange' ? 'text-orange-400' :
                                                                                         'text-red-400'
                                                                                     }`}>
-                                                                                        {marginResult.margin.toFixed(2)}%
+                                                                                        {marginResult.formattedMargin}
                                                                                     </span>
                                                                                 </div>
                                                                             </div>
@@ -1452,14 +1522,26 @@ const ImportPage = () => {
                                                         </h4>
                                                         <div className="grid grid-cols-2 gap-3">
                                                             {item.block_status && (
-                                                                <div className={`p-3 rounded-lg ${item.block_status === 'BLOQUEADO' ? 'bg-red-100 border-2 border-red-400' : 'bg-green-100 border border-green-300'}`}>
+                                                                <div className={`p-3 rounded-lg ${
+                                                                    item.block_status === 'BLOQUEADO' 
+                                                                        ? item.is_replacement
+                                                                            ? 'bg-cyan-50 border-2 border-cyan-300'
+                                                                            : 'bg-red-100 border-2 border-red-400' 
+                                                                        : 'bg-green-100 border border-green-300'
+                                                                }`}>
                                                                     <label className="text-xs font-medium text-gray-700">Bloqueio</label>
-                                                                    <p className={`text-sm font-bold ${item.block_status === 'BLOQUEADO' ? 'text-red-700' : 'text-green-700'}`}>
-                                                                        {item.block_status}
+                                                                    <p className={`text-sm font-bold ${
+                                                                        item.block_status === 'BLOQUEADO' 
+                                                                            ? item.is_replacement
+                                                                                ? 'text-cyan-700'
+                                                                                : 'text-red-700' 
+                                                                            : 'text-green-700'
+                                                                    }`}>
+                                                                        {item.block_status === 'BLOQUEADO' && item.is_replacement ? 'LIBERADO (TROCA)' : item.block_status}
                                                                     </p>
                                                                     {item.block_status === 'BLOQUEADO' && (
-                                                                        <p className="text-xs text-red-600 mt-1">
-                                                                            ⚠️ Intervenção do Financeiro necessária
+                                                                        <p className={`text-xs mt-1 ${item.is_replacement ? 'text-cyan-600 font-semibold' : 'text-red-600'}`}>
+                                                                            {item.is_replacement ? '✓ Crédito Pré-Aprovado (Troca)' : '⚠️ Intervenção do Financeiro necessária'}
                                                                         </p>
                                                                     )}
                                                                 </div>
@@ -1490,9 +1572,17 @@ const ImportPage = () => {
                                                             )}
                                                         </div>
                                                         {item.block_status === 'BLOQUEADO' && (
-                                                            <div className="mt-3 p-2 bg-red-50 border border-red-300 rounded">
-                                                                <p className="text-xs text-red-800">
-                                                                    <strong>🔒 GATE ATIVO:</strong> Este pedido está bloqueado e requer aprovação do Financeiro antes de prosseguir.
+                                                            <div className={`mt-3 p-2 border rounded ${item.is_replacement ? 'bg-cyan-50 border-cyan-300' : 'bg-red-50 border-red-300'}`}>
+                                                                <p className={`text-xs ${item.is_replacement ? 'text-cyan-800' : 'text-red-800'}`}>
+                                                                    {item.is_replacement ? (
+                                                                        <>
+                                                                            <strong>🔄 BYPASS ATIVO:</strong> Este item foi marcado como Troca/Reposição, liberando o crédito pré-aprovado automaticamente.
+                                                                        </>
+                                                                    ) : (
+                                                                        <>
+                                                                            <strong>🔒 GATE ATIVO:</strong> Este pedido está bloqueado e requer aprovação do Financeiro antes de prosseguir.
+                                                                        </>
+                                                                    )}
                                                                 </p>
                                                             </div>
                                                         )}
@@ -1508,18 +1598,16 @@ const ImportPage = () => {
                                                                 <AlertCircle className="w-4 h-4" />
                                                                 <span className="text-xs font-medium">Com Erros</span>
                                                             </div>
+                                                        ) : (item.block_status === 'BLOQUEADO' && item.is_replacement) ? (
+                                                            <div className="flex items-center gap-2 text-cyan-700 bg-cyan-100 px-2 py-0.5 rounded-full font-bold border border-cyan-300">
+                                                                <CheckCircle className="w-4 h-4 text-cyan-600 animate-pulse" />
+                                                                <span className="text-[10px]">CRÉDITO PRÉ-APROVADO (TROCA)</span>
+                                                            </div>
                                                         ) : item.is_checked ? (
-                                                            item.is_replacement ? (
-                                                                <div className="flex items-center gap-2 text-cyan-700 bg-cyan-100 px-2 py-0.5 rounded-full font-bold border border-cyan-300">
-                                                                    <CheckCircle className="w-4 h-4 text-cyan-600 animate-pulse" />
-                                                                    <span className="text-[10px]">CRÉDITO PRÉ-APROVADO (TROCA)</span>
-                                                                </div>
-                                                            ) : (
-                                                                <div className="flex items-center gap-2 text-green-600">
-                                                                    <CheckCircle className="w-4 h-4" />
-                                                                    <span className="text-xs font-medium">✓ Conferido</span>
-                                                                </div>
-                                                            )
+                                                            <div className="flex items-center gap-2 text-green-600">
+                                                                <CheckCircle className="w-4 h-4" />
+                                                                <span className="text-xs font-medium">✓ Conferido</span>
+                                                            </div>
                                                         ) : (
                                                             <div className="flex items-center gap-2 text-gray-500">
                                                                 <AlertCircle className="w-4 h-4" />
@@ -1602,7 +1690,7 @@ const ImportPage = () => {
                                                         <input
                                                             type="text"
                                                             value={item.payment_terms || ''}
-                                                            onChange={(e) => handleItemFieldChange(item.id, 'payment_terms', e.target.value)}
+                                                            onChange={(e) => handleItemFieldChange(item.id, 'payment_terms', e.target.value, e)}
                                                             className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-transparent font-medium bg-white"
                                                             placeholder="Ex: 30 dias"
                                                         />
@@ -1615,8 +1703,9 @@ const ImportPage = () => {
                                                             type="number"
                                                             step="0.01"
                                                             min="0"
-                                                            value={item.freight || 0}
-                                                            onChange={(e) => handleItemFieldChange(item.id, 'freight', parseFloat(e.target.value) || 0)}
+                                                            value={item.freight !== undefined && item.freight !== null ? item.freight : 0}
+                                                            onChange={(e) => handleItemFieldChange(item.id, 'freight', e.target.value, e)}
+                                                            onFocus={(e) => e.target.select()}
                                                             className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-transparent font-mono bg-white"
                                                             placeholder="0.00"
                                                         />
@@ -1629,8 +1718,9 @@ const ImportPage = () => {
                                                             type="number"
                                                             step="0.01"
                                                             min="0"
-                                                            value={item.total_cost !== undefined ? item.total_cost : (item.cost_mp || 0)}
-                                                            onChange={(e) => handleItemFieldChange(item.id, 'total_cost', parseFloat(e.target.value) || 0)}
+                                                            value={item.total_cost !== undefined && item.total_cost !== null ? item.total_cost : (item.cost_mp !== undefined && item.cost_mp !== null ? item.cost_mp : 0)}
+                                                            onChange={(e) => handleItemFieldChange(item.id, 'total_cost', e.target.value, e)}
+                                                            onFocus={(e) => e.target.select()}
                                                             className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-transparent font-mono bg-white"
                                                             placeholder="0.00"
                                                         />

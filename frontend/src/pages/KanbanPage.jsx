@@ -609,7 +609,11 @@ const KanbanPage = () => {
                                         <div>
                                             <span className="text-xs text-gray-600">Margem (CM)</span>
                                             <p className="text-lg font-bold text-gray-900">
-                                                {selectedPO.margin_percentage ? `${parseFloat(selectedPO.margin_percentage).toFixed(2)}%` : 'N/A'}
+                                                 {selectedPO.margin_percentage === 'PENDENTE_PCP' || selectedPO.margin_percentage === 'PENDENTE PCP' ? 'PENDENTE PCP' :
+                                                 (selectedPO.margin_percentage !== undefined && selectedPO.margin_percentage !== null) ? (() => {
+                                                     const marginVal = parseFloat(selectedPO.margin_percentage);
+                                                     return isNaN(marginVal) ? 'N/A' : (marginVal > 1000 ? '> 1000%' : `${marginVal.toFixed(2)}%`);
+                                                 })() : 'N/A'}
                                             </p>
                                         </div>
                                         <div>
