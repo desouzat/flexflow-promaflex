@@ -7,6 +7,7 @@ import { useAuth } from '../context/AuthContext'
 import HelpModal from '../components/HelpModal'
 import FinanceApprovalModal from '../components/FinanceApprovalModal'
 import { getHelpForStatus } from '../config/helpConfig'
+import { calculateDynamicMargin, parsePaymentTermsToDays } from '../utils/marginCalculator'
 
 const ITEMS_PER_PAGE = 10
 
@@ -592,6 +593,24 @@ const ImportPage = () => {
             return {
                 ...prev,
                 po_list: updatedPoList
+            }
+        })
+    }
+
+    const handleItemFieldChange = (itemId, field, value) => {
+        setStagingData(prev => {
+            if (!prev || !prev.po_list || !Array.isArray(prev.po_list)) return prev
+
+            return {
+                ...prev,
+                po_list: prev.po_list.map(po => ({
+                    ...po,
+                    items: Array.isArray(po.items) ? po.items.map(item =>
+                        item.id === itemId
+                            ? { ...item, [field]: value }
+                            : item
+                    ) : []
+                }))
             }
         })
     }
@@ -1283,47 +1302,146 @@ const ImportPage = () => {
                                         return (
                                             <div
                                                 key={item.id}
-                                                className={`border rounded-lg p-4 ${hasError
+                                                className={`border rounded-lg p-4 transition-all duration-300 ${hasError
                                                     ? 'border-red-300 bg-red-50'
                                                     : item.is_checked
-                                                        ? 'border-green-300 bg-green-50'
+                                                        ? item.is_replacement
+                                                            ? 'border-cyan-300 bg-cyan-50 shadow-md'
+                                                            : 'border-green-300 bg-green-50 shadow-md'
                                                         : 'border-gray-300 bg-gray-50'
                                                     }`}
                                             >
                                                 {/* Item Header with Conferido Status */}
-                                                <div className="grid grid-cols-6 gap-4 mb-4">
-                                                    <div>
-                                                        <label className="text-xs font-medium text-gray-600">SKU</label>
-                                                        <p className="font-semibold text-gray-900">{item.sku}</p>
-                                                        {item.needs_mapping && (
-                                                            <span className="inline-block mt-1 px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded">
-                                                                Precisa mapeamento
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                    <div className="col-span-2">
-                                                        <label className="text-xs font-medium text-gray-600">Descrição do Produto</label>
-                                                        <p className="font-semibold text-gray-900 text-sm truncate" title={item.description || 'N/A'}>
-                                                            {item.description || 'N/A'}
-                                                        </p>
-                                                    </div>
-                                                    <div>
-                                                        <label className="text-xs font-medium text-gray-600">Quantidade</label>
-                                                        <p className="font-semibold text-gray-900">{item.quantity}</p>
-                                                    </div>
-                                                    <div>
-                                                        <label className="text-xs font-medium text-gray-600">Vl.Unit</label>
-                                                        <p className="font-semibold text-gray-900">
-                                                            {formatCurrency(item.unit_value || item.price_unit)}
-                                                        </p>
-                                                    </div>
-                                                    <div>
-                                                        <label className="text-xs font-medium text-gray-600">Total Item</label>
-                                                        <p className="font-semibold text-green-600">
-                                                            {formatCurrency(item.item_total_value || (item.quantity * item.price_unit))}
-                                                        </p>
-                                                    </div>
-                                                </div>
+                                                {(() => {
+                                                    const priceVal = parseBrazilianNumber(item.unit_value !== null && item.unit_value !== undefined ? item.unit_value : item.price_unit);
+                                                    const itemGross = priceVal * item.quantity;
+                                                    const paymentDays = parsePaymentTermsToDays(item.payment_terms || currentPO.payment_terms);
+                                                    const itemCost = parseFloat(item.total_cost) || parseFloat(item.cost_mp) || 0;
+                                                    const itemFreight = parseFloat(item.freight) || 0;
+                                                    const commRate = parseFloat(item.manual_commission_rate) || parseFloat(currentPO.commission_rate) || 0;
+
+                                                    const marginResult = calculateDynamicMargin({
+                                                        gross: itemGross,
+                                                        freight: itemFreight,
+                                                        commissionRate: commRate,
+                                                        costs: itemCost,
+                                                        paymentDays: paymentDays,
+                                                        taxRate: 22.25
+                                                    });
+
+                                                    return (
+                                                        <div className="grid grid-cols-7 gap-4 mb-4 items-start">
+                                                            <div>
+                                                                <label className="text-xs font-medium text-gray-600">SKU</label>
+                                                                <p className="font-semibold text-gray-900">{item.sku}</p>
+                                                                {item.needs_mapping && (
+                                                                    <span className="inline-block mt-1 px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded">
+                                                                        Precisa mapeamento
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            <div className="col-span-2">
+                                                                <label className="text-xs font-medium text-gray-600">Descrição do Produto</label>
+                                                                <p className="font-semibold text-gray-900 text-sm truncate" title={item.description || 'N/A'}>
+                                                                    {item.description || 'N/A'}
+                                                                </p>
+                                                            </div>
+                                                            <div>
+                                                                <label className="text-xs font-medium text-gray-600">Quantidade</label>
+                                                                <p className="font-semibold text-gray-900">{item.quantity}</p>
+                                                            </div>
+                                                            <div>
+                                                                <label className="text-xs font-medium text-gray-600">Vl.Unit</label>
+                                                                <p className="font-semibold text-gray-900">
+                                                                    {formatCurrency(item.unit_value || item.price_unit)}
+                                                                </p>
+                                                            </div>
+                                                            <div>
+                                                                <label className="text-xs font-medium text-gray-600">Total Item</label>
+                                                                <p className="font-semibold text-green-600">
+                                                                    {formatCurrency(item.item_total_value || (item.quantity * item.price_unit))}
+                                                                </p>
+                                                            </div>
+                                                            <div>
+                                                                <label className="text-xs font-medium text-gray-600 block">Margem</label>
+                                                                {marginResult.status === 'PENDENTE_PCP' ? (
+                                                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-800 border border-gray-300">
+                                                                        PENDENTE PCP
+                                                                    </span>
+                                                                ) : (
+                                                                    <div className="relative group inline-block">
+                                                                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold border cursor-help shadow-sm transition-all duration-250 hover:scale-105 ${
+                                                                            marginResult.badgeColor === 'green' ? 'bg-green-100 text-green-800 border-green-300' :
+                                                                            marginResult.badgeColor === 'yellow' ? 'bg-yellow-100 text-yellow-800 border-yellow-300' :
+                                                                            marginResult.badgeColor === 'orange' ? 'bg-orange-100 text-orange-800 border-orange-300' :
+                                                                            'bg-red-100 text-red-800 border-red-300'
+                                                                        }`}>
+                                                                            {marginResult.margin.toFixed(2)}%
+                                                                        </span>
+                                                                        
+                                                                        {/* Tooltip Popover "O Extrato" */}
+                                                                        <div className="absolute z-50 hidden group-hover:block bg-slate-900 text-slate-100 p-4 rounded-xl shadow-2xl w-80 text-xs border border-slate-700 -top-2 left-full ml-3 pointer-events-none animate-fade-in">
+                                                                            <h4 className="font-bold text-white mb-2 border-b border-slate-700 pb-1 flex items-center justify-between">
+                                                                                <span>📊 Extrato de Margem</span>
+                                                                                <span className="text-[10px] text-slate-400 font-normal">Fórmula Celso</span>
+                                                                            </h4>
+                                                                            <div className="space-y-1.5 font-sans">
+                                                                                <div className="flex justify-between">
+                                                                                    <span className="text-slate-400">(+) Valor Bruto:</span>
+                                                                                    <span className="font-mono">{formatCurrency(marginResult.breakdown.gross)}</span>
+                                                                                </div>
+                                                                                <div className="flex justify-between text-amber-400">
+                                                                                    <span className="text-slate-400">(-) Ajuste VP (Prazo):</span>
+                                                                                    <span className="font-mono">-{formatCurrency(marginResult.breakdown.vpDiscount)}</span>
+                                                                                </div>
+                                                                                <div className="flex justify-between border-t border-slate-800 pt-0.5">
+                                                                                    <span className="text-slate-400 font-semibold">(=) Valor Presente (VP):</span>
+                                                                                    <span className="font-semibold font-mono">{formatCurrency(marginResult.breakdown.vp)}</span>
+                                                                                </div>
+                                                                                <div className="flex justify-between text-red-400">
+                                                                                    <span className="text-slate-400">(-) Impostos (22.25%):</span>
+                                                                                    <span className="font-mono">-{formatCurrency(marginResult.breakdown.taxes)}</span>
+                                                                                </div>
+                                                                                {marginResult.breakdown.commission > 0 && (
+                                                                                    <div className="flex justify-between text-red-400">
+                                                                                        <span className="text-slate-400">(-) Comissão ({commRate}%):</span>
+                                                                                        <span className="font-mono">-{formatCurrency(marginResult.breakdown.commission)}</span>
+                                                                                    </div>
+                                                                                )}
+                                                                                {marginResult.breakdown.freight > 0 && (
+                                                                                    <div className="flex justify-between text-red-400">
+                                                                                        <span className="text-slate-400">(-) Frete:</span>
+                                                                                        <span className="font-mono">-{formatCurrency(marginResult.breakdown.freight)}</span>
+                                                                                    </div>
+                                                                                )}
+                                                                                <div className="border-t border-slate-800 my-1"></div>
+                                                                                <div className="flex justify-between text-emerald-400 font-bold">
+                                                                                    <span className="text-slate-300">(=) Margem Absoluta:</span>
+                                                                                    <span className="font-mono">{formatCurrency(marginResult.breakdown.absoluteMargin)}</span>
+                                                                                </div>
+                                                                                <div className="flex justify-between text-slate-300">
+                                                                                    <span className="text-slate-400">(/) Custo Industrial:</span>
+                                                                                    <span className="font-mono">{formatCurrency(marginResult.breakdown.costs)}</span>
+                                                                                </div>
+                                                                                <div className="border-t border-slate-700 pt-1.5 flex justify-between items-center">
+                                                                                    <span className="font-bold text-white">Margem Final (%):</span>
+                                                                                    <span className={`font-mono text-sm font-bold ${
+                                                                                        marginResult.badgeColor === 'green' ? 'text-green-400' :
+                                                                                        marginResult.badgeColor === 'yellow' ? 'text-yellow-400' :
+                                                                                        marginResult.badgeColor === 'orange' ? 'text-orange-400' :
+                                                                                        'text-red-400'
+                                                                                    }`}>
+                                                                                        {marginResult.margin.toFixed(2)}%
+                                                                                    </span>
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })()}
 
                                                 {/* Risk Panel (Painel de Risco) - Credit & Terms Gate */}
                                                 {(item.block_status || item.balance !== null || item.delay !== null || item.payment_terms) && (
@@ -1391,10 +1509,17 @@ const ImportPage = () => {
                                                                 <span className="text-xs font-medium">Com Erros</span>
                                                             </div>
                                                         ) : item.is_checked ? (
-                                                            <div className="flex items-center gap-2 text-green-600">
-                                                                <CheckCircle className="w-4 h-4" />
-                                                                <span className="text-xs font-medium">✓ Conferido</span>
-                                                            </div>
+                                                            item.is_replacement ? (
+                                                                <div className="flex items-center gap-2 text-cyan-700 bg-cyan-100 px-2 py-0.5 rounded-full font-bold border border-cyan-300">
+                                                                    <CheckCircle className="w-4 h-4 text-cyan-600 animate-pulse" />
+                                                                    <span className="text-[10px]">CRÉDITO PRÉ-APROVADO (TROCA)</span>
+                                                                </div>
+                                                            ) : (
+                                                                <div className="flex items-center gap-2 text-green-600">
+                                                                    <CheckCircle className="w-4 h-4" />
+                                                                    <span className="text-xs font-medium">✓ Conferido</span>
+                                                                </div>
+                                                            )
                                                         ) : (
                                                             <div className="flex items-center gap-2 text-gray-500">
                                                                 <AlertCircle className="w-4 h-4" />
@@ -1461,12 +1586,56 @@ const ImportPage = () => {
 
                                                 {/* SLA Reduction Notice */}
                                                 {item.is_replacement && (
-                                                    <div className="mb-4 p-3 bg-purple-50 border border-purple-200 rounded-lg">
+                                                    <div className="mb-4 p-3 bg-purple-50 border border-purple-200 rounded-lg animate-pulse">
                                                         <p className="text-sm text-purple-800">
                                                             <strong>⚡ SLA Reduzido:</strong> Este item terá o prazo de entrega reduzido em 50% (Troca/Reposição)
                                                         </p>
                                                     </div>
                                                 )}
+
+                                                {/* Parâmetros Financeiros Editáveis para Recálculo Real-Time */}
+                                                <div className="mb-4 p-3 bg-slate-100 border border-slate-200 rounded-lg grid grid-cols-1 md:grid-cols-3 gap-3 animate-fade-in">
+                                                    <div>
+                                                        <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                                                            ⏱️ Cond. Pagamento
+                                                        </label>
+                                                        <input
+                                                            type="text"
+                                                            value={item.payment_terms || ''}
+                                                            onChange={(e) => handleItemFieldChange(item.id, 'payment_terms', e.target.value)}
+                                                            className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-transparent font-medium bg-white"
+                                                            placeholder="Ex: 30 dias"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                                                            🚚 Frete do Item (R$)
+                                                        </label>
+                                                        <input
+                                                            type="number"
+                                                            step="0.01"
+                                                            min="0"
+                                                            value={item.freight || 0}
+                                                            onChange={(e) => handleItemFieldChange(item.id, 'freight', parseFloat(e.target.value) || 0)}
+                                                            className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-transparent font-mono bg-white"
+                                                            placeholder="0.00"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                                                            🏭 Custo Unitário (R$)
+                                                        </label>
+                                                        <input
+                                                            type="number"
+                                                            step="0.01"
+                                                            min="0"
+                                                            value={item.total_cost !== undefined ? item.total_cost : (item.cost_mp || 0)}
+                                                            onChange={(e) => handleItemFieldChange(item.id, 'total_cost', parseFloat(e.target.value) || 0)}
+                                                            className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-transparent font-mono bg-white"
+                                                            placeholder="0.00"
+                                                        />
+                                                    </div>
+                                                </div>
 
                                                 {/* Personalizado: Shows BOTH textarea AND upload */}
                                                 {item.is_personalized && (
@@ -1536,11 +1705,12 @@ const ImportPage = () => {
 
                                                 {/* Conferido Checkbox - PROMINENT at the end */}
                                                 <div className="pt-4 border-t border-gray-300">
-                                                    {item.block_status === 'BLOQUEADO' ? (
-                                                        <button
-                                                            onClick={() => {
-                                                                if (item.is_checked) {
-                                                                    // Desmarcar / clique para desfazer
+                                                    {item.block_status === 'BLOQUEADO' && !item.is_replacement ? (
+                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                            {/* Twin Action 1: Manter Bloqueio */}
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
                                                                     setStagingData(prev => {
                                                                         if (!prev || !prev.po_list || !Array.isArray(prev.po_list)) return prev;
                                                                         return {
@@ -1551,7 +1721,7 @@ const ImportPage = () => {
                                                                                     if (it.id === item.id) {
                                                                                         return {
                                                                                             ...it,
-                                                                                            is_checked: false,
+                                                                                            is_checked: !it.is_checked,
                                                                                             extra_metadata: {
                                                                                                 ...(it.extra_metadata || {}),
                                                                                                 finance_justification: null
@@ -1563,37 +1733,95 @@ const ImportPage = () => {
                                                                             }))
                                                                         };
                                                                     });
-                                                                } else {
-                                                                    // Solicitar liberação
-                                                                    setSelectedFinanceItem(item);
-                                                                    setShowFinanceModal(true);
-                                                                }
-                                                            }}
-                                                            disabled={hasError}
-                                                            className={`w-full flex items-center justify-center gap-3 px-4 py-3 rounded-lg font-semibold transition-all ${hasError
-                                                                ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                                                                : item.is_checked
-                                                                    ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-                                                                    : 'bg-amber-500 text-white hover:bg-amber-600'
+                                                                }}
+                                                                disabled={hasError}
+                                                                className={`flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-semibold transition-all ${
+                                                                    hasError
+                                                                        ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                                                                        : item.is_checked && !item.extra_metadata?.finance_justification
+                                                                            ? 'bg-red-200 text-red-800 border border-red-400 hover:bg-red-300'
+                                                                            : 'bg-red-50 text-red-700 border border-red-350 hover:bg-red-100'
                                                                 }`}
-                                                        >
-                                                            {hasError ? (
-                                                                <>
-                                                                    <X className="w-5 h-5" />
-                                                                    <span>Corrija os erros para conferir</span>
-                                                                </>
-                                                            ) : item.is_checked ? (
-                                                                <>
-                                                                    <CheckSquare className="w-5 h-5 text-white" />
-                                                                    <span>✓ Liberação Solicitada - Clique para desfazer</span>
-                                                                </>
-                                                            ) : (
-                                                                <>
-                                                                    <DollarSign className="w-5 h-5 text-white" />
-                                                                    <span>Solicitar Liberação Financeira</span>
-                                                                </>
-                                                            )}
-                                                        </button>
+                                                            >
+                                                                {hasError ? (
+                                                                    <>
+                                                                        <X className="w-4 h-4" />
+                                                                        <span>Erros Pendentes</span>
+                                                                    </>
+                                                                ) : item.is_checked && !item.extra_metadata?.finance_justification ? (
+                                                                    <>
+                                                                        <Lock className="w-4 h-4" />
+                                                                        <span>✓ Bloqueio Mantido</span>
+                                                                    </>
+                                                                ) : (
+                                                                    <>
+                                                                        <Lock className="w-4 h-4 text-red-600" />
+                                                                        <span>Manter Bloqueio</span>
+                                                                    </>
+                                                                )}
+                                                            </button>
+
+                                                            {/* Twin Action 2: Solicitar Liberação Financeira */}
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    if (item.is_checked && item.extra_metadata?.finance_justification) {
+                                                                        // Desmarcar / clique para desfazer
+                                                                        setStagingData(prev => {
+                                                                            if (!prev || !prev.po_list || !Array.isArray(prev.po_list)) return prev;
+                                                                            return {
+                                                                                ...prev,
+                                                                                po_list: prev.po_list.map(po => ({
+                                                                                    ...po,
+                                                                                    items: Array.isArray(po.items) ? po.items.map(it => {
+                                                                                        if (it.id === item.id) {
+                                                                                            return {
+                                                                                                ...it,
+                                                                                                is_checked: false,
+                                                                                                extra_metadata: {
+                                                                                                    ...(it.extra_metadata || {}),
+                                                                                                    finance_justification: null
+                                                                                                }
+                                                                                            };
+                                                                                        }
+                                                                                        return it;
+                                                                                    }) : []
+                                                                                }))
+                                                                            };
+                                                                        });
+                                                                    } else {
+                                                                        // Solicitar liberação
+                                                                        setSelectedFinanceItem(item);
+                                                                        setShowFinanceModal(true);
+                                                                    }
+                                                                }}
+                                                                disabled={hasError}
+                                                                className={`flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-semibold transition-all ${
+                                                                    hasError
+                                                                        ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                                                                        : item.is_checked && item.extra_metadata?.finance_justification
+                                                                            ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                                                                            : 'bg-amber-500 text-white hover:bg-amber-600'
+                                                                }`}
+                                                            >
+                                                                {hasError ? (
+                                                                    <>
+                                                                        <X className="w-4 h-4" />
+                                                                        <span>Erros Pendentes</span>
+                                                                    </>
+                                                                ) : item.is_checked && item.extra_metadata?.finance_justification ? (
+                                                                    <>
+                                                                        <Unlock className="w-4 h-4 text-white" />
+                                                                        <span>✓ Liberação Solicitada</span>
+                                                                    </>
+                                                                ) : (
+                                                                    <>
+                                                                        <DollarSign className="w-4 h-4 text-white" />
+                                                                        <span>Solicitar Liberação</span>
+                                                                    </>
+                                                                )}
+                                                            </button>
+                                                        </div>
                                                     ) : (
                                                         <button
                                                             onClick={() => handleToggleChecked(item.id)}
@@ -1601,7 +1829,9 @@ const ImportPage = () => {
                                                             className={`w-full flex items-center justify-center gap-3 px-4 py-3 rounded-lg font-semibold transition-all ${hasError
                                                                 ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
                                                                 : item.is_checked
-                                                                    ? 'bg-green-600 text-white hover:bg-green-700'
+                                                                    ? item.is_replacement
+                                                                        ? 'bg-cyan-600 text-white hover:bg-cyan-700 shadow-md'
+                                                                        : 'bg-green-600 text-white hover:bg-green-700 shadow-md'
                                                                     : 'bg-blue-600 text-white hover:bg-blue-700'
                                                                 }`}
                                                         >

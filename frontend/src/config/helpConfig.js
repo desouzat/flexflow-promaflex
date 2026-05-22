@@ -11,6 +11,9 @@ export const HELP_CONFIG = {
             "✅ REGRA 100% CHECADO: Todos os itens devem estar marcados como 'Checado' antes de confirmar o PO",
             "📎 ANEXOS OBRIGATÓRIOS: Apenas para Clientes Novos em pedidos Personalizados",
             "📝 DESCRIÇÃO OBRIGATÓRIA: Qualquer pedido Personalizado deve ter descrição da customização",
+            "📊 MOTOR DE MARGEM DINÂMICA: Margem calculada em tempo real com base no Valor Presente (VP) ajustado a 2.5% a.m. pro-rata e taxa de impostos a 22.25%",
+            "🎨 CLASSIFICAÇÃO DE MARGEM: Verde (>= 30%), Amarelo (< 30%), Laranja (< 19%), Vermelho (< 10% ou negativa)",
+            "⚙️ STATUS PENDENTE PCP: Exibido em cinza se o custo for zero ou indefinido, garantindo proteção contra Divisão por Zero",
             "⚠️ PAINEL DE RISCO: Sistema exibe alertas visuais para itens que precisam de atenção",
             "📦 LIMITE DE ARQUIVO: 5MB por arquivo (Otimização de infraestrutura)",
             "📄 FORMATOS ACEITOS: PDF, JPG, PNG",
@@ -73,6 +76,8 @@ export const HELP_CONFIG = {
         rules: [
             "🔗 MAPEAMENTO DE-PARA: Use o sistema de Alias para mapear SKUs similares (Ex: 'SKU-A' → 'SKU-MASTER'). Isso permite reutilizar custos e especificações técnicas",
             "💰 CUSTO OBRIGATÓRIO: Cada SKU DEVE ter custo de matéria-prima vinculado (R$/kg) antes de avançar para Produção",
+            "📊 MOTOR DE MARGEM PCP: CM = (VP - Impostos 22.25% - Comissão - Frete) / Custos. Se Custos = 0 ou Nulo, a margem passa para o status 'PENDENTE PCP'",
+            "🎨 LIMITES DE MARGEM: Verde (>= 30%), Amarelo (< 30%), Laranja (< 19%), Vermelho (< 10% ou negativa)",
             "📎 VALIDAÇÃO DE ANEXOS: Para itens personalizados de clientes novos, verificar se os anexos técnicos foram carregados corretamente",
             "🆘 BOTÃO 'SUGERIR PARTIÇÃO': Se houver falta de matéria-prima, use este botão para dividir o pedido em lotes menores baseado no estoque disponível",
             "📦 TIPO DE EMBALAGEM: Definir obrigatoriamente: Caixa, Saco, Pallet, Granel ou Outro",

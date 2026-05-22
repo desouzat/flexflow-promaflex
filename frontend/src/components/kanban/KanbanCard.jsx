@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useMemo } from 'react'
 import {
     Calendar,
     DollarSign,
@@ -13,6 +13,7 @@ import {
     Split
 } from 'lucide-react'
 import { STRATEGIC_INDICATORS } from '../../config/helpConfig'
+import { calculatePOMargins } from '../../utils/marginCalculator'
 
 const KanbanCard = ({ po, onCardClick, compactView = false }) => {
     // Ensure po object has safe defaults
@@ -26,6 +27,10 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
         priority: po?.priority || 'normal',
         ...po
     }
+
+    const marginInfo = useMemo(() => {
+        return calculatePOMargins(safepo)
+    }, [safepo.items, safepo.total_value, safepo.payment_terms])
 
     const getStatusColor = (status) => {
         const colors = {
@@ -89,6 +94,10 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
 
     const formatDate = (dateString) => {
         if (!dateString) return 'N/A'
+        if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+            const [year, month, day] = dateString.split('-')
+            return `${day}/${month}/${year}`
+        }
         return new Date(dateString).toLocaleDateString('pt-BR')
     }
 
@@ -99,33 +108,33 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
 
         if (metadata.is_export) {
             indicators.push({
+                ...STRATEGIC_INDICATORS.is_export,
                 key: 'is_export',
-                icon: Globe,
-                ...STRATEGIC_INDICATORS.is_export
+                icon: Globe
             })
         }
 
         if (metadata.is_first_order) {
             indicators.push({
+                ...STRATEGIC_INDICATORS.is_first_order,
                 key: 'is_first_order',
-                icon: Star,
-                ...STRATEGIC_INDICATORS.is_first_order
+                icon: Star
             })
         }
 
         if (metadata.is_replacement) {
             indicators.push({
+                ...STRATEGIC_INDICATORS.is_replacement,
                 key: 'is_replacement',
-                icon: RefreshCw,
-                ...STRATEGIC_INDICATORS.is_replacement
+                icon: RefreshCw
             })
         }
 
         if (metadata.is_urgent || safepo.priority === 'high') {
             indicators.push({
+                ...STRATEGIC_INDICATORS.is_urgent,
                 key: 'is_urgent',
-                icon: Zap,
-                ...STRATEGIC_INDICATORS.is_urgent
+                icon: Zap
             })
         }
 
@@ -237,6 +246,85 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
                         <span className="text-xs">
                             {safepo.items_count} {safepo.items_count === 1 ? 'item' : 'items'}
                         </span>
+                    </div>
+                )}
+            </div>
+
+            {/* Margin Indicator with Popover */}
+            <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between">
+                <span className="text-xs text-gray-500 font-medium">Margem Estimada:</span>
+                {marginInfo.status === 'PENDENTE_PCP' ? (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-gray-100 text-gray-800 border border-gray-300">
+                        PENDENTE PCP
+                    </span>
+                ) : (
+                    <div className="relative group inline-block">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold border cursor-help shadow-sm transition-all duration-250 hover:scale-105 ${
+                            marginInfo.badgeColor === 'green' ? 'bg-green-100 text-green-800 border-green-300' :
+                            marginInfo.badgeColor === 'yellow' ? 'bg-yellow-100 text-yellow-800 border-yellow-300' :
+                            marginInfo.badgeColor === 'orange' ? 'bg-orange-100 text-orange-800 border-orange-300' :
+                            'bg-red-100 text-red-800 border-red-300'
+                        }`}>
+                            {marginInfo.margin.toFixed(2)}%
+                        </span>
+                        
+                        {/* Premium Popover "O Extrato" */}
+                        <div className="absolute z-50 hidden group-hover:block bg-slate-900 text-slate-100 p-4 rounded-xl shadow-2xl w-80 text-xs border border-slate-700 -top-2 right-full mr-3 pointer-events-none animate-fade-in">
+                            <h4 className="font-bold text-white mb-2 border-b border-slate-700 pb-1 flex items-center justify-between">
+                                <span>📊 Extrato de Margem PO</span>
+                                <span className="text-[10px] text-slate-400 font-normal">Fórmula Celso</span>
+                            </h4>
+                            <div className="space-y-1.5 font-sans font-medium">
+                                <div className="flex justify-between">
+                                    <span className="text-slate-400">(+) Valor Bruto:</span>
+                                    <span className="font-mono text-white">{formatCurrency(marginInfo.breakdown.gross)}</span>
+                                </div>
+                                <div className="flex justify-between text-amber-400">
+                                    <span className="text-slate-400">(-) Ajuste VP (Prazo):</span>
+                                    <span className="font-mono">-{formatCurrency(marginInfo.breakdown.vpDiscount)}</span>
+                                </div>
+                                <div className="flex justify-between border-t border-slate-800 pt-0.5">
+                                    <span className="text-slate-400 font-semibold">(=) Valor Presente (VP):</span>
+                                    <span className="font-semibold font-mono text-white">{formatCurrency(marginInfo.breakdown.vp)}</span>
+                                </div>
+                                <div className="flex justify-between text-red-400">
+                                    <span className="text-slate-400">(-) Impostos (22.25%):</span>
+                                    <span className="font-mono">-{formatCurrency(marginInfo.breakdown.taxes)}</span>
+                                </div>
+                                {marginInfo.breakdown.commission > 0 && (
+                                    <div className="flex justify-between text-red-400">
+                                        <span className="text-slate-400">(-) Comissão:</span>
+                                        <span className="font-mono">-{formatCurrency(marginInfo.breakdown.commission)}</span>
+                                    </div>
+                                )}
+                                {marginInfo.breakdown.freight > 0 && (
+                                    <div className="flex justify-between text-red-400">
+                                        <span className="text-slate-400">(-) Frete Total:</span>
+                                        <span className="font-mono">-{formatCurrency(marginInfo.breakdown.freight)}</span>
+                                    </div>
+                                )}
+                                <div className="border-t border-slate-800 my-1"></div>
+                                <div className="flex justify-between text-emerald-400 font-bold">
+                                    <span className="text-slate-300">(=) Margem Absoluta:</span>
+                                    <span className="font-mono text-white">{formatCurrency(marginInfo.breakdown.absoluteMargin)}</span>
+                                </div>
+                                <div className="flex justify-between text-slate-300">
+                                    <span className="text-slate-400">(/) Custo Industrial:</span>
+                                    <span className="font-mono text-white">{formatCurrency(marginInfo.breakdown.costs)}</span>
+                                </div>
+                                <div className="border-t border-slate-700 pt-1.5 flex justify-between items-center">
+                                    <span className="font-bold text-white">Margem Final (%):</span>
+                                    <span className={`font-mono text-sm font-bold ${
+                                        marginInfo.badgeColor === 'green' ? 'text-green-400' :
+                                        marginInfo.badgeColor === 'yellow' ? 'text-yellow-400' :
+                                        marginInfo.badgeColor === 'orange' ? 'text-orange-400' :
+                                        'text-red-400'
+                                    }`}>
+                                        {marginInfo.margin.toFixed(2)}%
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 )}
             </div>

@@ -62,7 +62,7 @@ describe('KanbanColumn', () => {
             />
         )
 
-        expect(screen.getByText('No items in this column')).toBeInTheDocument()
+        expect(screen.getByText('Nenhum item nesta coluna')).toBeInTheDocument()
         expect(screen.getByText('0')).toBeInTheDocument() // Count badge
     })
 
@@ -76,7 +76,7 @@ describe('KanbanColumn', () => {
             />
         )
 
-        const header = screen.getByText('Approved').closest('div')
+        const header = screen.getByText('Approved').closest('.rounded-t-lg')
         expect(header).toHaveClass('bg-green-100')
     })
 
