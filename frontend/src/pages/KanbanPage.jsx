@@ -107,6 +107,40 @@ const KanbanPage = () => {
         }
     }
 
+    const handleNukeTenantData = async () => {
+        if (!window.confirm("ATENÇÃO: Isso apagará TODOS os pedidos deste cliente permanentemente. Deseja continuar?")) {
+            return;
+        }
+
+        try {
+            setLoading(true);
+            const response = await api.post('/kanban/admin/nuke-tenant-data');
+            if (response.data.success) {
+                showSuccess("Banco de dados higienizado com sucesso!");
+                setBoardData({
+                    columns: (boardData?.columns || []).map(col => ({
+                        ...col,
+                        pos: [],
+                        count: 0
+                    })),
+                    total_pos: 0,
+                    total_items: 0,
+                    margin_global: 0,
+                    margin_percentage: 0
+                });
+                refreshNotifications();
+            } else {
+                showError("Erro inesperado ao higienizar banco.");
+            }
+        } catch (err) {
+            console.error('Error nuking tenant data:', err);
+            const errorMsg = err.response?.data?.detail || 'Erro ao higienizar banco de dados.';
+            showError(errorMsg);
+        } finally {
+            setLoading(false);
+        }
+    }
+
     useEffect(() => {
         fetchBoard()
     }, [])
@@ -775,6 +809,14 @@ const KanbanPage = () => {
                                 <RefreshCw className="w-5 h-5" />
                                 Atualizar
                             </button>
+                            {user?.role?.toLowerCase() === 'admin' && (
+                                <button
+                                    onClick={handleNukeTenantData}
+                                    className="border border-red-600 hover:bg-red-50 text-red-600 font-semibold px-4 py-2 rounded-lg flex items-center gap-2 transition-colors cursor-pointer"
+                                >
+                                    🧹 Higienizar Banco (Testes)
+                                </button>
+                            )}
                         </div>
                     </div>
                 </div>

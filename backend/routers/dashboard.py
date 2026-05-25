@@ -28,12 +28,22 @@ router = APIRouter(prefix="/api/dashboard", tags=["Dashboard"])
 
 
 # Status mapping: Database status -> Display name (Portuguese)
+# Standardized 5 Column Structure
 STATUS_DISPLAY_MAP = {
+    "SUBMITTED": "Comercial",
+    "APPROVED": "PCP",
+    "MANUFACTURING": "Produção/Embalagem",
+    "SHIPPING": "Faturamento/Expedição",
+    "FINANCE": "Financeiro",
+    
+    # Legacy compatibility fallbacks
     "DRAFT": "Comercial",
-    "SUBMITTED": "PCP",
-    "APPROVED": "Produção/Embalagem",
-    "IN_PROGRESS": "Expedição/Faturamento",
-    "COMPLETED": "Concluído",
+    "WAITING_COMMERCIAL_PARTITION": "Comercial",
+    "IN_PROGRESS": "Produção/Embalagem",
+    "WAITING_DISPATCH": "Faturamento/Expedição",
+    "AUDIT_PENDING": "Financeiro",
+    "COMPLETED": "Financeiro",
+    "ANALISE_CREDITO": "Financeiro",
     "CANCELLED": "Cancelado"
 }
 
@@ -142,7 +152,7 @@ async def get_dashboard_metrics(
     
     total_items = len(all_items)
     by_area = []
-    for status_name in ["Comercial", "PCP", "Produção/Embalagem", "Expedição/Faturamento", "Concluído"]:
+    for status_name in ["Comercial", "PCP", "Produção/Embalagem", "Faturamento/Expedição", "Financeiro"]:
         count = status_counts.get(status_name, 0)
         percentage = Decimal(str((count / total_items * 100) if total_items > 0 else 0))
         by_area.append(AreaItemCount(
@@ -197,7 +207,7 @@ async def get_dashboard_summary(
     
     total_pos = len(pos)
     status_distribution = []
-    for status_name in ["Comercial", "PCP", "Produção/Embalagem", "Expedição/Faturamento", "Concluído"]:
+    for status_name in ["Comercial", "PCP", "Produção/Embalagem", "Faturamento/Expedição", "Financeiro"]:
         count = status_counts.get(status_name, 0)
         percentage = Decimal(str((count / total_pos * 100) if total_pos > 0 else 0))
         status_distribution.append(StatusDistribution(
@@ -449,8 +459,8 @@ async def get_status_timeline(
             {"status": "Comercial", "avg_duration_hours": 48.0},
             {"status": "PCP", "avg_duration_hours": 36.0},
             {"status": "Produção/Embalagem", "avg_duration_hours": 240.0},
-            {"status": "Expedição/Faturamento", "avg_duration_hours": 24.0},
-            {"status": "Concluído", "avg_duration_hours": 0.0}
+            {"status": "Faturamento/Expedição", "avg_duration_hours": 24.0},
+            {"status": "Financeiro", "avg_duration_hours": 0.0}
         ]
         
         return {

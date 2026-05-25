@@ -31,12 +31,17 @@ router = APIRouter(prefix="/api/kanban", tags=["Kanban"])
 
 
 # Status mapping: Database status -> Display name (Portuguese)
-# Official Process Blueprint V2.0 - 5 Column Structure
+# Standardized 5 Column Structure
 STATUS_DISPLAY_MAP = {
-    "DRAFT": "Comercial",
-    "SUBMITTED": "Comercial",  # SUBMITTED now shows in Comercial
-    "WAITING_COMMERCIAL_PARTITION": "Comercial",  # Shows in Comercial with purple badge
+    "SUBMITTED": "Comercial",
     "APPROVED": "PCP",
+    "MANUFACTURING": "Produção/Embalagem",
+    "SHIPPING": "Faturamento/Expedição",
+    "FINANCE": "Financeiro",
+    
+    # Legacy compatibility fallbacks
+    "DRAFT": "Comercial",
+    "WAITING_COMMERCIAL_PARTITION": "Comercial",
     "IN_PROGRESS": "Produção/Embalagem",
     "WAITING_DISPATCH": "Faturamento/Expedição",
     "AUDIT_PENDING": "Financeiro",
@@ -48,16 +53,22 @@ STATUS_DISPLAY_MAP = {
 # Reverse mapping for API compatibility
 DISPLAY_TO_DB_STATUS = {v: k for k, v in STATUS_DISPLAY_MAP.items()}
 
-# Status flow for bidirectional movement - Official Process Blueprint V2.0
+# Status flow for bidirectional movement - Standardized 5 Columns
 STATUS_FLOW = {
+    "SUBMITTED": {"next": "APPROVED", "prev": None},
+    "APPROVED": {"next": "MANUFACTURING", "prev": "SUBMITTED"},
+    "MANUFACTURING": {"next": "SHIPPING", "prev": "APPROVED"},
+    "SHIPPING": {"next": "FINANCE", "prev": "MANUFACTURING"},
+    "FINANCE": {"next": "COMPLETED", "prev": "SHIPPING"},
+    "COMPLETED": {"next": None, "prev": "FINANCE"},
+    
+    # Legacy flow fallbacks
     "DRAFT": {"next": "SUBMITTED", "prev": None},
-    "SUBMITTED": {"next": "APPROVED", "prev": "DRAFT"},
     "WAITING_COMMERCIAL_PARTITION": {"next": "APPROVED", "prev": None},
-    "APPROVED": {"next": "IN_PROGRESS", "prev": "SUBMITTED"},
-    "IN_PROGRESS": {"next": "WAITING_DISPATCH", "prev": "APPROVED"},
-    "WAITING_DISPATCH": {"next": "AUDIT_PENDING", "prev": "IN_PROGRESS"},
+    "IN_PROGRESS": {"next": "SHIPPING", "prev": "APPROVED"},
+    "WAITING_DISPATCH": {"next": "FINANCE", "prev": "IN_PROGRESS"},
     "AUDIT_PENDING": {"next": "COMPLETED", "prev": "WAITING_DISPATCH"},
-    "COMPLETED": {"next": None, "prev": "AUDIT_PENDING"}
+    "ANALISE_CREDITO": {"next": "COMPLETED", "prev": None}
 }
 
 
@@ -161,18 +172,18 @@ async def get_kanban_board(
         PurchaseOrder.tenant_id == current_user.tenant_id
     ).all()
     
-    # Define status columns - Official Process Blueprint V2.0 (5 Columns)
-    # Comercial: SUBMITTED or WAITING_COMMERCIAL_PARTITION
+    # Define status columns - Standardized 5 Columns
+    # Comercial: SUBMITTED (fallback DRAFT, WAITING_COMMERCIAL_PARTITION)
     # PCP: APPROVED
-    # Produção/Embalagem: IN_PROGRESS
-    # Faturamento/Expedição: WAITING_DISPATCH
-    # Financeiro: AUDIT_PENDING or COMPLETED
+    # Produção/Embalagem: MANUFACTURING (fallback IN_PROGRESS)
+    # Faturamento/Expedição: SHIPPING (fallback WAITING_DISPATCH)
+    # Financeiro: FINANCE (fallback AUDIT_PENDING, COMPLETED, ANALISE_CREDITO)
     status_columns = [
-        ("Comercial", ["SUBMITTED", "WAITING_COMMERCIAL_PARTITION"]),
+        ("Comercial", ["SUBMITTED", "DRAFT", "WAITING_COMMERCIAL_PARTITION"]),
         ("PCP", ["APPROVED"]),
-        ("Produção/Embalagem", ["IN_PROGRESS"]),
-        ("Faturamento/Expedição", ["WAITING_DISPATCH"]),
-        ("Financeiro", ["AUDIT_PENDING", "COMPLETED", "ANALISE_CREDITO"])
+        ("Produção/Embalagem", ["MANUFACTURING", "IN_PROGRESS"]),
+        ("Faturamento/Expedição", ["SHIPPING", "WAITING_DISPATCH"]),
+        ("Financeiro", ["FINANCE", "AUDIT_PENDING", "COMPLETED", "ANALISE_CREDITO"])
     ]
     
     # Group POs by status
@@ -1675,3 +1686,65 @@ async def archive_purchase_order(
         "po_id": po_id,
         "status": to_status
     }
+
+
+@router.post("/admin/nuke-tenant-data")
+async def nuke_tenant_data(
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Emergency clean slate: Deletes all AuditLog, OrderItem, and PurchaseOrder records 
+    associated with the logged-in user's tenant.
+    """
+    import uuid
+    # Security: Ensure only users with role 'admin' can execute this
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Apenas administradores podem higienizar dados de testes."
+        )
+
+    tenant_uuid = uuid.UUID(str(current_user.tenant_id))
+    print(f"ADMIN NUKE: Starting data cleaning for tenant_id {tenant_uuid}", flush=True)
+
+    try:
+        from backend.models import AuditLog, OrderItem, PurchaseOrder
+
+        # 1. Delete all AuditLogs associated with OrderItems of this tenant
+        deleted_logs = db.query(AuditLog).filter(
+            AuditLog.item_id.in_(
+                db.query(OrderItem.id).filter(OrderItem.tenant_id == tenant_uuid)
+            )
+        ).delete(synchronize_session=False)
+
+        # 2. Delete all OrderItems belonging to this tenant
+        deleted_items = db.query(OrderItem).filter(OrderItem.tenant_id == tenant_uuid).delete(synchronize_session=False)
+
+        # 3. Delete all PurchaseOrders belonging to this tenant
+        deleted_pos = db.query(PurchaseOrder).filter(PurchaseOrder.tenant_id == tenant_uuid).delete(synchronize_session=False)
+
+        db.commit()
+
+        success_msg = (
+            f"ADMIN NUKE SUCCESS: Cleared {deleted_logs} AuditLogs, "
+            f"{deleted_items} OrderItems, and {deleted_pos} PurchaseOrders for tenant {tenant_uuid}"
+        )
+        print(success_msg, flush=True)
+        return {
+            "success": True,
+            "message": "Banco de dados higienizado com sucesso!",
+            "details": {
+                "deleted_audit_logs": deleted_logs,
+                "deleted_order_items": deleted_items,
+                "deleted_purchase_orders": deleted_pos
+            }
+        }
+    except Exception as exc:
+        db.rollback()
+        error_msg = f"ADMIN NUKE ERROR: Failed to nuke data for tenant {tenant_uuid}: {str(exc)}"
+        print(error_msg, flush=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao higienizar banco: {str(exc)}"
+        )

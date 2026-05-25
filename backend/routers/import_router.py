@@ -796,7 +796,7 @@ async def confirm_staging(
                 and item.extra_metadata.finance_justification
                 for item in po.items
             )
-            po_status_macro = "ANALISE_CREDITO" if has_blocked_item else "DRAFT"
+            po_status_macro = "FINANCE" if has_blocked_item else "SUBMITTED"
 
             # 3. Create new PurchaseOrder
             first_item_delivery = None
