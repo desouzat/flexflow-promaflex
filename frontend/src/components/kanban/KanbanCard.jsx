@@ -17,12 +17,22 @@ import { calculatePOMargins } from '../../utils/marginCalculator'
 
 const KanbanCard = ({ po, onCardClick, compactView = false }) => {
     // Ensure po object has safe defaults
+    const getRobustName = (val) => {
+        if (!val || val === 'null' || val === 'None' || String(val).trim() === '') {
+            return 'Desconhecido';
+        }
+        return val;
+    };
+
     const safepo = {
         po_number: po?.po_number || 'N/A',
-        supplier_name: po?.supplier_name || 'Unknown Supplier',
+        client_name: getRobustName(po?.client_name || po?.supplier_name),
+        vendor_name: getRobustName(po?.vendor_name || po?.supplier_name || po?.client_name),
+        supplier_name: getRobustName(po?.supplier_name || po?.client_name),
         status: po?.status || 'pending',
         total_value: po?.total_value || 0,
-        expected_delivery_date: po?.expected_delivery_date || null,
+        expected_delivery_date: po?.delivery_date || po?.expected_delivery_date || null,
+        delivery_date: po?.delivery_date || po?.expected_delivery_date || null,
         items_count: po?.items_count || 0,
         priority: po?.priority || 'normal',
         ...po
@@ -175,10 +185,10 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
                 )}
 
                 <p className="text-xs text-gray-700 font-semibold mb-1">
-                    Cliente: {safepo.client_name || safepo.supplier_name || 'Desconhecido'}
+                    Cliente: {safepo.client_name}
                 </p>
                 <p className="text-[10px] text-gray-500 mb-2">
-                    Fornecedor: {safepo.supplier_name}
+                    Fornecedor: {safepo.vendor_name}
                 </p>
                 <div className="flex items-center justify-between text-xs">
                     <span className="font-medium text-gray-900">
@@ -244,10 +254,10 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
                         )}
                     </div>
                     <p className="text-xs text-gray-800 font-semibold mb-0.5">
-                        Cliente: {safepo.client_name || safepo.supplier_name || 'Desconhecido'}
+                        Cliente: {safepo.client_name}
                     </p>
                     <p className="text-[11px] text-gray-500">
-                        Fornecedor: {safepo.supplier_name}
+                        Fornecedor: {safepo.vendor_name}
                     </p>
                 </div>
                 <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium border ${getStatusColor(safepo.status)}`}>

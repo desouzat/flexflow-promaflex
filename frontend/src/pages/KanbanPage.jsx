@@ -16,6 +16,13 @@ import {
 } from 'lucide-react'
 
 const KanbanPage = () => {
+    const getRobustName = (val) => {
+        if (!val || val === 'null' || val === 'None' || String(val).trim() === '') {
+            return 'Desconhecido';
+        }
+        return val;
+    };
+
     const [boardData, setBoardData] = useState(null)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState(null)
@@ -122,6 +129,7 @@ const KanbanPage = () => {
             setHandoffHistory(response.data)
         } catch (err) {
             console.error('Error loading handoff history:', err)
+            setHandoffHistory({ handoff_history: [], transitions: [] })
         }
 
         // Load logistics checklist if in Expedição/Faturamento or Faturamento/Expedição
@@ -552,6 +560,61 @@ const KanbanPage = () => {
         return true
     }
 
+    const getMissingFieldsTooltip = () => {
+        if (!selectedPO) return '';
+        const meta = selectedPO.extra_metadata || {};
+        const missing = [];
+
+        if (selectedPO.status === 'PCP') {
+            const packaging = meta.packaging_type || '';
+            const deliveryDate = meta.data_programada || selectedPO.expected_delivery_date || '';
+            if (packaging === '') missing.push('Tipo de Embalagem');
+            if (deliveryDate === '') missing.push('Data Programada');
+        }
+
+        if (selectedPO.status === 'Produção/Embalagem') {
+            const statusProd = meta.status_producao || '';
+            const qReal = parseFloat(meta.qtd_real_produzida);
+            const perda = parseFloat(meta.perda_tecnica);
+            
+            if (statusProd !== 'Finalizado' && statusProd !== 'FINISH') missing.push('Status de Produção (FINISH)');
+            if (isNaN(qReal) || qReal <= 0) missing.push('Quantidade Real Produzida (>0)');
+            if (isNaN(perda) || perda < 0) missing.push('Perda Técnica (>=0)');
+        }
+
+        if (selectedPO.status === 'Faturamento/Expedição') {
+            const nfe = meta.numero_nfe || '';
+            const accessKey = (meta.chave_acesso || '').replace(/\D/g, '');
+            const carrier = meta.transportadora || '';
+            const isKeyValid = accessKey.length === 44;
+            
+            if (nfe === '') missing.push('Número NF-e');
+            if (!isKeyValid) missing.push('Chave de Acesso (44 dígitos numéricos)');
+            if (carrier === '') missing.push('Transportadora');
+            
+            const checklistMissing = [];
+            if (!logisticsChecklist.endereco_conferido) checklistMissing.push('Endereço');
+            if (!logisticsChecklist.peso_validado) checklistMissing.push('Peso');
+            if (!logisticsChecklist.etiquetas_impressas) checklistMissing.push('Etiquetas');
+            if (!logisticsChecklist.foto_carga_path) checklistMissing.push('Foto da Carga');
+            if (!logisticsChecklist.foto_canhoto_path) checklistMissing.push('Foto do Canhoto');
+            
+            if (checklistMissing.length > 0) {
+                missing.push(`Checklist pendente: ${checklistMissing.join(', ')}`);
+            }
+        }
+
+        if (selectedPO.status === 'Financeiro') {
+            const comment = meta.audit_comment || '';
+            if (comment.trim().length === 0) missing.push('Comentário de Auditoria');
+        }
+
+        if (missing.length > 0) {
+            return `Campos pendentes: ${missing.join('; ')}`;
+        }
+        return '';
+    }
+
     if (loading) {
         return (
             <div className="flex items-center justify-center h-full">
@@ -672,7 +735,7 @@ const KanbanPage = () => {
                                         Pedido #{selectedPO.po_number}
                                     </h2>
                                     <p className="text-sm text-gray-600 mt-1">
-                                        {selectedPO.client_name || 'Cliente não especificado'}
+                                        {getRobustName(selectedPO.client_name || selectedPO.supplier_name)}
                                     </p>
                                 </div>
                                 <button
@@ -744,13 +807,13 @@ const KanbanPage = () => {
                                     };
 
                                     return (
-                                        <div className="mb-6 bg-slate-900 text-slate-100 p-5 rounded-xl border border-slate-700 shadow-lg">
-                                            <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-2">
-                                                <h3 className="text-xs font-bold tracking-wide uppercase text-slate-300 flex items-center gap-2">
+                                        <div className="mb-6 bg-slate-50 text-slate-700 p-5 rounded-xl border border-slate-200 shadow-sm">
+                                            <div className="flex items-center justify-between mb-4 border-b border-slate-200 pb-2">
+                                                <h3 className="text-xs font-bold tracking-wide uppercase text-slate-700 flex items-center gap-2">
                                                     <span>⏱️</span> Controle de SLA e Performance
                                                 </h3>
                                                 {isReplacement && (
-                                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-cyan-950 text-cyan-400 border border-cyan-800 animate-pulse">
+                                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-cyan-100 text-cyan-800 border border-cyan-300 animate-pulse">
                                                         SLA REDUZIDO (50% - TROCA)
                                                     </span>
                                                 )}
@@ -761,17 +824,17 @@ const KanbanPage = () => {
                                                 <div>
                                                     <div className="flex justify-between text-xs font-semibold mb-1">
                                                         <span>Tempo Total Acumulado</span>
-                                                        <span className="font-mono text-slate-300">
+                                                        <span className="font-mono text-slate-650 font-bold">
                                                             {totalElapsedHours.toFixed(1)}h / {totalSlaHours.toFixed(0)}h ({totalPercent.toFixed(0)}%)
                                                         </span>
                                                     </div>
-                                                    <div className="w-full bg-slate-800 rounded-full h-3 overflow-hidden border border-slate-700">
+                                                    <div className="w-full bg-slate-200 rounded-full h-3 overflow-hidden border border-slate-300">
                                                         <div 
                                                             className={`h-full transition-all duration-500 ${getProgressBarColor(totalPercent)}`} 
                                                             style={{ width: `${totalPercent}%` }}
                                                         />
                                                     </div>
-                                                    <p className="text-[10px] text-slate-450 mt-1">
+                                                    <p className="text-[10px] text-slate-500 mt-1">
                                                         Prazo total contratual para o fluxo completo do pedido.
                                                     </p>
                                                 </div>
@@ -780,17 +843,17 @@ const KanbanPage = () => {
                                                 <div>
                                                     <div className="flex justify-between text-xs font-semibold mb-1">
                                                         <span>Tempo na Área Atual ({selectedPO.status})</span>
-                                                        <span className="font-mono text-slate-300">
+                                                        <span className="font-mono text-slate-650 font-bold">
                                                             {currentAreaElapsedHours.toFixed(1)}h / {currentAreaSlaHours.toFixed(0)}h ({areaPercent.toFixed(0)}%)
                                                         </span>
                                                     </div>
-                                                    <div className="w-full bg-slate-800 rounded-full h-3 overflow-hidden border border-slate-700">
+                                                    <div className="w-full bg-slate-200 rounded-full h-3 overflow-hidden border border-slate-300">
                                                         <div 
                                                             className={`h-full transition-all duration-500 ${getProgressBarColor(areaPercent)}`} 
                                                             style={{ width: `${areaPercent}%` }}
                                                         />
                                                     </div>
-                                                    <p className="text-[10px] text-slate-455 mt-1">
+                                                    <p className="text-[10px] text-slate-500 mt-1">
                                                         Tempo decorrido neste setor operacional específico.
                                                     </p>
                                                 </div>
@@ -814,6 +877,8 @@ const KanbanPage = () => {
                                             const isActive = idx === currentStageIndex;
                                             const isLocked = idx > currentStageIndex;
                                             
+                                            if (isLocked) return null;
+
                                             let headerColor = 'bg-gray-50 border-gray-200 text-gray-500';
                                             let leftBorder = 'border-l-4 border-l-gray-300';
                                             let iconBadge = <Lock className="w-4 h-4 text-gray-400" />;
@@ -832,11 +897,11 @@ const KanbanPage = () => {
                                             }
                                             
                                             const displayNames = {
-                                                'Comercial': '1. Mesa Comercial',
-                                                'PCP': '2. Planejamento e Controle de Produção (PCP)',
-                                                'Produção/Embalagem': '3. Execução Industrial & Embalagem',
-                                                'Faturamento/Expedição': '4. Faturamento, Logística & Expedição',
-                                                'Financeiro': '5. Auditoria & Liberação Financeira'
+                                                'Comercial': 'Comercial',
+                                                'PCP': 'PCP',
+                                                'Produção/Embalagem': 'Produção/Embalagem',
+                                                'Faturamento/Expedição': 'Faturamento/Expedição',
+                                                'Financeiro': 'Financeiro'
                                             };
 
                                             return (
@@ -872,17 +937,33 @@ const KanbanPage = () => {
                                                             </div>
                                                         ) : (
                                                             <div>
+                                                                {/* Return Priority Banner */}
+                                                                {selectedPO.extra_metadata?.priority_note && selectedPO.extra_metadata.priority_note.target_area === stageName && (
+                                                                    <div className="mb-5 p-4 bg-amber-50 border-l-4 border-amber-500 rounded-r-lg shadow-2xs">
+                                                                        <div className="flex items-center gap-2 mb-1.5">
+                                                                            <span className="text-base">⚠️</span>
+                                                                            <span className="font-extrabold text-amber-800 text-xs uppercase tracking-wider">Nota de Devolução Prioritária</span>
+                                                                        </div>
+                                                                        <p className="text-sm text-amber-950 font-bold italic leading-relaxed">
+                                                                            "{selectedPO.extra_metadata.priority_note.text}"
+                                                                        </p>
+                                                                        <p className="text-[10px] text-amber-700 mt-2 font-medium">
+                                                                            Devolvido de <strong className="text-amber-850">{selectedPO.extra_metadata.priority_note.from_area}</strong> por <strong>{selectedPO.extra_metadata.priority_note.user}</strong> em {new Date(selectedPO.extra_metadata.priority_note.timestamp).toLocaleString()}
+                                                                        </p>
+                                                                    </div>
+                                                                )}
+
                                                                 {/* Render Stage Specific Content */}
                                                                 {stageName === 'Comercial' && (
                                                                     <div className="space-y-4">
                                                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                                                                             <div>
                                                                                 <span className="text-xs text-gray-500 font-semibold uppercase block">Cliente</span>
-                                                                                <span className="font-bold text-gray-800">{selectedPO.client_name || 'Não Informado'}</span>
+                                                                                <span className="font-bold text-gray-800">{getRobustName(selectedPO.client_name || selectedPO.supplier_name)}</span>
                                                                             </div>
                                                                             <div>
                                                                                 <span className="text-xs text-gray-500 font-semibold uppercase block">Fornecedor</span>
-                                                                                <span className="font-semibold text-gray-800">{selectedPO.supplier_name || 'Desconhecido'}</span>
+                                                                                <span className="font-semibold text-gray-800">{getRobustName(selectedPO.supplier_name || selectedPO.vendor_name || selectedPO.client_name)}</span>
                                                                             </div>
                                                                             <div>
                                                                                 <span className="text-xs text-gray-500 font-semibold uppercase block">Condição de Pagamento</span>
@@ -973,6 +1054,28 @@ const KanbanPage = () => {
 
                                                                 {stageName === 'PCP' && (
                                                                     <div className="space-y-4">
+                                                                        {/* Task 4: The PCP Link */}
+                                                                        {calculatePOMargins(selectedPO).status === 'PENDENTE_PCP' && (
+                                                                            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-3xs mb-4">
+                                                                                <div className="flex items-center gap-2">
+                                                                                    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-extrabold bg-amber-100 text-amber-800 border border-amber-300">
+                                                                                        PENDENTE PCP
+                                                                                    </span>
+                                                                                    <span className="text-xs text-amber-900 font-semibold">
+                                                                                        Custo industrial do SKU ainda não foi validado pelo PCP.
+                                                                                    </span>
+                                                                                </div>
+                                                                                <button
+                                                                                    onClick={() => {
+                                                                                        const firstSku = selectedPO.items?.[0]?.sku || '';
+                                                                                        window.location.href = `/costs?search=${encodeURIComponent(firstSku)}`;
+                                                                                    }}
+                                                                                    className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-lg cursor-pointer transition-colors shadow-2xs flex-shrink-0"
+                                                                                >
+                                                                                    🔍 Vincular Custo Técnico
+                                                                                </button>
+                                                                            </div>
+                                                                        )}
                                                                         {!isActive ? (
                                                                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
                                                                                 <div>
@@ -1577,45 +1680,28 @@ const KanbanPage = () => {
                                             <RefreshCw className="w-4 h-4 animate-spin text-gray-400" />
                                             Carregando histórico do fluxo...
                                         </div>
-                                    ) : (!handoffHistory.handoff_history || handoffHistory.handoff_history.length === 0) ? (
+                                    ) : (!handoffHistory.transitions || handoffHistory.transitions.length === 0) ? (
                                         <p className="text-sm text-gray-500 italic py-4 text-center bg-slate-50 border border-gray-200 rounded-lg">Nenhum registro de movimentação disponível para este pedido.</p>
                                     ) : (
                                         <div className="overflow-hidden border border-gray-200 rounded-lg shadow-2xs">
                                             <table className="min-w-full divide-y divide-gray-200 text-sm text-left">
                                                 <thead className="bg-slate-50 text-slate-700 font-bold uppercase tracking-wider text-[10px]">
                                                     <tr>
-                                                        <th className="px-4 py-3">Área Operacional</th>
-                                                        <th className="px-4 py-3">Data de Entrada</th>
-                                                        <th className="px-4 py-3">Data de Saída</th>
-                                                        <th className="px-4 py-3">Duração</th>
-                                                        <th className="px-4 py-3">Responsáveis</th>
+                                                        <th className="px-4 py-3">Data</th>
+                                                        <th className="px-4 py-3">Responsável</th>
+                                                        <th className="px-4 py-3">De ➔ Para</th>
+                                                        <th className="px-4 py-3">Motivo/Justificativa</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-gray-100 bg-white text-gray-700 font-medium">
-                                                    {handoffHistory.handoff_history.map((record, index) => (
+                                                    {handoffHistory.transitions.map((record, index) => (
                                                         <tr key={index} className="hover:bg-slate-50 transition-colors">
-                                                            <td className="px-4 py-3 font-semibold text-gray-900">
-                                                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                                                    record.area === 'Comercial' ? 'bg-yellow-100 text-yellow-800' :
-                                                                    record.area === 'PCP' ? 'bg-blue-100 text-blue-800' :
-                                                                    record.area === 'Produção' ? 'bg-purple-100 text-purple-800' :
-                                                                    record.area === 'Expedição' ? 'bg-cyan-100 text-cyan-800' :
-                                                                    'bg-green-100 text-green-800'
-                                                                }`}>
-                                                                    {record.area}
-                                                                </span>
+                                                            <td className="px-4 py-3 font-mono text-xs text-gray-650">{record.date}</td>
+                                                            <td className="px-4 py-3 text-xs text-gray-600 font-semibold">{record.user}</td>
+                                                            <td className="px-4 py-3 text-xs font-bold text-gray-900">{record.from_to}</td>
+                                                            <td className="px-4 py-3 text-xs text-gray-650 italic font-normal max-w-xs truncate" title={record.reason}>
+                                                                {record.reason || '—'}
                                                             </td>
-                                                            <td className="px-4 py-3 font-mono text-xs text-gray-650">{record.arrival}</td>
-                                                            <td className="px-4 py-3 font-mono text-xs">
-                                                                {record.departure === 'Em andamento' ? (
-                                                                    <span className="text-blue-600 font-bold flex items-center gap-1">
-                                                                        <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-ping" />
-                                                                        Em andamento
-                                                                    </span>
-                                                                ) : record.departure}
-                                                            </td>
-                                                            <td className="px-4 py-3 font-mono text-xs text-gray-900">{record.duration}</td>
-                                                            <td className="px-4 py-3 text-xs text-gray-600">{record.user || 'Sistema'}</td>
                                                         </tr>
                                                     ))}
                                                 </tbody>
@@ -1632,7 +1718,7 @@ const KanbanPage = () => {
                                     {canReturn(selectedPO) && (
                                         <button
                                             onClick={() => setShowReturnModal(true)}
-                                            className="flex items-center gap-2 px-4 py-2 bg-orange-650 text-white rounded-lg hover:bg-orange-700 transition-colors font-semibold text-sm cursor-pointer shadow-sm"
+                                            className="flex items-center gap-2 px-4 py-2 bg-orange-600 border border-orange-500 text-white rounded-lg hover:bg-orange-700 transition-colors font-bold text-sm cursor-pointer shadow-md"
                                         >
                                             <RefreshCw className="w-4 h-4" />
                                             Devolver para {getPreviousStatus(selectedPO.status)}
@@ -1651,7 +1737,7 @@ const KanbanPage = () => {
                                                     ? 'bg-green-600 text-white hover:bg-green-700 cursor-pointer'
                                                     : 'bg-gray-300 text-gray-500 cursor-not-allowed border border-gray-310'
                                             }`}
-                                            title={!canAdvanceCurrentArea() ? "Preencha todos os campos obrigatórios deste setor para avançar" : `Avançar para ${getNextStatus(selectedPO.status)}`}
+                                            title={!canAdvanceCurrentArea() ? `Não é possível avançar. ${getMissingFieldsTooltip()}` : `Avançar para ${getNextStatus(selectedPO.status)}`}
                                         >
                                             Avançar para {getNextStatus(selectedPO.status)}
                                             <Zap className="w-4 h-4" />

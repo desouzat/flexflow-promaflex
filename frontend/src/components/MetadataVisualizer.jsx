@@ -1,6 +1,41 @@
 import React, { useState } from 'react'
 import { ChevronDown, ChevronRight, Edit2, Save, X } from 'lucide-react'
 
+const KEY_TRANSLATIONS = {
+    is_export: 'Exportação',
+    is_replacement: 'Troca / Reposição',
+    is_parted: 'Particionado',
+    waiting_partition: 'Aguardando Partição',
+    packaging_type: 'Tipo de Embalagem',
+    data_programada: 'Data Programada',
+    production_impediment: 'Impedimento de Produção',
+    status_producao: 'Status de Produção',
+    qtd_real_produzida: 'Qtd Real Produzida',
+    perda_tecnica: 'Perda Técnica',
+    numero_nfe: 'Número NF-e',
+    chave_acesso: 'Chave de Acesso',
+    transportadora: 'Transportadora',
+    manual_commission_rate: 'Comissão Manual (%)',
+    audit_comment: 'Comentário de Auditoria',
+    client_name: 'Nome do Cliente',
+    expected_delivery_date: 'Data de Entrega Prevista',
+    endereco_conferido: 'Endereço Conferido',
+    peso_validado: 'Peso Validado',
+    etiquetas_impressas: 'Etiquetas Impressas',
+    foto_carga_path: 'Foto da Carga (Anexo)',
+    foto_canhoto_path: 'Canhoto / NF (Anexo)',
+    freight_strategy: 'Estratégia de Frete',
+    freight_ship_now: 'Enviar Frete Agora',
+    freight_ship_later: 'Enviar Frete Depois',
+    justification: 'Justificativa',
+    reason: 'Motivo',
+    priority_note: 'Nota Prioritária'
+}
+
+const humanizeKey = (key) => {
+    return KEY_TRANSLATIONS[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
 /**
  * MetadataVisualizer Component
  * 
@@ -59,8 +94,8 @@ const MetadataVisualizer = ({ metadata, itemId, onUpdate, readOnly = false }) =>
         // Boolean
         if (typeof value === 'boolean') {
             return (
-                <div style={{ marginLeft: `${indent}px` }} className="text-blue-600 font-medium">
-                    {value.toString()}
+                <div style={{ marginLeft: `${indent}px` }} className="text-blue-650 font-bold">
+                    {value ? 'Sim' : 'Não'}
                 </div>
             )
         }
@@ -127,7 +162,7 @@ const MetadataVisualizer = ({ metadata, itemId, onUpdate, readOnly = false }) =>
                         <div className="mt-1 space-y-1">
                             {keys.map((objKey) => (
                                 <div key={objKey}>
-                                    <span className="text-gray-600 font-medium text-sm">{objKey}:</span>
+                                    <span className="text-gray-600 font-medium text-sm">{humanizeKey(objKey)}:</span>
                                     {renderValue(value[objKey], `${key}.${objKey}`, depth + 1)}
                                 </div>
                             ))}
@@ -211,8 +246,8 @@ const MetadataVisualizer = ({ metadata, itemId, onUpdate, readOnly = false }) =>
                         {Object.keys(metadata).map((key) => (
                             <div key={key} className="border-b border-gray-100 pb-2 last:border-0">
                                 <div className="flex items-start gap-2">
-                                    <span className="text-gray-700 font-semibold text-sm min-w-[120px]">
-                                        {key}:
+                                    <span className="text-gray-700 font-semibold text-sm min-w-[140px]">
+                                        {humanizeKey(key)}:
                                     </span>
                                     <div className="flex-1">
                                         {renderValue(metadata[key], key)}

@@ -672,8 +672,44 @@ async def get_handoff_history(
     if formatted_history:
         current_area_elapsed_hours = formatted_history[-1]["duration_seconds"] / 3600.0
         
+    # Construct chronological transitions history (Task 5)
+    transitions = []
+    
+    # Initial status transition (po creation)
+    initial_area = STATUS_DISPLAY_MAP.get(initial_status, initial_status)
+    transitions.append({
+        "date": po.created_at.strftime("%d/%m/%Y %H:%M:%S"),
+        "user": creator_name,
+        "from_to": f"Criado ➔ {initial_area}",
+        "reason": ""
+    })
+    
+    # Subsequent movements
+    for log in logs:
+        log_user = "Sistema"
+        if log.changed_by_user:
+            log_user = log.changed_by_user.name or log.changed_by_user.email
+            
+        from_area = STATUS_DISPLAY_MAP.get(log.from_status, log.from_status) if log.from_status else "Comercial"
+        to_area = STATUS_DISPLAY_MAP.get(log.to_status, log.to_status)
+        
+        reason = log.justification or ""
+        if log.extra_data:
+            if log.extra_data.get("return_reason"):
+                reason = log.extra_data.get("return_reason")
+            elif log.extra_data.get("partition_reason"):
+                reason = log.extra_data.get("partition_reason")
+                
+        transitions.append({
+            "date": log.created_at.strftime("%d/%m/%Y %H:%M:%S"),
+            "user": log_user,
+            "from_to": f"{from_area} ➔ {to_area}",
+            "reason": reason
+        })
+        
     return {
         "handoff_history": formatted_history,
+        "transitions": transitions,
         "is_replacement": is_replacement,
         "total_sla_hours": total_sla_hours,
         "total_elapsed_hours": total_elapsed_hours,
@@ -1271,6 +1307,12 @@ async def advance_po_status(
     po.status_macro = next_status
     po.updated_at = datetime.utcnow()
     
+    # Clean up return priority note upon successful advance
+    if po.partition_metadata and "priority_note" in po.partition_metadata:
+        meta = dict(po.partition_metadata)
+        meta.pop("priority_note", None)
+        po.partition_metadata = meta
+    
     # Log status transition
     log_po_status_transition(
         db=db,
@@ -1334,6 +1376,19 @@ async def return_po_status(
     po.status_macro = prev_status
     po.updated_at = datetime.utcnow()
     
+    # Save justification to po.partition_metadata["priority_note"]
+    if po.partition_metadata is None:
+        po.partition_metadata = {}
+    meta = dict(po.partition_metadata)
+    meta["priority_note"] = {
+        "text": reason,
+        "from_area": STATUS_DISPLAY_MAP.get(from_status, from_status),
+        "target_area": STATUS_DISPLAY_MAP.get(prev_status, prev_status),
+        "timestamp": datetime.utcnow().isoformat(),
+        "user": current_user.name or current_user.email or "Sistema"
+    }
+    po.partition_metadata = meta
+    
     # Create audit log for return
     log_po_status_transition(
         db=db,
@@ -1390,7 +1445,7 @@ async def suggest_partition(
         )
     
     # Verify PO is in PCP stage
-    if po.status_macro != "SUBMITTED":
+    if po.status_macro != "APPROVED":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Sugestão de partição só pode ser feita no estágio PCP"

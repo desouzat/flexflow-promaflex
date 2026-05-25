@@ -16,7 +16,10 @@ const CostsPage = () => {
     const [commissions, setCommissions] = useState([])
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState(null)
-    const [searchTerm, setSearchTerm] = useState('')
+    const [searchTerm, setSearchTerm] = useState(() => {
+        const params = new URLSearchParams(window.location.search);
+        return params.get('search') || '';
+    })
     const [isCreating, setIsCreating] = useState(false)
     const [editingId, setEditingId] = useState(null)
     const [deleteConfirm, setDeleteConfirm] = useState(null)
