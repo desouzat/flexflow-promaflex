@@ -120,7 +120,7 @@ app.add_middleware(
 # Excludes /api/auth/login, /api/auth/me, /api/ping and other public paths
 app.add_middleware(
     AuthenticationMiddleware,
-    exclude_paths=["/api/auth/login", "/api/auth/me", "/api/ping"]
+    exclude_paths=["/api/auth/login", "/api/auth/me", "/api/ping", "/api/uploads/download"]
 )
 
 # Tenant Isolation Middleware (checks tenant_id in context)
@@ -315,6 +315,39 @@ async def api_info():
 
 
 # ============================================================================
+# SAFE FILE DOWNLOAD ENDPOINT
+# ============================================================================
+
+@app.get("/api/uploads/download", tags=["Uploads"])
+async def download_uploaded_file(path: str):
+    """
+    Serve uploaded files safely with path traversal protection.
+    """
+    from fastapi.responses import FileResponse
+    from fastapi import HTTPException
+    import os
+    
+    clean_path = path.lstrip("/")
+    # Remove 'backend/uploads/' or 'uploads/' prefix if present in path parameter to avoid double nesting
+    if clean_path.startswith("backend/uploads/"):
+        clean_path = clean_path[len("backend/uploads/"):]
+    elif clean_path.startswith("uploads/"):
+        clean_path = clean_path[len("uploads/"):]
+        
+    base_dir = os.path.abspath("backend/uploads")
+    file_path = os.path.abspath(os.path.join(base_dir, clean_path))
+    
+    # Path traversal protection
+    if not file_path.startswith(base_dir):
+        raise HTTPException(status_code=403, detail="Acesso não autorizado")
+        
+    if not os.path.exists(file_path) or not os.path.isfile(file_path):
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado")
+        
+    return FileResponse(file_path)
+
+
+# ============================================================================
 # MAIN
 # ============================================================================
 
@@ -328,3 +361,4 @@ if __name__ == "__main__":
         reload=True,  # Enable auto-reload for development
         log_level="info"
     )
+    # Trigger reload supervisor validation - May 2026

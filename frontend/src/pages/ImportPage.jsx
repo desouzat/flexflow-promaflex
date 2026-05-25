@@ -375,7 +375,7 @@ const ImportPage = () => {
                             customization_notes: '',
                             attachment_path: null,
                             needs_mapping: false,
-                            is_checked: false,  // Human review flag
+                            is_checked: true,  // Default to checked (confirmed) so valid items can be imported in batch immediately
                             extra_metadata: {
                                 finance_justification: null
                             }
@@ -439,7 +439,7 @@ const ImportPage = () => {
                                 customization_notes: '',
                                 attachment_path: null,
                                 needs_mapping: false,
-                                is_checked: false,  // Human review flag
+                                is_checked: true,  // Default to checked (confirmed) so valid items can be imported immediately
                                 extra_metadata: {
                                     finance_justification: null
                                 }
@@ -910,10 +910,10 @@ const ImportPage = () => {
                 // Refresh notifications
                 await refreshNotifications()
 
-                // Trigger a hard refresh by reloading the window after a short delay
-                // This ensures the Kanban board shows the new POs
+                // Trigger a clean redirect to the Kanban page with a full hard refresh
+                // This ensures the Kanban board fetches and displays the new POs immediately
                 setTimeout(() => {
-                    window.location.reload()
+                    window.location.href = '/kanban'
                 }, 1500)
             } else {
                 dismissToast(toastId)

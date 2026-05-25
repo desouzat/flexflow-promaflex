@@ -204,11 +204,13 @@ class PurchaseOrder(Base):
     STATUS_CANCELLED = "CANCELLED"
     STATUS_WAITING_COMMERCIAL_PARTITION = "WAITING_COMMERCIAL_PARTITION"
     STATUS_ANALISE_CREDITO = "ANALISE_CREDITO"
+    STATUS_ARCHIVED = "ARCHIVED"
     
     VALID_STATUSES = [
         STATUS_DRAFT, STATUS_SUBMITTED, STATUS_APPROVED,
         STATUS_WAITING_DISPATCH, STATUS_COMPLETED, STATUS_CANCELLED,
-        STATUS_WAITING_COMMERCIAL_PARTITION, STATUS_ANALISE_CREDITO
+        STATUS_WAITING_COMMERCIAL_PARTITION, STATUS_ANALISE_CREDITO,
+        STATUS_ARCHIVED
     ]
     
     # Colunas
@@ -341,36 +343,55 @@ class PurchaseOrder(Base):
         Getter para expected_delivery_date. Retorna a data armazenada em partition_metadata
         ou recupera a data nos itens.
         """
+        from datetime import date
         if self.partition_metadata and "expected_delivery_date" in self.partition_metadata:
             val = self.partition_metadata["expected_delivery_date"]
             if val:
                 if isinstance(val, datetime):
                     return val
+                if isinstance(val, date):
+                    return datetime(val.year, val.month, val.day)
                 try:
                     return datetime.fromisoformat(str(val))
                 except ValueError:
                     try:
                         return datetime.strptime(str(val), "%Y-%m-%d")
                     except ValueError:
-                        pass
+                        try:
+                            if "/" in str(val):
+                                parts = str(val).split("/")
+                                if len(parts) == 3:
+                                    d, m, y = parts
+                                    return datetime(int(y), int(m), int(d))
+                        except ValueError:
+                            pass
                     return None
         
         # Fallback para os itens associados
         if self.items:
             for item in self.items:
                 if item.extra_metadata:
-                    for key in ["expected_delivery_date", "data_previsao_entrega", "Previsão de Entrega"]:
+                    for key in ["expected_delivery_date", "delivery_date", "data_previsao_entrega", "Previsão de Entrega"]:
                         if key in item.extra_metadata and item.extra_metadata[key]:
                             val = item.extra_metadata[key]
                             if isinstance(val, datetime):
                                 return val
+                            if isinstance(val, date):
+                                return datetime(val.year, val.month, val.day)
                             try:
                                 return datetime.fromisoformat(str(val))
                             except ValueError:
                                 try:
                                     return datetime.strptime(str(val), "%Y-%m-%d")
                                 except ValueError:
-                                    pass
+                                    try:
+                                        if "/" in str(val):
+                                            parts = str(val).split("/")
+                                            if len(parts) == 3:
+                                                d, m, y = parts
+                                                return datetime(int(y), int(m), int(d))
+                                    except ValueError:
+                                        pass
                                 
         return None
 

@@ -41,6 +41,45 @@ const KanbanPage = () => {
         foto_canhoto_path: null
     })
     const [uploadingEvidence, setUploadingEvidence] = useState(false)
+    const [checklistFinanceiro, setChecklistFinanceiro] = useState({
+        margem_comissoes_validadas: false,
+        nfe_chave_conferidas: false,
+        evidencias_fotograficas_verificadas: false
+    })
+    
+    const handleFinanceiroChecklistChange = (field, checked) => {
+        setChecklistFinanceiro(prev => ({
+            ...prev,
+            [field]: checked
+        }))
+    }
+
+    const getRobustImpediment = () => {
+        if (!selectedPO) return '';
+        const meta = selectedPO.extra_metadata || {};
+        const impediment = meta.production_impediment || '';
+        if (!impediment && meta.priority_note) {
+            return typeof meta.priority_note === 'string' ? meta.priority_note : (meta.priority_note.text || '');
+        }
+        return impediment;
+    }
+
+    const getFinanceiroMissingFieldsTooltip = () => {
+        const missing = [];
+        if (!checklistFinanceiro.margem_comissoes_validadas) missing.push('validar margem e comissões');
+        if (!checklistFinanceiro.nfe_chave_conferidas) missing.push('conferir NFE e chave de acesso');
+        if (!checklistFinanceiro.evidencias_fotograficas_verificadas) missing.push('verificar evidências fotográficas');
+        
+        const commentLen = (localFields.audit_comment || '').trim().length;
+        if (commentLen < 20) {
+            missing.push(`faltam ${20 - commentLen} caracteres no parecer`);
+        }
+        
+        if (missing.length === 0) return '';
+        const joined = missing.join(', ');
+        return joined.charAt(0).toUpperCase() + joined.slice(1);
+    }
+
     const [showReturnModal, setShowReturnModal] = useState(false)
     const [returnReason, setReturnReason] = useState('')
     const [showPartitionModal, setShowPartitionModal] = useState(false)
@@ -94,7 +133,15 @@ const KanbanPage = () => {
 
     useEffect(() => {
         if (selectedPO) {
-            setLocalFields(selectedPO.extra_metadata || {})
+            const meta = selectedPO.extra_metadata || {}
+            let impediment = meta.production_impediment || ''
+            if (!impediment && meta.priority_note) {
+                impediment = typeof meta.priority_note === 'string' ? meta.priority_note : (meta.priority_note.text || '')
+            }
+            setLocalFields({
+                ...meta,
+                production_impediment: impediment
+            })
         } else {
             setLocalFields({})
         }
@@ -123,6 +170,13 @@ const KanbanPage = () => {
         setShowDetailsModal(true)
         setHandoffHistory(null)
 
+        // Reset Financeiro checklist
+        setChecklistFinanceiro({
+            margem_comissoes_validadas: false,
+            nfe_chave_conferidas: false,
+            evidencias_fotograficas_verificadas: false
+        })
+
         // Load handoff history & SLA data
         try {
             const response = await api.get(`/kanban/pos/${po.id}/handoff-history`)
@@ -132,14 +186,19 @@ const KanbanPage = () => {
             setHandoffHistory({ handoff_history: [], transitions: [] })
         }
 
-        // Load logistics checklist if in Expedição/Faturamento or Faturamento/Expedição
-        if (po.status === 'Expedição/Faturamento' || po.status === 'Faturamento/Expedição') {
-            try {
-                const response = await api.get(`/kanban/pos/${po.id}/logistics-checklist`)
-                setLogisticsChecklist(response.data.checklist)
-            } catch (err) {
-                console.error('Error loading logistics checklist:', err)
-            }
+        // Load logistics checklist (always query to make it available for Financeiro audit)
+        try {
+            const response = await api.get(`/kanban/pos/${po.id}/logistics-checklist`)
+            setLogisticsChecklist(response.data.checklist)
+        } catch (err) {
+            console.error('Error loading logistics checklist:', err)
+            setLogisticsChecklist({
+                endereco_conferido: false,
+                peso_validado: false,
+                etiquetas_impressas: false,
+                foto_carga_path: null,
+                foto_canhoto_path: null
+            })
         }
     }
 
@@ -353,6 +412,27 @@ const KanbanPage = () => {
                 showError(errorMsg)
             }
             console.error('Error advancing status:', err)
+        }
+    }
+
+    const handleArchivePO = async () => {
+        if (!selectedPO) return
+
+        try {
+            setSavingFields(true)
+            const response = await api.post(`/kanban/pos/${selectedPO.id}/archive`, {
+                audit_comment: (localFields.audit_comment || '').trim()
+            })
+            showSuccess(response.data.message)
+            await fetchBoard() // Refresh board data
+            refreshNotifications() // Refresh notifications
+            handleCloseModal()
+        } catch (err) {
+            const errorMsg = err.response?.data?.detail?.message || err.response?.data?.detail || 'Falha ao finalizar e arquivar pedido'
+            showError(errorMsg)
+            console.error('Error archiving PO:', err)
+        } finally {
+            setSavingFields(false)
         }
     }
 
@@ -823,7 +903,7 @@ const KanbanPage = () => {
                                                 {/* Tempo Total */}
                                                 <div>
                                                     <div className="flex justify-between text-xs font-semibold mb-1">
-                                                        <span>Tempo Total Acumulado</span>
+                                                        <span>{handoffHistory?.is_archived ? 'Total Lead Time' : 'Tempo Total Acumulado'}</span>
                                                         <span className="font-mono text-slate-650 font-bold">
                                                             {totalElapsedHours.toFixed(1)}h / {totalSlaHours.toFixed(0)}h ({totalPercent.toFixed(0)}%)
                                                         </span>
@@ -842,9 +922,9 @@ const KanbanPage = () => {
                                                 {/* Tempo na Área Atual */}
                                                 <div>
                                                     <div className="flex justify-between text-xs font-semibold mb-1">
-                                                        <span>Tempo na Área Atual ({selectedPO.status})</span>
+                                                        <span>{handoffHistory?.is_archived ? 'Tempo na Área Atual (Arquivado)' : `Tempo na Área Atual (${selectedPO.status})`}</span>
                                                         <span className="font-mono text-slate-650 font-bold">
-                                                            {currentAreaElapsedHours.toFixed(1)}h / {currentAreaSlaHours.toFixed(0)}h ({areaPercent.toFixed(0)}%)
+                                                            {handoffHistory?.is_archived ? 'Finalizado' : `${currentAreaElapsedHours.toFixed(1)}h / ${currentAreaSlaHours.toFixed(0)}h (${areaPercent.toFixed(0)}%)`}
                                                         </span>
                                                     </div>
                                                     <div className="w-full bg-slate-200 rounded-full h-3 overflow-hidden border border-slate-300">
@@ -970,40 +1050,62 @@ const KanbanPage = () => {
                                                                                 <span className="font-medium text-gray-700">{selectedPO.payment_terms || selectedPO.extra_metadata?.payment_terms || 'À vista'}</span>
                                                                             </div>
                                                                             <div>
+                                                                                <span className="text-xs text-gray-500 font-semibold uppercase block">Data de Entrega (Excel)</span>
+                                                                                <span className="font-medium text-gray-700">{formatDate(selectedPO.delivery_date)}</span>
+                                                                            </div>
+                                                                            <div>
                                                                                 <span className="text-xs text-gray-500 font-semibold uppercase block">Data Limite de Entrega</span>
-                                                                                <span className="font-medium text-gray-700">{formatDate(selectedPO.expected_delivery_date)}</span>
+                                                                                <span className="font-medium text-gray-700">{formatDate(selectedPO.data_limite || selectedPO.expected_delivery_date)}</span>
                                                                             </div>
                                                                         </div>
                                                                         
                                                                         <div>
-                                                                            <span className="text-xs text-gray-500 font-semibold uppercase block mb-1.5">Regras e Indicadores Estratégicos</span>
-                                                                            <div className="flex flex-wrap gap-2">
-                                                                                {selectedPO.extra_metadata?.is_export && (
-                                                                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-sky-100 text-sky-800 border border-sky-200">
-                                                                                        🌐 Exportação
+                                                                            <span className="text-xs text-gray-500 font-semibold uppercase block mb-2">Regras e Indicadores Estratégicos</span>
+                                                                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-gray-50 p-3 rounded-lg border border-gray-200">
+                                                                                <label className="flex items-center gap-2 cursor-not-allowed">
+                                                                                    <input
+                                                                                        type="checkbox"
+                                                                                        checked={selectedPO.extra_metadata?.is_export || false}
+                                                                                        disabled
+                                                                                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-80"
+                                                                                    />
+                                                                                    <span className="text-xs font-semibold text-gray-700">
+                                                                                        Exportação: {selectedPO.extra_metadata?.is_export ? 'Sim' : 'Não'}
                                                                                     </span>
-                                                                                )}
-                                                                                {selectedPO.extra_metadata?.is_first_order && (
-                                                                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-200">
-                                                                                        ⭐ Primeiro Pedido
+                                                                                </label>
+                                                                                <label className="flex items-center gap-2 cursor-not-allowed">
+                                                                                    <input
+                                                                                        type="checkbox"
+                                                                                        checked={selectedPO.extra_metadata?.is_urgent || false}
+                                                                                        disabled
+                                                                                        className="rounded border-gray-300 text-rose-600 focus:ring-rose-500 disabled:opacity-80"
+                                                                                    />
+                                                                                    <span className="text-xs font-semibold text-gray-700">
+                                                                                        Urgente: {selectedPO.extra_metadata?.is_urgent ? 'Sim' : 'Não'}
                                                                                     </span>
-                                                                                )}
-                                                                                {selectedPO.extra_metadata?.is_replacement && (
-                                                                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-extrabold bg-cyan-100 text-cyan-800 border border-cyan-300">
-                                                                                        🔄 CRÉDITO PRÉ-APROVADO (TROCA)
+                                                                                </label>
+                                                                                <label className="flex items-center gap-2 cursor-not-allowed">
+                                                                                    <input
+                                                                                        type="checkbox"
+                                                                                        checked={selectedPO.extra_metadata?.is_first_order || false}
+                                                                                        disabled
+                                                                                        className="rounded border-gray-300 text-amber-600 focus:ring-amber-500 disabled:opacity-80"
+                                                                                    />
+                                                                                    <span className="text-xs font-semibold text-gray-700">
+                                                                                        Primeiro Pedido: {selectedPO.extra_metadata?.is_first_order ? 'Sim' : 'Não'}
                                                                                     </span>
-                                                                                )}
-                                                                                {selectedPO.extra_metadata?.is_urgent && (
-                                                                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-100 text-rose-800 border border-rose-200">
-                                                                                        ⚡ Urgente
+                                                                                </label>
+                                                                                <label className="flex items-center gap-2 cursor-not-allowed">
+                                                                                    <input
+                                                                                        type="checkbox"
+                                                                                        checked={selectedPO.extra_metadata?.is_replacement || false}
+                                                                                        disabled
+                                                                                        className="rounded border-gray-300 text-purple-600 focus:ring-purple-500 disabled:opacity-80"
+                                                                                    />
+                                                                                    <span className="text-xs font-semibold text-gray-700">
+                                                                                        Reposição: {selectedPO.extra_metadata?.is_replacement ? 'Sim' : 'Não'}
                                                                                     </span>
-                                                                                )}
-                                                                                {!selectedPO.extra_metadata?.is_export && 
-                                                                                 !selectedPO.extra_metadata?.is_first_order && 
-                                                                                 !selectedPO.extra_metadata?.is_replacement && 
-                                                                                 !selectedPO.extra_metadata?.is_urgent && (
-                                                                                    <span className="text-xs text-gray-500 italic">Nenhum indicador especial registrado.</span>
-                                                                                )}
+                                                                                </label>
                                                                             </div>
                                                                         </div>
 
@@ -1054,15 +1156,14 @@ const KanbanPage = () => {
 
                                                                 {stageName === 'PCP' && (
                                                                     <div className="space-y-4">
-                                                                        {/* Task 4: The PCP Link */}
-                                                                        {calculatePOMargins(selectedPO).status === 'PENDENTE_PCP' && (
+                                                                        {(['APPROVED', 'approved', 'PCP', 'pcp'].includes(selectedPO.status_macro) || selectedPO.status === 'PCP') && (
                                                                             <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-3xs mb-4">
                                                                                 <div className="flex items-center gap-2">
                                                                                     <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-extrabold bg-amber-100 text-amber-800 border border-amber-300">
-                                                                                        PENDENTE PCP
+                                                                                        PCP ATIVO
                                                                                     </span>
                                                                                     <span className="text-xs text-amber-900 font-semibold">
-                                                                                        Custo industrial do SKU ainda não foi validado pelo PCP.
+                                                                                        Vincule ou revise o custo técnico para atualizar a margem real.
                                                                                     </span>
                                                                                 </div>
                                                                                 <button
@@ -1088,7 +1189,7 @@ const KanbanPage = () => {
                                                                                 </div>
                                                                                 <div>
                                                                                     <span className="text-xs text-gray-500 font-semibold uppercase block">Impedimento de Produção</span>
-                                                                                    <span className="font-medium text-gray-700">{selectedPO.extra_metadata?.production_impediment || 'Nenhum impedimento'}</span>
+                                                                                    <span className="font-medium text-gray-700">{getRobustImpediment() || 'Nenhum impedimento'}</span>
                                                                                 </div>
                                                                             </div>
                                                                         ) : (
@@ -1246,7 +1347,7 @@ const KanbanPage = () => {
                                                                                 <div className="flex gap-4">
                                                                                     {logisticsChecklist.foto_carga_path && (
                                                                                         <a 
-                                                                                            href={`/api/uploads/download?path=${encodeURIComponent(logisticsChecklist.foto_carga_path)}`}
+                                                                                            href={`/api/uploads/download?path=${encodeURIComponent((logisticsChecklist.foto_carga_path || '').replace(/^\//, ''))}`}
                                                                                             target="_blank" 
                                                                                             rel="noreferrer" 
                                                                                             className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 font-semibold underline"
@@ -1256,7 +1357,7 @@ const KanbanPage = () => {
                                                                                     )}
                                                                                     {logisticsChecklist.foto_canhoto_path && (
                                                                                         <a 
-                                                                                            href={`/api/uploads/download?path=${encodeURIComponent(logisticsChecklist.foto_canhoto_path)}`}
+                                                                                            href={`/api/uploads/download?path=${encodeURIComponent((logisticsChecklist.foto_canhoto_path || '').replace(/^\//, ''))}`}
                                                                                             target="_blank" 
                                                                                             rel="noreferrer" 
                                                                                             className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 font-semibold underline"
@@ -1390,7 +1491,7 @@ const KanbanPage = () => {
                                                                                                         <span>Evidência da Carga Salva!</span>
                                                                                                     </div>
                                                                                                     <a 
-                                                                                                        href={`/api/uploads/download?path=${encodeURIComponent(logisticsChecklist.foto_carga_path)}`}
+                                                                                                        href={`/api/uploads/download?path=${encodeURIComponent((logisticsChecklist.foto_carga_path || '').replace(/^\//, ''))}`}
                                                                                                         target="_blank" 
                                                                                                         rel="noreferrer" 
                                                                                                         className="text-xs text-blue-600 hover:text-blue-800 font-semibold underline block"
@@ -1447,7 +1548,7 @@ const KanbanPage = () => {
                                                                                                         <span>Evidência do Canhoto Salva!</span>
                                                                                                     </div>
                                                                                                     <a 
-                                                                                                        href={`/api/uploads/download?path=${encodeURIComponent(logisticsChecklist.foto_canhoto_path)}`}
+                                                                                                        href={`/api/uploads/download?path=${encodeURIComponent((logisticsChecklist.foto_canhoto_path || '').replace(/^\//, ''))}`}
                                                                                                         target="_blank" 
                                                                                                         rel="noreferrer" 
                                                                                                         className="text-xs text-blue-600 hover:text-blue-800 font-semibold underline block"
@@ -1500,6 +1601,116 @@ const KanbanPage = () => {
 
                                                                 {stageName === 'Financeiro' && (
                                                                     <div className="space-y-4">
+                                                                        {/* Painel de Evidências da Expedição (Visual 360º) */}
+                                                                        <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg space-y-3">
+                                                                            <h5 className="text-xs font-bold text-slate-800 uppercase tracking-wider border-b border-slate-200 pb-2 flex items-center gap-1.5">
+                                                                                <span>📋</span> Evidências Físicas & Fiscais (Expedição)
+                                                                            </h5>
+                                                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                                                                {/* Chave de Acesso NF-e */}
+                                                                                <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-2xs space-y-1">
+                                                                                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block">NF-e & Chave de Acesso</span>
+                                                                                    <div className="text-xs font-semibold text-slate-800">
+                                                                                        Número NF-e: <span className="font-mono text-blue-600 font-bold">{selectedPO.extra_metadata?.numero_nfe || 'Não informado'}</span>
+                                                                                    </div>
+                                                                                    <div className="text-[11px] font-medium text-slate-600 font-mono break-all bg-slate-50 p-1.5 rounded border border-slate-200 mt-1">
+                                                                                        {selectedPO.extra_metadata?.chave_acesso || 'Chave não informada'}
+                                                                                    </div>
+                                                                                </div>
+
+                                                                                {/* Foto da Carga */}
+                                                                                <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-2xs space-y-1 flex flex-col justify-between">
+                                                                                    <div>
+                                                                                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block">Foto da Carga Carregada</span>
+                                                                                        {logisticsChecklist.foto_carga_path ? (
+                                                                                            <div className="text-xs text-green-700 font-semibold flex items-center gap-1 mt-1">
+                                                                                                <span className="text-emerald-500">✓</span> Foto Salva com Sucesso!
+                                                                                            </div>
+                                                                                        ) : (
+                                                                                            <div className="text-xs text-amber-700 font-medium flex items-center gap-1 mt-1">
+                                                                                                <span>⚠</span> Nenhuma foto anexada
+                                                                                            </div>
+                                                                                        )}
+                                                                                    </div>
+                                                                                    {logisticsChecklist.foto_carga_path && (
+                                                                                        <a 
+                                                                                            href={`/api/uploads/download?path=${encodeURIComponent((logisticsChecklist.foto_carga_path || '').replace(/^\//, ''))}`}
+                                                                                            target="_blank" 
+                                                                                            rel="noreferrer" 
+                                                                                            className="text-xs text-blue-600 hover:text-blue-800 font-bold hover:underline block mt-2"
+                                                                                        >
+                                                                                            🔍 Visualizar Foto da Carga
+                                                                                        </a>
+                                                                                    )}
+                                                                                </div>
+
+                                                                                {/* PDF Canhoto / Comprovante */}
+                                                                                <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-2xs space-y-1 flex flex-col justify-between">
+                                                                                    <div>
+                                                                                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block">Canhoto Assinado / NF</span>
+                                                                                        {logisticsChecklist.foto_canhoto_path ? (
+                                                                                            <div className="text-xs text-green-700 font-semibold flex items-center gap-1 mt-1">
+                                                                                                <span className="text-emerald-500">✓</span> Evidência Salva com Sucesso!
+                                                                                            </div>
+                                                                                        ) : (
+                                                                                            <div className="text-xs text-amber-700 font-medium flex items-center gap-1 mt-1">
+                                                                                                <span>⚠</span> Nenhum arquivo anexado
+                                                                                            </div>
+                                                                                        )}
+                                                                                    </div>
+                                                                                    {logisticsChecklist.foto_canhoto_path && (
+                                                                                        <a 
+                                                                                            href={`/api/uploads/download?path=${encodeURIComponent((logisticsChecklist.foto_canhoto_path || '').replace(/^\//, ''))}`}
+                                                                                            target="_blank" 
+                                                                                            rel="noreferrer" 
+                                                                                            className="text-xs text-blue-600 hover:text-blue-800 font-bold hover:underline block mt-2"
+                                                                                        >
+                                                                                            📄 Abrir Canhoto Assinado
+                                                                                        </a>
+                                                                                    )}
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+
+                                                                        {/* Checklist de Auditoria Financeira */}
+                                                                        <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg space-y-3">
+                                                                            <h5 className="text-xs font-bold text-slate-800 uppercase tracking-wider border-b border-slate-200 pb-2">
+                                                                                Checklist de Auditoria Financeira
+                                                                            </h5>
+                                                                            <div className="flex flex-col gap-2.5">
+                                                                                <label className="flex items-center gap-2.5 text-xs text-slate-700 font-semibold cursor-pointer">
+                                                                                    <input
+                                                                                        type="checkbox"
+                                                                                        checked={checklistFinanceiro.margem_comissoes_validadas}
+                                                                                        onChange={(e) => handleFinanceiroChecklistChange('margem_comissoes_validadas', e.target.checked)}
+                                                                                        className="w-4 h-4 text-emerald-600 border-gray-300 rounded focus:ring-emerald-500 cursor-pointer"
+                                                                                        disabled={!isActive}
+                                                                                    />
+                                                                                    <span>Margem e Comissões Validadas</span>
+                                                                                </label>
+                                                                                <label className="flex items-center gap-2.5 text-xs text-slate-700 font-semibold cursor-pointer">
+                                                                                    <input
+                                                                                        type="checkbox"
+                                                                                        checked={checklistFinanceiro.nfe_chave_conferidas}
+                                                                                        onChange={(e) => handleFinanceiroChecklistChange('nfe_chave_conferidas', e.target.checked)}
+                                                                                        className="w-4 h-4 text-emerald-600 border-gray-300 rounded focus:ring-emerald-500 cursor-pointer"
+                                                                                        disabled={!isActive}
+                                                                                    />
+                                                                                    <span>NFE e Chave de Acesso Conferidas</span>
+                                                                                </label>
+                                                                                <label className="flex items-center gap-2.5 text-xs text-slate-700 font-semibold cursor-pointer">
+                                                                                    <input
+                                                                                        type="checkbox"
+                                                                                        checked={checklistFinanceiro.evidencias_fotograficas_verificadas}
+                                                                                        onChange={(e) => handleFinanceiroChecklistChange('evidencias_fotograficas_verificadas', e.target.checked)}
+                                                                                        className="w-4 h-4 text-emerald-600 border-gray-300 rounded focus:ring-emerald-500 cursor-pointer"
+                                                                                        disabled={!isActive}
+                                                                                    />
+                                                                                    <span>Evidências Fotográficas Verificadas</span>
+                                                                                </label>
+                                                                            </div>
+                                                                        </div>
+
                                                                         {/* Comissão */}
                                                                         <div className="p-4 bg-slate-50 border border-gray-200 rounded-lg">
                                                                             <div className="flex items-center justify-between mb-3 border-b border-gray-200 pb-2">
@@ -1658,7 +1869,7 @@ const KanbanPage = () => {
                                                                 metadata={item.extra_metadata}
                                                                 itemId={item.id}
                                                                 onUpdate={handleMetadataUpdate}
-                                                                readOnly={false}
+                                                                readOnly={true}
                                                             />
                                                         </div>
                                                     )}
@@ -1715,7 +1926,7 @@ const KanbanPage = () => {
                             <div className="flex items-center justify-between gap-3 p-6 border-t border-gray-200 bg-gray-50">
                                 <div className="flex items-center gap-3">
                                     {/* Return Button - visible for PCP and subsequent stages */}
-                                    {canReturn(selectedPO) && (
+                                    {canReturn(selectedPO) && selectedPO.status_macro !== 'ARCHIVED' && (
                                         <button
                                             onClick={() => setShowReturnModal(true)}
                                             className="flex items-center gap-2 px-4 py-2 bg-orange-600 border border-orange-500 text-white rounded-lg hover:bg-orange-700 transition-colors font-bold text-sm cursor-pointer shadow-md"
@@ -1727,8 +1938,39 @@ const KanbanPage = () => {
                                 </div>
 
                                 <div className="flex items-center gap-3">
+                                    {/* Final Action: Finalizar Auditoria e Arquivar */}
+                                    {selectedPO.status === 'Financeiro' && selectedPO.status_macro !== 'ARCHIVED' && (
+                                        <button
+                                            onClick={handleArchivePO}
+                                            disabled={
+                                                !checklistFinanceiro.margem_comissoes_validadas ||
+                                                !checklistFinanceiro.nfe_chave_conferidas ||
+                                                !checklistFinanceiro.evidencias_fotograficas_verificadas ||
+                                                (localFields.audit_comment || '').trim().length < 20
+                                            }
+                                            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition-colors shadow-sm text-sm ${
+                                                (checklistFinanceiro.margem_comissoes_validadas &&
+                                                checklistFinanceiro.nfe_chave_conferidas &&
+                                                checklistFinanceiro.evidencias_fotograficas_verificadas &&
+                                                (localFields.audit_comment || '').trim().length >= 20)
+                                                    ? 'bg-emerald-600 text-white hover:bg-emerald-700 cursor-pointer animate-pulse'
+                                                    : 'bg-gray-300 text-gray-500 cursor-not-allowed border border-gray-310'
+                                            }`}
+                                            title={
+                                                !(checklistFinanceiro.margem_comissoes_validadas &&
+                                                checklistFinanceiro.nfe_chave_conferidas &&
+                                                checklistFinanceiro.evidencias_fotograficas_verificadas &&
+                                                (localFields.audit_comment || '').trim().length >= 20)
+                                                    ? `Não é possível finalizar. ${getFinanceiroMissingFieldsTooltip()}`
+                                                    : 'Finalizar Auditoria e Arquivar Definitivamente'
+                                            }
+                                        >
+                                            ✅ Finalizar Auditoria e Arquivar
+                                        </button>
+                                    )}
+
                                     {/* Advance Button - enabled only if mandatory fields are filled */}
-                                    {canAdvance(selectedPO) && (
+                                    {canAdvance(selectedPO) && selectedPO.status_macro !== 'ARCHIVED' && (
                                         <button
                                             onClick={handleAdvanceStatus}
                                             disabled={!canAdvanceCurrentArea()}

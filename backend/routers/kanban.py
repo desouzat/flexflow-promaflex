@@ -71,6 +71,7 @@ def log_po_status_transition(
     is_exception: bool = False,
     extra_data: Optional[dict] = None
 ):
+    print(f"DEBUG: Logging transition from {from_status} to {to_status}")
     """
     Log status transition for all items of a PO into the AuditLog using high-security V2 hashing (with tenant_id).
     """
@@ -228,12 +229,42 @@ async def get_kanban_board(
             if po.partition_metadata and "logistics_checklist" in po.partition_metadata:
                 logistics_checklist = po.partition_metadata["logistics_checklist"]
             
+            # Calculate original delivery date and data_limite
+            from datetime import timedelta
+            orig_delivery = None
+            data_limite_val = None
+            if po.partition_metadata and "expected_delivery_date" in po.partition_metadata:
+                try:
+                    val = po.partition_metadata["expected_delivery_date"]
+                    if isinstance(val, str):
+                        orig_delivery = datetime.fromisoformat(val)
+                    elif isinstance(val, datetime):
+                        orig_delivery = val
+                except Exception:
+                    pass
+            if not orig_delivery:
+                for item in po.items:
+                    if item.extra_metadata and "delivery_date" in item.extra_metadata:
+                        try:
+                            val = item.extra_metadata["delivery_date"]
+                            if isinstance(val, str):
+                                if "/" in val:
+                                    d, m, y = val.split("/")
+                                    orig_delivery = datetime(int(y), int(m), int(d))
+                                else:
+                                    orig_delivery = datetime.fromisoformat(val)
+                            break
+                        except Exception:
+                            pass
+            if orig_delivery:
+                data_limite_val = orig_delivery - timedelta(days=2)
+
             po_response = POResponse(
                 id=str(po.id),
                 po_number=po.po_number,
                 client_name=getattr(po, 'client_name', None) or "Cliente Desconhecido",
                 supplier_name=getattr(po, 'client_name', None) or "Fornecedor Desconhecido",
-                status_macro=display_name,  # Use display name
+                status_macro=po.status_macro,  # Raw database status macro (e.g. 'APPROVED' for PCP)
                 status=display_name,  # Alias for frontend compatibility
                 items=items,
                 items_count=len(items),
@@ -243,7 +274,9 @@ async def get_kanban_board(
                 commission_rate=commission_rate,
                 commission_value=commission_value,
                 shipping_cost=Decimal(str(po.shipping_cost)),
-                expected_delivery_date=getattr(po, 'expected_delivery_date', None),
+                expected_delivery_date=data_limite_val if data_limite_val else orig_delivery,
+                delivery_date=orig_delivery,
+                data_limite=data_limite_val,
                 priority=getattr(po, 'priority', 'normal'),
                 extra_metadata=po.partition_metadata,
                 logistics_checklist=logistics_checklist,
@@ -460,12 +493,42 @@ async def get_purchase_order(
     if po.partition_metadata and "logistics_checklist" in po.partition_metadata:
         logistics_checklist = po.partition_metadata["logistics_checklist"]
     
-    return POResponse(
+    # Calculate original delivery date and data_limite
+    from datetime import timedelta
+    orig_delivery = None
+    data_limite_val = None
+    if po.partition_metadata and "expected_delivery_date" in po.partition_metadata:
+        try:
+            val = po.partition_metadata["expected_delivery_date"]
+            if isinstance(val, str):
+                orig_delivery = datetime.fromisoformat(val)
+            elif isinstance(val, datetime):
+                orig_delivery = val
+        except Exception:
+            pass
+    if not orig_delivery:
+        for item in po.items:
+            if item.extra_metadata and "delivery_date" in item.extra_metadata:
+                try:
+                    val = item.extra_metadata["delivery_date"]
+                    if isinstance(val, str):
+                        if "/" in val:
+                            d, m, y = val.split("/")
+                            orig_delivery = datetime(int(y), int(m), int(d))
+                        else:
+                            orig_delivery = datetime.fromisoformat(val)
+                    break
+                except Exception:
+                    pass
+    if orig_delivery:
+        data_limite_val = orig_delivery - timedelta(days=2)
+
+    response_data = POResponse(
         id=str(po.id),
         po_number=po.po_number,
         client_name=getattr(po, 'client_name', None) or "Cliente Desconhecido",
         supplier_name=getattr(po, 'client_name', None) or "Fornecedor Desconhecido",
-        status_macro=STATUS_DISPLAY_MAP.get(po.status_macro, po.status_macro),
+        status_macro=po.status_macro,  # Raw database status macro (e.g. 'APPROVED' for PCP)
         status=STATUS_DISPLAY_MAP.get(po.status_macro, po.status_macro),
         items=items,
         items_count=len(items),
@@ -475,7 +538,9 @@ async def get_purchase_order(
         commission_rate=commission_rate,
         commission_value=commission_value,
         shipping_cost=Decimal(str(po.shipping_cost)),
-        expected_delivery_date=getattr(po, 'expected_delivery_date', None),
+        expected_delivery_date=data_limite_val if data_limite_val else orig_delivery,
+        delivery_date=orig_delivery,
+        data_limite=data_limite_val,
         priority=getattr(po, 'priority', 'normal'),
         extra_metadata=po.partition_metadata,
         logistics_checklist=logistics_checklist,
@@ -483,6 +548,13 @@ async def get_purchase_order(
         updated_at=po.updated_at,
         created_by=str(po.created_by) if po.created_by else None
     )
+    print("\n================== BACKEND TRACEABILITY LOG ==================")
+    print(f"PO Details Requested: {po_id}")
+    print(f"Client Name: {response_data.client_name}")
+    print(f"Expected Delivery Date: {response_data.expected_delivery_date}")
+    print(f"JSON Output:\n{response_data.model_dump_json(indent=2)}")
+    print("==============================================================\n")
+    return response_data
 
 
 @router.get("/pos/{po_id}/handoff-history")
@@ -495,7 +567,8 @@ async def get_handoff_history(
     Get handoff history and SLA analytics for a specific PO.
     """
     import uuid
-    from backend.models import AuditLog
+    from backend.models import AuditLog, OrderItem
+    from datetime import datetime
     
     try:
         uuid.UUID(po_id)
@@ -516,12 +589,21 @@ async def get_handoff_history(
             detail=f"Purchase Order {po_id} not found"
         )
         
-    # Reconstruct chronological traces
-    logs = []
-    if po.items:
-        logs = db.query(AuditLog).filter(
-            AuditLog.item_id == po.items[0].id
-        ).order_by(AuditLog.created_at.asc()).all()
+    # Reconstruct chronological traces joining OrderItem
+    logs = db.query(AuditLog).join(OrderItem).filter(
+        OrderItem.po_id == po.id
+    ).order_by(AuditLog.created_at.asc()).all()
+    
+    # Deduplicate logs based on from_status, to_status, and date
+    seen = set()
+    unique_logs = []
+    for log in logs:
+        timestamp_str = log.created_at.strftime("%Y-%m-%d %H:%M:%S") if log.created_at else ""
+        key = (log.from_status, log.to_status, timestamp_str)
+        if key not in seen:
+            seen.add(key)
+            unique_logs.append(log)
+    logs = unique_logs
         
     timeline = []
     initial_status = logs[0].from_status if (logs and logs[0].from_status) else "DRAFT"
@@ -563,6 +645,8 @@ async def get_handoff_history(
             return "Expedição"
         elif status_db in ["AUDIT_PENDING", "COMPLETED", "ANALISE_CREDITO"]:
             return "Financeiro"
+        elif status_db in ["ARCHIVED"]:
+            return "Arquivado"
         return "Comercial"
         
     grouped_areas = []
@@ -590,8 +674,22 @@ async def get_handoff_history(
     if current_area:
         grouped_areas.append(current_area)
         
-    now = datetime.utcnow()
+    def to_naive(dt):
+        if dt is None:
+            return None
+        return dt.replace(tzinfo=None) if dt.tzinfo else dt
+
+    now_naive = to_naive(datetime.utcnow())
+    po_created_naive = to_naive(po.created_at)
     
+    is_archived = (po.status_macro == "ARCHIVED")
+    if is_archived:
+        # SLA timer stops at last archiving transition log
+        last_transition_naive = to_naive(logs[-1].created_at) if logs else to_naive(po.updated_at)
+        if not last_transition_naive:
+            last_transition_naive = po_created_naive
+        now_naive = last_transition_naive
+        
     def format_duration(td):
         total_seconds = int(td.total_seconds())
         if total_seconds < 60:
@@ -613,20 +711,15 @@ async def get_handoff_history(
         
     formatted_history = []
     for item in grouped_areas:
-        arrival = item["arrival"]
-        departure = item["departure"]
-        end_for_duration = departure if departure else now
+        arrival = to_naive(item["arrival"])
+        departure = to_naive(item["departure"])
+        end_for_duration = departure if departure else now_naive
         
-        if arrival.tzinfo:
-            arrival = arrival.replace(tzinfo=None)
-        if end_for_duration.tzinfo:
-            end_for_duration = end_for_duration.replace(tzinfo=None)
-            
         duration_td = end_for_duration - arrival
         duration_str = format_duration(duration_td)
         
-        arrival_str = arrival.strftime("%d/%m/%Y %H:%M:%S")
-        departure_str = departure.strftime("%d/%m/%Y %H:%M:%S") if departure else "Em andamento"
+        arrival_str = arrival.strftime("%d/%m/%Y %H:%M:%S") if arrival else ""
+        departure_str = departure.strftime("%d/%m/%Y %H:%M:%S") if departure else ("Concluído" if is_archived else "Em andamento")
         
         formatted_history.append({
             "area": item["area"],
@@ -657,28 +750,32 @@ async def get_handoff_history(
         "PCP": 24.0,
         "Produção": 72.0,
         "Expedição": 48.0,
-        "Financeiro": 48.0
+        "Financeiro": 48.0,
+        "Arquivado": 0.0
     }
     
     active_area = STATUS_DISPLAY_MAP.get(po.status_macro, "Comercial")
     current_area_sla_hours = area_slas.get(active_area, 48.0) * sla_factor
     
     # Total elapsed
-    po_created_naive = po.created_at.replace(tzinfo=None) if po.created_at.tzinfo else po.created_at
-    total_elapsed_hours = (now - po_created_naive).total_seconds() / 3600.0
-    
+    total_elapsed_hours = 0.0
+    if po_created_naive:
+        total_elapsed_hours = (now_naive - po_created_naive).total_seconds() / 3600.0
+        
     # Current Area elapsed
     current_area_elapsed_hours = 0.0
-    if formatted_history:
+    if is_archived:
+        current_area_elapsed_hours = 0.0
+    elif formatted_history:
         current_area_elapsed_hours = formatted_history[-1]["duration_seconds"] / 3600.0
         
-    # Construct chronological transitions history (Task 5)
+    # Construct chronological transitions history
     transitions = []
     
     # Initial status transition (po creation)
     initial_area = STATUS_DISPLAY_MAP.get(initial_status, initial_status)
     transitions.append({
-        "date": po.created_at.strftime("%d/%m/%Y %H:%M:%S"),
+        "date": po_created_naive.strftime("%d/%m/%Y %H:%M:%S") if po_created_naive else "",
         "user": creator_name,
         "from_to": f"Criado ➔ {initial_area}",
         "reason": ""
@@ -691,7 +788,7 @@ async def get_handoff_history(
             log_user = log.changed_by_user.name or log.changed_by_user.email
             
         from_area = STATUS_DISPLAY_MAP.get(log.from_status, log.from_status) if log.from_status else "Comercial"
-        to_area = STATUS_DISPLAY_MAP.get(log.to_status, log.to_status)
+        to_area = STATUS_DISPLAY_MAP.get(log.to_status, log.to_status) if log.to_status != "ARCHIVED" else "Arquivado"
         
         reason = log.justification or ""
         if log.extra_data:
@@ -699,9 +796,11 @@ async def get_handoff_history(
                 reason = log.extra_data.get("return_reason")
             elif log.extra_data.get("partition_reason"):
                 reason = log.extra_data.get("partition_reason")
+            elif log.extra_data.get("audit_comment"):
+                reason = log.extra_data.get("audit_comment")
                 
         transitions.append({
-            "date": log.created_at.strftime("%d/%m/%Y %H:%M:%S"),
+            "date": to_naive(log.created_at).strftime("%d/%m/%Y %H:%M:%S") if log.created_at else "",
             "user": log_user,
             "from_to": f"{from_area} ➔ {to_area}",
             "reason": reason
@@ -715,7 +814,8 @@ async def get_handoff_history(
         "total_elapsed_hours": total_elapsed_hours,
         "current_area": active_area,
         "current_area_sla_hours": current_area_sla_hours,
-        "current_area_elapsed_hours": current_area_elapsed_hours
+        "current_area_elapsed_hours": current_area_elapsed_hours,
+        "is_archived": is_archived
     }
 
 
@@ -748,6 +848,12 @@ async def update_po_area_fields(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Purchase Order {po_id} not found"
+        )
+        
+    if po.status_macro == "ARCHIVED":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Não é permitido editar um pedido arquivado."
         )
         
     if po.partition_metadata is None:
@@ -1018,6 +1124,12 @@ async def update_manual_commission(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Pedido {po_id} não encontrado"
         )
+        
+    if po.status_macro == "ARCHIVED":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Não é permitido alterar a comissão de um pedido arquivado."
+        )
     
     # Update commission rate in PO metadata
     if not po.partition_metadata:
@@ -1116,6 +1228,12 @@ async def update_logistics_checklist(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Pedido {po_id} não encontrado"
+        )
+        
+    if po.status_macro == "ARCHIVED":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Não é permitido alterar o checklist logístico de um pedido arquivado."
         )
     
     # Update logistics checklist in metadata
@@ -1481,4 +1599,79 @@ async def suggest_partition(
         "from_status": STATUS_DISPLAY_MAP.get(from_status, from_status),
         "to_status": STATUS_DISPLAY_MAP.get("WAITING_COMMERCIAL_PARTITION", "Aguardando Partição"),
         "reason": reason
+    }
+
+
+@router.post("/pos/{po_id}/archive")
+async def archive_purchase_order(
+    po_id: str,
+    payload: dict,
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Finalize audit, archive the PO definitively (removing from Kanban), and seal blockchain hash.
+    """
+    import uuid
+    from datetime import datetime
+    try:
+        uuid.UUID(po_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Pedido {po_id} não encontrado"
+        )
+
+    po = db.query(PurchaseOrder).filter(
+        PurchaseOrder.id == po_id,
+        PurchaseOrder.tenant_id == current_user.tenant_id
+    ).first()
+    
+    if not po:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Pedido {po_id} não encontrado"
+        )
+        
+    audit_comment = payload.get("audit_comment", "").strip()
+    if len(audit_comment) < 20:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="O comentário de auditoria deve conter pelo menos 20 caracteres."
+        )
+        
+    # Save comment to metadata
+    if po.partition_metadata is None:
+        po.partition_metadata = {}
+    meta = dict(po.partition_metadata)
+    meta["audit_comment"] = audit_comment
+    po.partition_metadata = meta
+    
+    from_status = po.status_macro
+    to_status = "ARCHIVED"
+    
+    po.status_macro = to_status
+    po.updated_at = datetime.utcnow()
+    
+    # Log status transition to seal blockchain hash
+    log_po_status_transition(
+        db=db,
+        po=po,
+        from_status=from_status,
+        to_status=to_status,
+        current_user=current_user,
+        justification=f"AUDITORIA FINALIZADA E ARQUIVADA: {audit_comment}",
+        is_exception=False,
+        extra_data={
+            "action_type": "ARCHIVE",
+            "audit_comment": audit_comment
+        }
+    )
+    
+    db.commit()
+    return {
+        "success": True,
+        "message": "Pedido de compra finalizado, auditado e arquivado com sucesso!",
+        "po_id": po_id,
+        "status": to_status
     }

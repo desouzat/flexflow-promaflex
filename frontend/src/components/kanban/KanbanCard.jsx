@@ -16,6 +16,7 @@ import { STRATEGIC_INDICATORS } from '../../config/helpConfig'
 import { calculatePOMargins } from '../../utils/marginCalculator'
 
 const KanbanCard = ({ po, onCardClick, compactView = false }) => {
+    console.log('Rendering PO:', po);
     // Ensure po object has safe defaults
     const getRobustName = (val) => {
         if (!val || val === 'null' || val === 'None' || String(val).trim() === '') {
@@ -31,8 +32,9 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
         supplier_name: getRobustName(po?.supplier_name || po?.client_name),
         status: po?.status || 'pending',
         total_value: po?.total_value || 0,
-        expected_delivery_date: po?.delivery_date || po?.expected_delivery_date || null,
-        delivery_date: po?.delivery_date || po?.expected_delivery_date || null,
+        expected_delivery_date: po?.data_limite || po?.expected_delivery_date || null,
+        delivery_date: po?.delivery_date || null,
+        data_limite: po?.data_limite || null,
         items_count: po?.items_count || 0,
         priority: po?.priority || 'normal',
         ...po

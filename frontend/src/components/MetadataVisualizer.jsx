@@ -29,7 +29,12 @@ const KEY_TRANSLATIONS = {
     freight_ship_later: 'Enviar Frete Depois',
     justification: 'Justificativa',
     reason: 'Motivo',
-    priority_note: 'Nota Prioritária'
+    priority_note: 'Nota Prioritária',
+    ipi: 'IPI (%)',
+    unit: 'Unidade',
+    width: 'Largura',
+    length: 'Comprimento',
+    balance: 'Saldo'
 }
 
 const humanizeKey = (key) => {
@@ -86,7 +91,7 @@ const MetadataVisualizer = ({ metadata, itemId, onUpdate, readOnly = false }) =>
         if (value === null || value === undefined) {
             return (
                 <div style={{ marginLeft: `${indent}px` }} className="text-gray-400 italic">
-                    null
+                    N/A
                 </div>
             )
         }

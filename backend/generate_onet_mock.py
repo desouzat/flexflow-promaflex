@@ -135,8 +135,9 @@ def generate_onet_mock():
         if is_personalized:
             description += ' - PERSONALIZADO'
         
-        # Determinar se é Replacement (20% dos casos)
-        is_replacement = random.random() < 0.2
+        # Determinar se é Replacement baseado no índice do PO para garantir consistência e ter exatamente 19 POs
+        po_idx = i % 19
+        is_replacement = (po_idx % 3 == 0)
         
         # Bloqueio de crédito (15% dos casos)
         is_blocked = random.random() < 0.15
@@ -175,10 +176,9 @@ def generate_onet_mock():
         if is_replacement:
             balance = random.randint(0, quantity // 2)
         
-        # Número do pedido - Agrupar alguns itens no mesmo PO
+        # Número do pedido - Agrupar itens para ter exatamente 19 POs únicos
         po_type = 'REP' if is_replacement else 'ONET'
-        # Create 10 different POs, so multiple items per PO
-        po_base = 1001 + (i // 5)  # Every 5 items share a PO
+        po_base = 1001 + po_idx
         po_number = f'{po_type}-2026-{po_base}'
         
         # Track PO totals for Valor Total do Pedido

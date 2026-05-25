@@ -769,6 +769,12 @@ async def confirm_staging(
     user_uuid = uuid.UUID(str(current_user.id))
 
     try:
+        try:
+            with open("uvicorn_live_import.log", "w", encoding="utf-8") as f:
+                f.truncate(0)
+        except Exception:
+            pass
+
         for po in payload.pos:
             # 1. Cleanly delete existing PO with identical po_number under this tenant
             existing_po = (
@@ -793,6 +799,13 @@ async def confirm_staging(
             po_status_macro = "ANALISE_CREDITO" if has_blocked_item else "DRAFT"
 
             # 3. Create new PurchaseOrder
+            first_item_delivery = None
+            if po.items:
+                for item in po.items:
+                    if item.delivery_date:
+                        first_item_delivery = item.delivery_date
+                        break
+
             new_po = PurchaseOrder(
                 id=uuid.uuid4(),
                 tenant_id=tenant_uuid,
@@ -801,7 +814,10 @@ async def confirm_staging(
                 created_by=user_uuid,
                 shipping_cost=po.freight_cost + po.additional_costs,
                 po_total_value=po.po_total_value,
-                partition_metadata={"client_name": po.client_name}
+                partition_metadata={
+                    "client_name": po.client_name,
+                    "expected_delivery_date": first_item_delivery
+                }
             )
             db.add(new_po)
             db.flush()
@@ -897,9 +913,15 @@ async def confirm_staging(
                             "workflow": "FINANCE_BLOCK_ON_IMPORT"
                         }
                     )
-                    db.add(audit_log)
-
-        db.commit()
+            # Commit each PO in its own transaction to guarantee batch persistence stability
+            db.commit()
+            success_msg = f"SUCCESS: PO {po.po_number} saved to database"
+            print(success_msg, flush=True)
+            try:
+                with open("uvicorn_live_import.log", "a", encoding="utf-8") as f:
+                    f.write(success_msg + "\n")
+            except Exception:
+                pass
 
     except Exception as exc:
         db.rollback()

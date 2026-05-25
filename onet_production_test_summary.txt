@@ -2,22 +2,22 @@ FLEXFLOW - RESUMO DO ARQUIVO DE TESTE DE PRODUÇÃO (22 CAMPOS)
 ================================================================================
 
 Arquivo gerado: onet_production_test_50_rows.xlsx
-Data de geração: 19/05/2026 10:50:03
+Data de geração: 25/05/2026 17:16:54
 Total de linhas: 50
 Total de campos: 22
-Total de POs únicos: 15
+Total de POs únicos: 19
 
 ESTATÍSTICAS:
-  - SKUs existentes: 39
-  - SKUs novos: 11
-  - Crédito bloqueado: 5
-  - Pedidos Replacement: 6
-  - Itens personalizados: 15
-  - Pedidos com atraso: 7
+  - SKUs existentes: 35
+  - SKUs novos: 15
+  - Crédito bloqueado: 7
+  - Pedidos Replacement: 18
+  - Itens personalizados: 12
+  - Pedidos com atraso: 0
 
 ESTATÍSTICAS FINANCEIRAS:
-  - Valor Total dos Itens: R$ 2,103,025.00
-  - Valor Unitário Médio: R$ 73.99
+  - Valor Total dos Itens: R$ 2,349,457.00
+  - Valor Unitário Médio: R$ 74.48
 
 CAMPOS (22):
    1. Pedido 

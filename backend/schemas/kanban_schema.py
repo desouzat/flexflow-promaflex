@@ -41,6 +41,8 @@ class POResponse(BaseModel):
     commission_value: Optional[Decimal] = Field(None, description="Commission value in currency")
     shipping_cost: Optional[Decimal] = Field(None, description="Shipping cost")
     expected_delivery_date: Optional[datetime] = Field(None, description="Expected delivery date")
+    delivery_date: Optional[datetime] = Field(None, description="Original delivery date (Excel)")
+    data_limite: Optional[datetime] = Field(None, description="Data Limite de Entrega (delivery_date - 2 days)")
     priority: Optional[str] = Field("normal", description="Priority level (normal, high)")
     extra_metadata: Optional[dict] = Field(None, description="Extra metadata for PO")
     logistics_checklist: Optional[dict] = Field(None, description="Logistics checklist data")
