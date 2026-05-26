@@ -11,6 +11,13 @@ import ErrorBoundary from '../components/ErrorBoundary'
  * Permite CRUD completo de custos de materiais e tabela de comissões.
  */
 const CostsPage = () => {
+    const sanitizeNumberInput = (val) => {
+        if (typeof val === 'string' && /^0\d+/.test(val)) {
+            return val.replace(/^0+/, '');
+        }
+        return val;
+    };
+
     const [activeTab, setActiveTab] = useState('materials') // 'materials' or 'commissions'
     const [materials, setMaterials] = useState([])
     const [commissions, setCommissions] = useState([])
@@ -390,7 +397,7 @@ const CostsPage = () => {
                                                 type="number"
                                                 step="0.01"
                                                 value={formData.custo_mp_kg}
-                                                onChange={(e) => setFormData({ ...formData, custo_mp_kg: e.target.value })}
+                                                onChange={(e) => setFormData({ ...formData, custo_mp_kg: sanitizeNumberInput(e.target.value) })}
                                                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                                                 placeholder="15.50"
                                             />
@@ -403,7 +410,7 @@ const CostsPage = () => {
                                                 type="number"
                                                 step="0.0001"
                                                 value={formData.rendimento}
-                                                onChange={(e) => setFormData({ ...formData, rendimento: e.target.value })}
+                                                onChange={(e) => setFormData({ ...formData, rendimento: sanitizeNumberInput(e.target.value) })}
                                                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                                                 placeholder="0.5"
                                             />
@@ -416,7 +423,7 @@ const CostsPage = () => {
                                                 type="number"
                                                 step="0.01"
                                                 value={formData.indice_impostos}
-                                                onChange={(e) => setFormData({ ...formData, indice_impostos: e.target.value })}
+                                                onChange={(e) => setFormData({ ...formData, indice_impostos: sanitizeNumberInput(e.target.value) })}
                                                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                                                 placeholder="22.25"
                                             />
@@ -491,7 +498,7 @@ const CostsPage = () => {
                                                                     type="number"
                                                                     step="0.01"
                                                                     value={formData.custo_mp_kg}
-                                                                    onChange={(e) => setFormData({ ...formData, custo_mp_kg: e.target.value })}
+                                                                    onChange={(e) => setFormData({ ...formData, custo_mp_kg: sanitizeNumberInput(e.target.value) })}
                                                                     className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
                                                                 />
                                                             </td>
@@ -500,7 +507,7 @@ const CostsPage = () => {
                                                                     type="number"
                                                                     step="0.0001"
                                                                     value={formData.rendimento}
-                                                                    onChange={(e) => setFormData({ ...formData, rendimento: e.target.value })}
+                                                                    onChange={(e) => setFormData({ ...formData, rendimento: sanitizeNumberInput(e.target.value) })}
                                                                     className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
                                                                 />
                                                             </td>
@@ -509,7 +516,7 @@ const CostsPage = () => {
                                                                     type="number"
                                                                     step="0.01"
                                                                     value={formData.indice_impostos}
-                                                                    onChange={(e) => setFormData({ ...formData, indice_impostos: e.target.value })}
+                                                                    onChange={(e) => setFormData({ ...formData, indice_impostos: sanitizeNumberInput(e.target.value) })}
                                                                     className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
                                                                 />
                                                             </td>
@@ -623,7 +630,7 @@ const CostsPage = () => {
                                                             type="number"
                                                             step="0.01"
                                                             value={commissionFormData.min_margin}
-                                                            onChange={(e) => setCommissionFormData({ ...commissionFormData, min_margin: e.target.value })}
+                                                            onChange={(e) => setCommissionFormData({ ...commissionFormData, min_margin: sanitizeNumberInput(e.target.value) })}
                                                             className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
                                                         />
                                                     </td>
@@ -632,7 +639,7 @@ const CostsPage = () => {
                                                             type="number"
                                                             step="0.01"
                                                             value={commissionFormData.max_margin}
-                                                            onChange={(e) => setCommissionFormData({ ...commissionFormData, max_margin: e.target.value })}
+                                                            onChange={(e) => setCommissionFormData({ ...commissionFormData, max_margin: sanitizeNumberInput(e.target.value) })}
                                                             className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
                                                         />
                                                     </td>
@@ -641,7 +648,7 @@ const CostsPage = () => {
                                                             type="number"
                                                             step="0.01"
                                                             value={commissionFormData.commission_rate}
-                                                            onChange={(e) => setCommissionFormData({ ...commissionFormData, commission_rate: e.target.value })}
+                                                            onChange={(e) => setCommissionFormData({ ...commissionFormData, commission_rate: sanitizeNumberInput(e.target.value) })}
                                                             className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
                                                         />
                                                     </td>

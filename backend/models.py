@@ -207,13 +207,15 @@ class PurchaseOrder(Base):
     STATUS_WAITING_COMMERCIAL_PARTITION = "WAITING_COMMERCIAL_PARTITION"
     STATUS_ANALISE_CREDITO = "ANALISE_CREDITO"
     STATUS_ARCHIVED = "ARCHIVED"
+    STATUS_ARCHIVED_PARTITIONED = "ARCHIVED_PARTITIONED"
+    STATUS_WAITING_MATERIAL = "WAITING_MATERIAL"
     
     VALID_STATUSES = [
         STATUS_DRAFT, STATUS_SUBMITTED, STATUS_APPROVED,
         STATUS_MANUFACTURING, STATUS_SHIPPING, STATUS_FINANCE,
         STATUS_COMPLETED, STATUS_CANCELLED,
         STATUS_WAITING_COMMERCIAL_PARTITION, STATUS_ANALISE_CREDITO,
-        STATUS_ARCHIVED
+        STATUS_ARCHIVED, STATUS_ARCHIVED_PARTITIONED, STATUS_WAITING_MATERIAL
     ]
     
     # Colunas
@@ -272,6 +274,19 @@ class PurchaseOrder(Base):
         JSONB,
         nullable=True,
         comment="Metadata about partition: original_items, split_date, freight_strategy, etc."
+    )
+    
+    # SLA pause fields
+    sla_paused_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Timestamp when SLA timer was paused"
+    )
+    total_hold_time_seconds: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        nullable=False,
+        comment="Accumulated pause time in seconds for SLA freeze"
     )
     
     # Financial fields (22-field ONET structure)

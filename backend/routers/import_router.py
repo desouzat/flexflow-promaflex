@@ -796,7 +796,7 @@ async def confirm_staging(
                 and item.extra_metadata.finance_justification
                 for item in po.items
             )
-            po_status_macro = "FINANCE" if has_blocked_item else "SUBMITTED"
+            po_status_macro = "ANALISE_CREDITO" if has_blocked_item else "SUBMITTED"
 
             # 3. Create new PurchaseOrder
             first_item_delivery = None
@@ -913,6 +913,8 @@ async def confirm_staging(
                             "workflow": "FINANCE_BLOCK_ON_IMPORT"
                         }
                     )
+                    db.add(audit_log)
+                    db.flush()
             # Commit each PO in its own transaction to guarantee batch persistence stability
             db.commit()
             success_msg = f"SUCCESS: PO {po.po_number} saved to database"

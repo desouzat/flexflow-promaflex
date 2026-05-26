@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { ChevronDown, ChevronRight, Edit2, Save, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, Edit2, Save, X, Paperclip } from 'lucide-react'
 
 const KEY_TRANSLATIONS = {
     is_export: 'Exportação',
@@ -34,7 +34,29 @@ const KEY_TRANSLATIONS = {
     unit: 'Unidade',
     width: 'Largura',
     length: 'Comprimento',
-    balance: 'Saldo'
+    balance: 'Saldo',
+    freight: 'Frete',
+    Freight: 'Frete',
+    salesperson: 'Vendedor',
+    Salesperson: 'Vendedor',
+    billing_date: 'Data Faturamento',
+    'Billing Date': 'Data Faturamento',
+    block_status: 'Bloqueio',
+    'Block Status': 'Bloqueio',
+    icms_percent: '% ICMS',
+    'Icms Percent': '% ICMS',
+    delivery_date: 'Data Entrega',
+    'Delivery Date': 'Data Entrega',
+    payment_terms: 'Condição Pagamento',
+    'Payment Terms': 'Condição Pagamento',
+    customization_notes: 'Descritivo Customização',
+    'Customization Notes': 'Descritivo Customização',
+    finance_justification: 'Justificativa Financeiro',
+    'Finance Justification': 'Justificativa Financeiro',
+    delay: 'Atraso (Dias)',
+    Delay: 'Atraso (Dias)',
+    shipping_cost: 'Custo de Envio',
+    attachment_path: 'Foto do Item (Anexo)'
 }
 
 const humanizeKey = (key) => {
@@ -116,6 +138,31 @@ const MetadataVisualizer = ({ metadata, itemId, onUpdate, readOnly = false }) =>
 
         // String
         if (typeof value === 'string') {
+            const isPath = (() => {
+                const keyLower = String(key).toLowerCase();
+                const valLower = String(value).toLowerCase();
+                const hasPathKey = keyLower.includes('path') || keyLower.includes('foto') || keyLower.includes('anexo') || keyLower.includes('file') || keyLower.includes('url');
+                const hasFileExtension = /\.(jpg|jpeg|png|gif|pdf|doc|docx|xls|xlsx|csv|txt|zip)$/i.test(valLower);
+                const isUrlOrFilePath = valLower.startsWith('http') || valLower.startsWith('/') || valLower.startsWith('\\') || valLower.includes('/') || valLower.includes('\\');
+                return hasPathKey || (hasFileExtension && isUrlOrFilePath);
+            })();
+
+            if (isPath) {
+                return (
+                    <div style={{ marginLeft: `${indent}px` }} className="flex items-center gap-1.5 mt-0.5">
+                        <a 
+                            href={`/api/uploads/download?path=${encodeURIComponent(value)}`} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center justify-center p-2 bg-blue-50 border border-blue-200 hover:bg-blue-100 text-blue-600 hover:text-blue-850 rounded-lg transition-all shadow-xs"
+                            title="Baixar anexo"
+                        >
+                            <Paperclip className="w-4 h-4" />
+                        </a>
+                    </div>
+                )
+            }
+
             return (
                 <div style={{ marginLeft: `${indent}px` }} className="text-gray-700">
                     "{value}"
@@ -202,7 +249,7 @@ const MetadataVisualizer = ({ metadata, itemId, onUpdate, readOnly = false }) =>
         <div className="bg-white border border-gray-200 rounded-lg">
             {/* Header */}
             <div className="flex items-center justify-between p-3 border-b border-gray-200 bg-gray-50">
-                <h3 className="font-semibold text-gray-900 text-sm">Metadata Customizada</h3>
+                <h3 className="font-semibold text-gray-900 text-sm">Detalhe do Pedido</h3>
                 {!readOnly && !isEditing && (
                     <button
                         onClick={() => setIsEditing(true)}
@@ -248,18 +295,38 @@ const MetadataVisualizer = ({ metadata, itemId, onUpdate, readOnly = false }) =>
                     </div>
                 ) : (
                     <div className="space-y-2">
-                        {Object.keys(metadata).map((key) => (
-                            <div key={key} className="border-b border-gray-100 pb-2 last:border-0">
-                                <div className="flex items-start gap-2">
-                                    <span className="text-gray-700 font-semibold text-sm min-w-[140px]">
-                                        {humanizeKey(key)}:
-                                    </span>
-                                    <div className="flex-1">
-                                        {renderValue(metadata[key], key)}
+                        {Object.keys(metadata)
+                            .filter((key) => {
+                                const k = key.toLowerCase();
+                                return ![
+                                    'is_export',
+                                    'is_first_order',
+                                    'is_new_client',
+                                    'is_replacement',
+                                    'is_personalized',
+                                    'is_urgent',
+                                    'client_name',
+                                    'apply_sla_reduction',
+                                    'exportação',
+                                    'is new client',
+                                    'troca/reposição',
+                                    'is personalized',
+                                    'nome do cliente',
+                                    'apply sla reduction'
+                                ].includes(k);
+                            })
+                            .map((key) => (
+                                <div key={key} className="border-b border-gray-100 pb-2 last:border-0">
+                                    <div className="flex items-start gap-2">
+                                        <span className="text-gray-700 font-semibold text-sm min-w-[140px]">
+                                            {humanizeKey(key)}:
+                                        </span>
+                                        <div className="flex-1">
+                                            {renderValue(metadata[key], key)}
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                        ))}
+                            ))}
                     </div>
                 )}
             </div>

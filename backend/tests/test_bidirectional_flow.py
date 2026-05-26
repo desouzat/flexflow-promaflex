@@ -20,10 +20,10 @@ def test_status_flow_mapping():
     expected_forward = {
         "DRAFT": "SUBMITTED",
         "SUBMITTED": "APPROVED",
-        "APPROVED": "IN_PROGRESS",
-        "IN_PROGRESS": "WAITING_DISPATCH",
-        "WAITING_DISPATCH": "AUDIT_PENDING",
-        "AUDIT_PENDING": "COMPLETED",
+        "APPROVED": "MANUFACTURING",
+        "MANUFACTURING": "SHIPPING",
+        "SHIPPING": "FINANCE",
+        "FINANCE": "COMPLETED",
         "COMPLETED": None,
         "WAITING_COMMERCIAL_PARTITION": "APPROVED"
     }
@@ -43,12 +43,12 @@ def test_status_flow_mapping():
     print("\n[BACKWARD FLOW]")
     expected_backward = {
         "DRAFT": None,
-        "SUBMITTED": "DRAFT",
+        "SUBMITTED": None,
         "APPROVED": "SUBMITTED",
-        "IN_PROGRESS": "APPROVED",
-        "WAITING_DISPATCH": "IN_PROGRESS",
-        "AUDIT_PENDING": "WAITING_DISPATCH",
-        "COMPLETED": "AUDIT_PENDING",
+        "MANUFACTURING": "APPROVED",
+        "SHIPPING": "MANUFACTURING",
+        "FINANCE": "SHIPPING",
+        "COMPLETED": "FINANCE",
         "WAITING_COMMERCIAL_PARTITION": None
     }
     
@@ -124,9 +124,9 @@ def test_valid_transitions():
         "DRAFT",
         "SUBMITTED",
         "APPROVED",
-        "IN_PROGRESS",
-        "WAITING_DISPATCH",
-        "AUDIT_PENDING",
+        "MANUFACTURING",
+        "SHIPPING",
+        "FINANCE",
         "COMPLETED"
     ]
     
@@ -144,12 +144,11 @@ def test_valid_transitions():
     # Test rejection path
     print("\n[REJECTION PATH]")
     rejection_tests = [
-        ("SUBMITTED", "DRAFT", "PCP can reject to Comercial"),
-        ("APPROVED", "SUBMITTED", "Production can return to PCP"),
-        ("IN_PROGRESS", "APPROVED", "Dispatch can return to Production"),
-        ("WAITING_DISPATCH", "IN_PROGRESS", "Dispatch can return to Production"),
-        ("AUDIT_PENDING", "WAITING_DISPATCH", "Finance can return to Dispatch"),
-        ("COMPLETED", "AUDIT_PENDING", "Completed can return to Finance"),
+        ("APPROVED", "SUBMITTED", "PCP can reject to Comercial"),
+        ("MANUFACTURING", "APPROVED", "Production can return to PCP"),
+        ("SHIPPING", "MANUFACTURING", "Dispatch can return to Production"),
+        ("FINANCE", "SHIPPING", "Finance can return to Dispatch"),
+        ("COMPLETED", "FINANCE", "Completed can return to Finance"),
     ]
     
     for current, expected_prev, description in rejection_tests:

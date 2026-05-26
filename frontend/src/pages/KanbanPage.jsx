@@ -81,10 +81,31 @@ const KanbanPage = () => {
     }
 
     const [showReturnModal, setShowReturnModal] = useState(false)
+    const [returnLabel, setReturnLabel] = useState('')
+    const [returnReasonText, setReturnReasonText] = useState('')
     const [returnReason, setReturnReason] = useState('')
     const [showPartitionModal, setShowPartitionModal] = useState(false)
     const [partitionReason, setPartitionReason] = useState('')
+    const [qtySplits, setQtySplits] = useState({})
+    const [showFreightModal, setShowFreightModal] = useState(false)
+    const [freightC1, setFreightC1] = useState('')
+    const [freightC2, setFreightC2] = useState('')
+    const [pauseTicks, setPauseTicks] = useState(0)
     const [handoffHistory, setHandoffHistory] = useState(null)
+    const [showLinkCostModal, setShowLinkCostModal] = useState(false)
+    const [linkingItem, setLinkingItem] = useState(null)
+    const [searchQuery, setSearchQuery] = useState('')
+    const [searchResults, setSearchResults] = useState([])
+    const [costForm, setCostForm] = useState({
+        sku: '',
+        nome: '',
+        custo_mp_kg: '',
+        rendimento: '',
+        indice_impostos: '22.25'
+    })
+    const [loadingSearchResults, setLoadingSearchResults] = useState(false)
+    const [savingCost, setSavingCost] = useState(false)
+
     const [savingFields, setSavingFields] = useState(false)
     const [localFields, setLocalFields] = useState({})
     const { refreshNotifications } = useNotifications()
@@ -97,6 +118,25 @@ const KanbanPage = () => {
             const response = await api.get('/kanban/board')
             setBoardData(response.data)
             refreshNotifications()
+            
+            // Auto-refresh active selectedPO to instantly update item link states/margins
+            if (selectedPO) {
+                let foundPO = null;
+                if (response.data && Array.isArray(response.data.columns)) {
+                    for (const col of response.data.columns) {
+                        if (Array.isArray(col.pos)) {
+                            const match = col.pos.find(p => p.id === selectedPO.id);
+                            if (match) {
+                                foundPO = match;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (foundPO) {
+                    setSelectedPO(foundPO);
+                }
+            }
         } catch (err) {
             const errorMsg = err.response?.data?.detail || 'Falha ao carregar o quadro Kanban'
             setError(errorMsg)
@@ -104,6 +144,133 @@ const KanbanPage = () => {
             console.error('Error fetching board:', err)
         } finally {
             setLoading(false)
+        }
+    }
+
+    const handleOpenLinkCost = async (item) => {
+        setLinkingItem(item)
+        setShowLinkCostModal(true)
+        setSearchQuery('')
+        setSearchResults([])
+        
+        // Default form values
+        const defaultName = item.product_description || item.description || item.extra_metadata?.description || item.nome || '';
+        setCostForm({
+            sku: item.sku || '',
+            nome: defaultName,
+            custo_mp_kg: '',
+            rendimento: '',
+            indice_impostos: '22.25'
+        })
+        
+        // Auto-fetch if this SKU already has material costs configured
+        try {
+            setLoadingSearchResults(true)
+            const checkRes = await api.get(`/costs/materials?sku=${encodeURIComponent(item.sku)}`)
+            const exactMatch = (checkRes.data?.items || []).find(it => it.sku.toLowerCase() === item.sku.toLowerCase())
+            if (exactMatch) {
+                setCostForm({
+                    sku: exactMatch.sku,
+                    nome: exactMatch.nome,
+                    custo_mp_kg: exactMatch.custo_mp_kg.toString(),
+                    rendimento: exactMatch.rendimento.toString(),
+                    indice_impostos: exactMatch.indice_impostos.toString()
+                })
+            }
+        } catch (err) {
+            console.error("Error auto-fetching material cost:", err)
+        } finally {
+            setLoadingSearchResults(false)
+        }
+    }
+
+    const handleSearchMaterials = async (query) => {
+        setSearchQuery(query)
+        if (!query.trim()) {
+            setSearchResults([])
+            return
+        }
+        try {
+            setLoadingSearchResults(true)
+            const response = await api.get(`/costs/materials?sku=${encodeURIComponent(query)}`)
+            setSearchResults(response.data?.items || [])
+        } catch (err) {
+            console.error('Error searching materials:', err)
+        } finally {
+            setLoadingSearchResults(false)
+        }
+    }
+
+    const handleSelectMaterial = (mat) => {
+        setCostForm({
+            sku: mat.sku,
+            nome: mat.nome,
+            custo_mp_kg: mat.custo_mp_kg.toString(),
+            rendimento: mat.rendimento.toString(),
+            indice_impostos: mat.indice_impostos.toString()
+        })
+        setSearchResults([])
+        setSearchQuery('')
+    }
+
+    const handleCostFormChange = (field, val) => {
+        let cleaned = val
+        if (['custo_mp_kg', 'rendimento', 'indice_impostos'].includes(field)) {
+            // Allow decimals (e.g. "0.", "0.05") but prevent "05", "00" etc.
+            if (cleaned.startsWith('0') && cleaned.length > 1 && cleaned[1] !== '.') {
+                cleaned = cleaned.replace(/^0+/, '')
+                if (cleaned === '') cleaned = '0'
+            }
+        }
+        setCostForm(prev => ({ ...prev, [field]: cleaned }))
+    }
+
+    const handleSaveCostLink = async (e) => {
+        e.preventDefault()
+        if (!costForm.sku || !costForm.nome || !costForm.custo_mp_kg || !costForm.rendimento) {
+            showError('Por favor, preencha todos os campos obrigatórios.')
+            return
+        }
+        
+        try {
+            setSavingCost(true)
+            
+            // Check if SKU exists to determine if we should POST (create) or PUT (update)
+            let exists = false
+            try {
+                const checkRes = await api.get(`/costs/materials?sku=${encodeURIComponent(costForm.sku)}`)
+                exists = (checkRes.data?.items || []).some(item => item.sku.toLowerCase() === costForm.sku.toLowerCase())
+            } catch (err) {
+                console.log("SKU check failed, assuming create", err)
+            }
+            
+            const payload = {
+                sku: costForm.sku,
+                nome: costForm.nome,
+                custo_mp_kg: parseFloat(costForm.custo_mp_kg),
+                rendimento: parseFloat(costForm.rendimento),
+                indice_impostos: parseFloat(costForm.indice_impostos || '22.25')
+            }
+            
+            if (exists) {
+                await api.put(`/costs/materials/${encodeURIComponent(costForm.sku)}`, payload)
+                showSuccess('Custo do material atualizado com sucesso!')
+            } else {
+                await api.post(`/costs/materials`, payload)
+                showSuccess('Custo do material vinculado com sucesso!')
+            }
+            
+            // Auto refresh
+            await fetchBoard()
+            
+            setShowLinkCostModal(false)
+            setLinkingItem(null)
+        } catch (err) {
+            const errorMsg = err.response?.data?.detail || 'Falha ao salvar custo de material'
+            showError(errorMsg)
+            console.error('Error saving material cost:', err)
+        } finally {
+            setSavingCost(false)
         }
     }
 
@@ -143,7 +310,26 @@ const KanbanPage = () => {
 
     useEffect(() => {
         fetchBoard()
+        
+        // Auto-sync: Trigger a re-fetch of the board when the window recovers focus
+        const handleFocus = () => {
+            console.log('Window focused, triggering auto-sync...');
+            fetchBoard();
+        };
+        window.addEventListener('focus', handleFocus);
+        return () => {
+            window.removeEventListener('focus', handleFocus);
+        };
     }, [])
+
+    // Ticking interval for live pause counter
+    useEffect(() => {
+        if (!selectedPO?.sla_paused_at) return;
+        const interval = setInterval(() => {
+            setPauseTicks(prev => prev + 1);
+        }, 1000);
+        return () => clearInterval(interval);
+    }, [selectedPO?.sla_paused_at]);
 
     // Add escape key handler for modals
     useEffect(() => {
@@ -153,17 +339,24 @@ const KanbanPage = () => {
                     handleCloseModal();
                 } else if (showReturnModal) {
                     setShowReturnModal(false);
+                    setReturnLabel('');
+                    setReturnReasonText('');
                     setReturnReason('');
                 } else if (showPartitionModal) {
                     setShowPartitionModal(false);
                     setPartitionReason('');
+                    setQtySplits({});
+                } else if (showFreightModal) {
+                    setShowFreightModal(false);
+                    setFreightC1('');
+                    setFreightC2('');
                 }
             }
         };
 
         document.addEventListener('keydown', handleEscape);
         return () => document.removeEventListener('keydown', handleEscape);
-    }, [showDetailsModal, showReturnModal, showPartitionModal]);
+    }, [showDetailsModal, showReturnModal, showPartitionModal, showFreightModal]);
 
     useEffect(() => {
         if (selectedPO) {
@@ -182,7 +375,11 @@ const KanbanPage = () => {
     }, [selectedPO])
 
     const handleChangeLocalField = (key, value) => {
-        setLocalFields(prev => ({ ...prev, [key]: value }))
+        let processedValue = value;
+        if (typeof value === 'string' && /^0\d+/.test(value)) {
+            processedValue = value.replace(/^0+/, '');
+        }
+        setLocalFields(prev => ({ ...prev, [key]: processedValue }))
     }
 
     const handleBlurLocalField = (key) => {
@@ -471,19 +668,26 @@ const KanbanPage = () => {
     }
 
     const handleReturnStatus = async () => {
-        if (!returnReason || returnReason.trim().length < 10) {
-            showError('Motivo da devolução deve ter pelo menos 10 caracteres')
+        if (!returnLabel) {
+            showError('Selecione um motivo de devolução da lista')
             return
         }
+        if (!returnReasonText || returnReasonText.trim().length < 10) {
+            showError('A explicação adicional deve ter pelo menos 10 caracteres')
+            return
+        }
+
+        const fullReason = `${returnLabel} ${returnReasonText.trim()}`
 
         try {
             // FIXED: Send po_id and reason as query parameters with proper encoding
             const response = await api.post(
-                `/kanban/return-status?po_id=${encodeURIComponent(selectedPO.id)}&reason=${encodeURIComponent(returnReason)}`
+                `/kanban/return-status?po_id=${encodeURIComponent(selectedPO.id)}&reason=${encodeURIComponent(fullReason)}`
             )
             showSuccess(response.data.message)
             setShowReturnModal(false)
-            setReturnReason('')
+            setReturnLabel('')
+            setReturnReasonText('')
             await fetchBoard() // Refresh board data
             refreshNotifications() // Refresh notifications
             handleCloseModal()
@@ -500,14 +704,30 @@ const KanbanPage = () => {
             return
         }
 
+        // Validate splits sum up to parent quantity exactly for each item
+        const payloadQtySplits = {};
+        for (const item of selectedPO.items || []) {
+            const split = qtySplits[item.id] || [Math.ceil(item.quantity / 2), item.quantity - Math.ceil(item.quantity / 2)];
+            if (split[0] + split[1] !== item.quantity) {
+                showError(`A soma das partições do item ${item.sku} deve ser igual a ${item.quantity}`);
+                return;
+            }
+            payloadQtySplits[item.id] = split;
+        }
+
         try {
-            // FIXED: Send po_id and reason as query parameters with proper encoding
             const response = await api.post(
-                `/kanban/suggest-partition?po_id=${encodeURIComponent(selectedPO.id)}&reason=${encodeURIComponent(partitionReason)}`
+                `/kanban/suggest-partition`,
+                {
+                    po_id: selectedPO.id,
+                    reason: partitionReason,
+                    qty_splits: payloadQtySplits
+                }
             )
             showSuccess(response.data.message)
             setShowPartitionModal(false)
             setPartitionReason('')
+            setQtySplits({})
             fetchBoard()
             handleCloseModal()
         } catch (err) {
@@ -517,7 +737,31 @@ const KanbanPage = () => {
         }
     }
 
+    const mapStatusToStageName = (status) => {
+        if (!status) return 'Comercial';
+        const statusMap = {
+            'Comercial': 'Comercial',
+            'PCP': 'PCP',
+            'Produção/Embalagem': 'Produção/Embalagem',
+            'Faturamento/Expedição': 'Faturamento/Expedição',
+            'Financeiro': 'Financeiro',
+            'SUBMITTED': 'Comercial',
+            'APPROVED': 'PCP',
+            'MANUFACTURING': 'Produção/Embalagem',
+            'SHIPPING': 'Faturamento/Expedição',
+            'FINANCE': 'Financeiro',
+            'DRAFT': 'Comercial',
+            'WAITING_COMMERCIAL_PARTITION': 'Comercial',
+            'PARTITION_REQUESTED': 'Comercial',
+            'WAITING_MATERIAL': 'PCP',
+            'ARCHIVED_PARTITIONED': 'Arquivado'
+        };
+        const upper = String(status).toUpperCase();
+        return statusMap[status] || statusMap[upper] || status || 'Comercial';
+    };
+
     const getNextStatus = (currentStatus) => {
+        const mapped = mapStatusToStageName(currentStatus)
         const statusFlow = {
             'Comercial': 'PCP',
             'PCP': 'Produção/Embalagem',
@@ -525,17 +769,18 @@ const KanbanPage = () => {
             'Faturamento/Expedição': 'Financeiro',
             'Financeiro': null
         }
-        return statusFlow[currentStatus] || null
+        return statusFlow[mapped] || null
     }
 
     const getPreviousStatus = (currentStatus) => {
+        const mapped = mapStatusToStageName(currentStatus)
         const statusFlow = {
             'PCP': 'Comercial',
             'Produção/Embalagem': 'PCP',
             'Faturamento/Expedição': 'Produção/Embalagem',
             'Financeiro': 'Faturamento/Expedição'
         }
-        return statusFlow[currentStatus] || null
+        return statusFlow[mapped] || null
     }
 
     const canAdvance = (po) => {
@@ -912,16 +1157,37 @@ const KanbanPage = () => {
 
                                 {/* SLA and Performance Control Dashboard */}
                                 {(() => {
-                                    const totalSlaHours = handoffHistory?.total_sla_hours || (selectedPO?.extra_metadata?.is_replacement ? 120 : 240);
+                                    const calculateSlaPercent = (po) => {
+                                        if (!po?.created_at || (!po?.expected_delivery_date && !po?.data_limite)) return 0;
+                                        const start = new Date(po.created_at).getTime();
+                                        const originalEnd = new Date(po.expected_delivery_date || po.data_limite).getTime();
+                                        const now = new Date().getTime();
+                                        
+                                        if (originalEnd <= start) return 100;
+                                        
+                                        let totalSlaDuration = originalEnd - start;
+                                        const isRep = po.is_replacement || po.extra_metadata?.is_replacement || false;
+                                        if (isRep) {
+                                            totalSlaDuration = totalSlaDuration * 0.5;
+                                        }
+                                        
+                                        const elapsed = now - start;
+                                        const percent = (elapsed / totalSlaDuration) * 100;
+                                        return Math.max(0, Math.min(100, percent));
+                                    };
+
+                                    const isReplacement = selectedPO?.is_replacement || selectedPO?.extra_metadata?.is_replacement || false;
+                                    const totalPercent = calculateSlaPercent(selectedPO);
+                                    
+                                    const totalSlaHours = handoffHistory?.total_sla_hours || (isReplacement ? 120 : 240);
                                     const totalElapsedHours = handoffHistory?.total_elapsed_hours || 0;
                                     const currentAreaSlaHours = handoffHistory?.current_area_sla_hours || 48;
                                     const currentAreaElapsedHours = handoffHistory?.current_area_elapsed_hours || 0;
-                                    const isReplacement = handoffHistory?.is_replacement || selectedPO?.extra_metadata?.is_replacement || false;
 
-                                    const totalPercent = Math.min((totalElapsedHours / totalSlaHours) * 100, 100);
                                     const areaPercent = Math.min((currentAreaElapsedHours / currentAreaSlaHours) * 100, 100);
 
                                     const getProgressBarColor = (percent) => {
+                                        if (isReplacement) return 'bg-cyan-500';
                                         if (percent < 60) return 'bg-emerald-500';
                                         if (percent < 85) return 'bg-amber-500';
                                         if (percent < 100) return 'bg-orange-500';
@@ -934,11 +1200,31 @@ const KanbanPage = () => {
                                                 <h3 className="text-xs font-bold tracking-wide uppercase text-slate-700 flex items-center gap-2">
                                                     <span>⏱️</span> Controle de SLA e Performance
                                                 </h3>
-                                                {isReplacement && (
-                                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-cyan-100 text-cyan-800 border border-cyan-300 animate-pulse">
-                                                        SLA REDUZIDO (50% - TROCA)
-                                                    </span>
-                                                )}
+                                                <div className="flex items-center gap-2">
+                                                    {selectedPO?.sla_paused_at && (
+                                                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-gray-200 text-gray-700 border border-gray-300">
+                                                            ⏸️ Pausa: {(() => {
+                                                                const pausedAt = new Date(selectedPO.sla_paused_at).getTime();
+                                                                const now = new Date().getTime();
+                                                                const diffSecs = Math.max(0, Math.floor((now - pausedAt) / 1000));
+                                                                const hrs = Math.floor(diffSecs / 3600);
+                                                                const mins = Math.floor((diffSecs % 3600) / 60);
+                                                                const secs = diffSecs % 60;
+                                                                
+                                                                let str = '';
+                                                                if (hrs > 0) str += `${hrs}h `;
+                                                                if (mins > 0 || hrs > 0) str += `${mins}m `;
+                                                                str += `${secs}s`;
+                                                                return str;
+                                                            })()}
+                                                        </span>
+                                                    )}
+                                                    {isReplacement && (
+                                                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-cyan-100 text-cyan-800 border border-cyan-300 animate-pulse">
+                                                            SLA REDUZIDO (50% - TROCA)
+                                                        </span>
+                                                    )}
+                                                </div>
                                             </div>
                                             
                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -950,7 +1236,10 @@ const KanbanPage = () => {
                                                             {totalElapsedHours.toFixed(1)}h / {totalSlaHours.toFixed(0)}h ({totalPercent.toFixed(0)}%)
                                                         </span>
                                                     </div>
-                                                    <div className="w-full bg-slate-200 rounded-full h-3 overflow-hidden border border-slate-300">
+                                                    <div 
+                                                        className="w-full bg-slate-200 rounded-full h-3 overflow-hidden border border-slate-300"
+                                                        title={isReplacement ? "SLA Prioritário (Troca)" : "Progresso de SLA"}
+                                                    >
                                                         <div 
                                                             className={`h-full transition-all duration-500 ${getProgressBarColor(totalPercent)}`} 
                                                             style={{ width: `${totalPercent}%` }}
@@ -987,12 +1276,12 @@ const KanbanPage = () => {
                                 {/* Sector Flow Stepper */}
                                 <div className="space-y-6 mb-6">
                                     <h3 className="text-lg font-bold text-gray-900 border-b border-gray-150 pb-2 flex items-center gap-2">
-                                        <span>⚙️</span> Esteira BPMS de Operações (Setores de Produção)
+                                        <span>⚙️</span> Esteira de Operações (Setores de Produção)
                                     </h3>
                                     
                                     {(() => {
                                         const stages = ['Comercial', 'PCP', 'Produção/Embalagem', 'Faturamento/Expedição', 'Financeiro'];
-                                        const currentStageIndex = stages.indexOf(selectedPO.status);
+                                        const currentStageIndex = stages.indexOf(mapStatusToStageName(selectedPO.status));
 
                                         return stages.map((stageName, idx) => {
                                             const isCompleted = idx < currentStageIndex;
@@ -1104,6 +1393,33 @@ const KanbanPage = () => {
                                                                         <div>
                                                                             <span className="text-xs text-gray-500 font-semibold uppercase block mb-2">Regras e Indicadores Estratégicos</span>
                                                                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-gray-50 p-3 rounded-lg border border-gray-200">
+                                                                                {/* 1. Personalizado */}
+                                                                                <label className="flex items-center gap-2 cursor-not-allowed">
+                                                                                    <input
+                                                                                        type="checkbox"
+                                                                                        checked={selectedPO.extra_metadata?.is_personalized || selectedPO.extra_metadata?.is_urgent || false}
+                                                                                        disabled
+                                                                                        className="rounded border-gray-300 text-rose-600 focus:ring-rose-500 disabled:opacity-80"
+                                                                                    />
+                                                                                    <span className="text-xs font-semibold text-gray-700">
+                                                                                        Personalizado: {(selectedPO.extra_metadata?.is_personalized || selectedPO.extra_metadata?.is_urgent) ? 'Sim' : 'Não'}
+                                                                                    </span>
+                                                                                </label>
+
+                                                                                {/* 2. Cliente Novo */}
+                                                                                <label className="flex items-center gap-2 cursor-not-allowed">
+                                                                                    <input
+                                                                                        type="checkbox"
+                                                                                        checked={selectedPO.extra_metadata?.is_new_client || selectedPO.extra_metadata?.is_first_order || false}
+                                                                                        disabled
+                                                                                        className="rounded border-gray-300 text-amber-600 focus:ring-amber-500 disabled:opacity-80"
+                                                                                    />
+                                                                                    <span className="text-xs font-semibold text-gray-700">
+                                                                                        Cliente Novo: {(selectedPO.extra_metadata?.is_new_client || selectedPO.extra_metadata?.is_first_order) ? 'Sim' : 'Não'}
+                                                                                    </span>
+                                                                                </label>
+
+                                                                                {/* 3. Exportação */}
                                                                                 <label className="flex items-center gap-2 cursor-not-allowed">
                                                                                     <input
                                                                                         type="checkbox"
@@ -1115,37 +1431,17 @@ const KanbanPage = () => {
                                                                                         Exportação: {selectedPO.extra_metadata?.is_export ? 'Sim' : 'Não'}
                                                                                     </span>
                                                                                 </label>
-                                                                                <label className="flex items-center gap-2 cursor-not-allowed">
-                                                                                    <input
-                                                                                        type="checkbox"
-                                                                                        checked={selectedPO.extra_metadata?.is_urgent || false}
-                                                                                        disabled
-                                                                                        className="rounded border-gray-300 text-rose-600 focus:ring-rose-500 disabled:opacity-80"
-                                                                                    />
-                                                                                    <span className="text-xs font-semibold text-gray-700">
-                                                                                        Urgente: {selectedPO.extra_metadata?.is_urgent ? 'Sim' : 'Não'}
-                                                                                    </span>
-                                                                                </label>
-                                                                                <label className="flex items-center gap-2 cursor-not-allowed">
-                                                                                    <input
-                                                                                        type="checkbox"
-                                                                                        checked={selectedPO.extra_metadata?.is_first_order || false}
-                                                                                        disabled
-                                                                                        className="rounded border-gray-300 text-amber-600 focus:ring-amber-500 disabled:opacity-80"
-                                                                                    />
-                                                                                    <span className="text-xs font-semibold text-gray-700">
-                                                                                        Primeiro Pedido: {selectedPO.extra_metadata?.is_first_order ? 'Sim' : 'Não'}
-                                                                                    </span>
-                                                                                </label>
+
+                                                                                {/* 4. Troca/Reposição */}
                                                                                 <label className="flex items-center gap-2 cursor-not-allowed">
                                                                                     <input
                                                                                         type="checkbox"
                                                                                         checked={selectedPO.extra_metadata?.is_replacement || false}
                                                                                         disabled
-                                                                                        className="rounded border-gray-300 text-purple-600 focus:ring-purple-500 disabled:opacity-80"
+                                                                                        className="rounded border-gray-300 text-cyan-600 focus:ring-cyan-500 disabled:opacity-80"
                                                                                     />
                                                                                     <span className="text-xs font-semibold text-gray-700">
-                                                                                        Reposição: {selectedPO.extra_metadata?.is_replacement ? 'Sim' : 'Não'}
+                                                                                        Troca/Reposição: {selectedPO.extra_metadata?.is_replacement ? 'Sim' : 'Não'}
                                                                                     </span>
                                                                                 </label>
                                                                             </div>
@@ -1193,30 +1489,152 @@ const KanbanPage = () => {
                                                                                 </div>
                                                                             );
                                                                         })()}
+
+                                                                        {/* Commercial Partition Approval or Material Pause Panel */}
+                                                                        {selectedPO.status_macro === 'WAITING_COMMERCIAL_PARTITION' && (
+                                                                            <div className="mt-4 p-4 bg-purple-50 border border-purple-200 rounded-lg shadow-2xs">
+                                                                                <h4 className="text-sm font-bold text-purple-900 mb-2 flex items-center gap-1.5">
+                                                                                    <Split className="w-4 h-4" />
+                                                                                    <span>Sugestão de Partição Pendente (PCP)</span>
+                                                                                </h4>
+                                                                                <p className="text-xs text-purple-950 font-semibold mb-3">
+                                                                                    <strong>Justificativa Técnica:</strong> "{selectedPO.partition_reason || selectedPO.extra_metadata?.partition_reason}"
+                                                                                </p>
+                                                                                <div className="flex flex-wrap gap-2.5">
+                                                                                    <button
+                                                                                        onClick={() => {
+                                                                                            setFreightC1('');
+                                                                                            setFreightC2('');
+                                                                                            setShowFreightModal(true);
+                                                                                        }}
+                                                                                        className="inline-flex items-center justify-center px-3.5 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-lg cursor-pointer transition-colors shadow-2xs"
+                                                                                    >
+                                                                                        Aprovar Partição (Ratear Frete)
+                                                                                    </button>
+                                                                                    <button
+                                                                                        onClick={async () => {
+                                                                                            try {
+                                                                                                const response = await api.post(`/kanban/pos/${selectedPO.id}/pause-material`);
+                                                                                                showSuccess(response.data.message);
+                                                                                                await fetchBoard();
+                                                                                                handleCloseModal();
+                                                                                            } catch (err) {
+                                                                                                showError(err.response?.data?.detail || 'Erro ao aguardar insumo');
+                                                                                            }
+                                                                                        }}
+                                                                                        className="inline-flex items-center justify-center px-3.5 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-xs font-bold rounded-lg cursor-pointer transition-colors shadow-2xs"
+                                                                                    >
+                                                                                        🧹 Aguardar Insumo (Pausar SLA)
+                                                                                    </button>
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
                                                                     </div>
                                                                 )}
 
                                                                 {stageName === 'PCP' && (
                                                                     <div className="space-y-4">
-                                                                        {(['APPROVED', 'approved', 'PCP', 'pcp'].includes(selectedPO.status_macro) || selectedPO.status === 'PCP') && (
-                                                                            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-3xs mb-4">
-                                                                                <div className="flex items-center gap-2">
-                                                                                    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-extrabold bg-amber-100 text-amber-800 border border-amber-300">
-                                                                                        PCP ATIVO
-                                                                                    </span>
+                                                                        {selectedPO.status_macro === 'WAITING_MATERIAL' && (
+                                                                            <div className="p-4 bg-gray-50 border border-gray-300 rounded-lg shadow-3xs mb-4">
+                                                                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                                                                    <div className="flex items-center gap-2">
+                                                                                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-extrabold bg-gray-200 text-gray-800 border border-gray-350">
+                                                                                            SLA PAUSADO (AGUARDANDO INSUMO)
+                                                                                        </span>
+                                                                                        <span className="text-xs text-gray-750 font-semibold">
+                                                                                            Retome o cronômetro assim que os materiais forem recebidos.
+                                                                                        </span>
+                                                                                    </div>
+                                                                                    <button
+                                                                                        onClick={async () => {
+                                                                                            try {
+                                                                                                const response = await api.post(`/kanban/pos/${selectedPO.id}/resume-material`);
+                                                                                                showSuccess(response.data.message);
+                                                                                                await fetchBoard();
+                                                                                                handleCloseModal();
+                                                                                            } catch (err) {
+                                                                                                showError(err.response?.data?.detail || 'Falha ao retomar SLA');
+                                                                                            }
+                                                                                        }}
+                                                                                        className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg cursor-pointer transition-colors shadow-2xs flex-shrink-0"
+                                                                                    >
+                                                                                        📦 Insumo Recebido - Retomar SLA
+                                                                                    </button>
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
+
+                                                                        {(['APPROVED', 'approved', 'PCP', 'pcp', 'WAITING_MATERIAL'].includes(selectedPO.status_macro) || selectedPO.status === 'PCP') && (
+                                                                            <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg shadow-3xs mb-4">
+                                                                                <div className="flex items-center justify-between mb-3 border-b border-amber-200 pb-2">
+                                                                                    <div className="flex items-center gap-2">
+                                                                                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-extrabold bg-amber-100 text-amber-800 border border-amber-300">
+                                                                                            GRADE DE ITENS E CUSTOS (PCP)
+                                                                                        </span>
+                                                                                    </div>
                                                                                     <span className="text-xs text-amber-900 font-semibold">
-                                                                                        Vincule ou revise o custo técnico para atualizar a margem real.
+                                                                                        Vincule o custo de cada SKU para calcular a margem.
                                                                                     </span>
                                                                                 </div>
-                                                                                <button
-                                                                                    onClick={() => {
-                                                                                        const firstSku = selectedPO.items?.[0]?.sku || '';
-                                                                                        window.location.href = `/costs?search=${encodeURIComponent(firstSku)}`;
-                                                                                    }}
-                                                                                    className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-lg cursor-pointer transition-colors shadow-2xs flex-shrink-0"
-                                                                                >
-                                                                                    🔍 Vincular Custo Técnico
-                                                                                </button>
+                                                                                
+                                                                                <div className="overflow-x-auto">
+                                                                                    <table className="w-full text-xs text-left text-gray-500 border border-gray-200 rounded-lg overflow-hidden">
+                                                                                        <thead className="text-[10px] text-gray-700 uppercase bg-gray-100 border-b border-gray-200">
+                                                                                            <tr>
+                                                                                                <th scope="col" className="px-3 py-2 font-bold">SKU</th>
+                                                                                                <th scope="col" className="px-3 py-2 font-bold text-center">Quantidade</th>
+                                                                                                <th scope="col" className="px-3 py-2 font-bold text-center">Status de Custo</th>
+                                                                                                <th scope="col" className="px-3 py-2 font-bold text-center">Ações</th>
+                                                                                            </tr>
+                                                                                        </thead>
+                                                                                        <tbody className="divide-y divide-gray-200 bg-white">
+                                                                                            {selectedPO.items && selectedPO.items.length > 0 ? (
+                                                                                                selectedPO.items.map((item) => {
+                                                                                                    const unitCost = parseFloat(item.total_cost) || parseFloat(item.cost_mp) || parseFloat(item.extra_metadata?.total_cost) || parseFloat(item.extra_metadata?.cost_mp) || 0;
+                                                                                                    const hasCost = unitCost > 0;
+                                                                                                    return (
+                                                                                                        <tr key={item.id || item.sku} className="hover:bg-gray-50">
+                                                                                                            <td className="px-3 py-2 font-semibold text-gray-900">
+                                                                                                                {item.sku}
+                                                                                                                {(item.product_description || item.description || item.extra_metadata?.description || item.nome) && (
+                                                                                                                    <span className="text-[10px] font-normal text-gray-500 ml-1.5">
+                                                                                                                        - {item.product_description || item.description || item.extra_metadata?.description || item.nome}
+                                                                                                                    </span>
+                                                                                                                )}
+                                                                                                            </td>
+                                                                                                            <td className="px-3 py-2 text-center text-gray-700 font-medium">{item.quantity}</td>
+                                                                                                            <td className="px-3 py-2 text-center">
+                                                                                                                {hasCost ? (
+                                                                                                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-800 border border-green-200">
+                                                                                                                        ✅ Vinculado
+                                                                                                                    </span>
+                                                                                                                ) : (
+                                                                                                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                                                                                                                        ⚠️ Sem Custo
+                                                                                                                    </span>
+                                                                                                                )}
+                                                                                                            </td>
+                                                                                                            <td className="px-3 py-2 text-center">
+                                                                                                                <button
+                                                                                                                    onClick={() => handleOpenLinkCost(item)}
+                                                                                                                    className="inline-flex items-center justify-center gap-1 px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-bold rounded cursor-pointer transition-colors shadow-2xs"
+                                                                                                                >
+                                                                                                                    🔍 Vincular
+                                                                                                                </button>
+                                                                                                            </td>
+                                                                                                        </tr>
+                                                                                                    );
+                                                                                                })
+                                                                                            ) : (
+                                                                                                <tr>
+                                                                                                    <td colSpan="4" className="px-3 py-4 text-center text-gray-400 italic">
+                                                                                                        Nenhum item cadastrado neste pedido
+                                                                                                    </td>
+                                                                                                </tr>
+                                                                                            )}
+                                                                                        </tbody>
+                                                                                    </table>
+                                                                                </div>
                                                                             </div>
                                                                         )}
                                                                         {!isActive ? (
@@ -1262,7 +1680,7 @@ const KanbanPage = () => {
                                                                                         value={localFields.data_programada || ''}
                                                                                         onChange={(e) => handleChangeLocalField('data_programada', e.target.value)}
                                                                                         onBlur={() => handleBlurLocalField('data_programada')}
-                                                                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800 font-medium"
+                                                                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-850 font-medium"
                                                                                     />
                                                                                 </div>
 
@@ -1286,7 +1704,14 @@ const KanbanPage = () => {
                                                                                         <strong>Partição Técnica:</strong> Se houver restrições de maquinário ou entrega, proponha o desmembramento técnico deste PO.
                                                                                     </div>
                                                                                     <button
-                                                                                        onClick={() => setShowPartitionModal(true)}
+                                                                                        onClick={() => {
+                                                                                            const initialSplits = {};
+                                                                                            selectedPO.items?.forEach(item => {
+                                                                                                initialSplits[item.id] = [Math.ceil(item.quantity / 2), item.quantity - Math.ceil(item.quantity / 2)];
+                                                                                            });
+                                                                                            setQtySplits(initialSplits);
+                                                                                            setShowPartitionModal(true);
+                                                                                        }}
                                                                                         className="flex items-center gap-2 px-3 py-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 cursor-pointer transition-colors text-xs font-semibold flex-shrink-0 shadow-sm"
                                                                                     >
                                                                                         <Package className="w-3.5 h-3.5" />
@@ -2040,53 +2465,76 @@ const KanbanPage = () => {
                     </div>
                 )}
 
-                {/* Return Status Modal */}
+                {/* Return Modal */}
                 {showReturnModal && (
                     <div
                         className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
                         onClick={(e) => {
                             if (e.target === e.currentTarget) {
                                 setShowReturnModal(false);
+                                setReturnLabel('');
+                                setReturnReasonText('');
                                 setReturnReason('');
                             }
                         }}
                     >
-                        <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
-                            <div className="p-6">
-                                <h3 className="text-xl font-bold text-gray-900 mb-4">
-                                    Devolver para {getPreviousStatus(selectedPO?.status)}
-                                </h3>
-                                <p className="text-sm text-gray-600 mb-4">
-                                    Informe o motivo da devolução (mínimo 10 caracteres):
-                                </p>
+                        <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+                            <h3 className="text-xl font-bold text-gray-900 mb-4">
+                                Devolver para {getPreviousStatus(selectedPO?.status)}
+                            </h3>
+                            
+                            <div className="mb-4">
+                                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                    Motivo da Devolução <span className="text-red-500">*</span>
+                                </label>
+                                <select
+                                    value={returnLabel}
+                                    onChange={(e) => setReturnLabel(e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white font-semibold text-gray-800"
+                                >
+                                    <option value="">Selecione um motivo...</option>
+                                    <option value="[Particionamento]">[Particionamento]</option>
+                                    <option value="[Ajuste de Personalização]">[Ajuste de Personalização]</option>
+                                    <option value="[Erro de Dados ONET]">[Erro de Dados ONET]</option>
+                                    <option value="[Outros]">[Outros]</option>
+                                </select>
+                            </div>
+
+                            <div className="mb-4">
+                                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                    Explicação Adicional (mínimo 10 caracteres) <span className="text-red-500">*</span>
+                                </label>
                                 <textarea
-                                    value={returnReason}
-                                    onChange={(e) => setReturnReason(e.target.value)}
-                                    placeholder="Ex: Falta informação de prazo de entrega..."
+                                    value={returnReasonText}
+                                    onChange={(e) => setReturnReasonText(e.target.value)}
+                                    placeholder="Ex: Detalhe o motivo da devolução para a área anterior..."
                                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                                    rows="4"
+                                    rows="3"
                                 />
-                                <div className="flex items-center justify-end gap-3 mt-6">
-                                    <button
-                                        onClick={() => {
-                                            setShowReturnModal(false)
-                                            setReturnReason('')
-                                        }}
-                                        className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors"
-                                    >
-                                        Cancelar
-                                    </button>
-                                    <button
-                                        onClick={handleReturnStatus}
-                                        disabled={!returnReason || returnReason.trim().length < 10}
-                                        className={`px-4 py-2 rounded-lg transition-colors ${returnReason && returnReason.trim().length >= 10
-                                            ? 'bg-orange-600 text-white hover:bg-orange-700'
-                                            : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                                            }`}
-                                    >
-                                        Devolver
-                                    </button>
-                                </div>
+                            </div>
+
+                            <div className="flex items-center justify-end gap-3 mt-6">
+                                <button
+                                    onClick={() => {
+                                        setShowReturnModal(false)
+                                        setReturnLabel('')
+                                        setReturnReasonText('')
+                                        setReturnReason('')
+                                    }}
+                                    className="px-4 py-2 bg-gray-300 text-gray-700 text-sm font-semibold rounded-lg hover:bg-gray-400 transition-colors"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    onClick={handleReturnStatus}
+                                    disabled={!returnLabel || !returnReasonText || returnReasonText.trim().length < 10}
+                                    className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${returnLabel && returnReasonText && returnReasonText.trim().length >= 10
+                                        ? 'bg-orange-605 text-white hover:bg-orange-700'
+                                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                        }`}
+                                >
+                                    Devolver
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -2100,46 +2548,425 @@ const KanbanPage = () => {
                             if (e.target === e.currentTarget) {
                                 setShowPartitionModal(false);
                                 setPartitionReason('');
+                                setQtySplits({});
                             }
                         }}
                     >
-                        <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
-                            <div className="p-6">
-                                <h3 className="text-xl font-bold text-gray-900 mb-4">
+                        <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col mx-4">
+                            <div className="p-6 overflow-y-auto flex-1">
+                                <h3 className="text-xl font-bold text-gray-900 mb-2">
                                     Sugerir Partição do Pedido
                                 </h3>
-                                <p className="text-sm text-gray-600 mb-4">
-                                    Informe o motivo da sugestão de partição (mínimo 10 caracteres):
+                                <p className="text-xs text-gray-500 mb-4">
+                                    Proponha o desmembramento técnico deste pedido em dois pedidos filhos (C1 e C2).
                                 </p>
-                                <textarea
-                                    value={partitionReason}
-                                    onChange={(e) => setPartitionReason(e.target.value)}
-                                    placeholder="Ex: Pedido muito grande, sugerir divisão em 2 entregas..."
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                                    rows="4"
-                                />
-                                <div className="flex items-center justify-end gap-3 mt-6">
+                                
+                                <div className="mb-4">
+                                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                        Motivo da Sugestão (mínimo 10 caracteres) <span className="text-red-500">*</span>
+                                    </label>
+                                    <textarea
+                                        value={partitionReason}
+                                        onChange={(e) => setPartitionReason(e.target.value)}
+                                        placeholder="Ex: Pedido muito grande, sugerir divisão em 2 entregas devido a capacidade produtiva..."
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                                        rows="3"
+                                    />
+                                </div>
+
+                                <div className="mb-4">
+                                    <label className="block text-xs font-bold text-gray-700 uppercase mb-2">
+                                        Divisão de Quantidades dos Itens <span className="text-red-500">*</span>
+                                    </label>
+                                    <div className="border border-gray-200 rounded-lg overflow-hidden max-h-60 overflow-y-auto">
+                                        <table className="w-full text-xs text-left text-gray-500">
+                                            <thead className="text-[10px] text-gray-700 uppercase bg-gray-50 border-b border-gray-200 sticky top-0">
+                                                <tr>
+                                                    <th className="px-3 py-2">Item/SKU</th>
+                                                    <th className="px-3 py-2 text-center">Original</th>
+                                                    <th className="px-3 py-2 text-center">Qtd Filho 1 (C1)</th>
+                                                    <th className="px-3 py-2 text-center">Qtd Filho 2 (C2)</th>
+                                                    <th className="px-3 py-2 text-center">Status</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-200 bg-white">
+                                                {selectedPO.items?.map((item) => {
+                                                    const split = qtySplits[item.id] || [Math.ceil(item.quantity / 2), item.quantity - Math.ceil(item.quantity / 2)];
+                                                    const q1 = split[0];
+                                                    const q2 = split[1];
+                                                    const sum = q1 + q2;
+                                                    const isValid = sum === item.quantity;
+                                                    
+                                                    return (
+                                                        <tr key={item.id} className="hover:bg-gray-50">
+                                                            <td className="px-3 py-2 font-semibold text-gray-900">{item.sku}</td>
+                                                            <td className="px-3 py-2 text-center font-bold text-gray-700">{item.quantity}</td>
+                                                            <td className="px-3 py-2 text-center">
+                                                                <input
+                                                                    type="number"
+                                                                    min="0"
+                                                                    max={item.quantity}
+                                                                    value={q1}
+                                                                    onChange={(e) => {
+                                                                        const val = parseInt(e.target.value) || 0;
+                                                                        setQtySplits(prev => ({
+                                                                            ...prev,
+                                                                            [item.id]: [val, item.quantity - val]
+                                                                        }));
+                                                                    }}
+                                                                    className="w-16 px-1.5 py-1 border border-gray-300 rounded text-center text-xs font-bold"
+                                                                />
+                                                            </td>
+                                                            <td className="px-3 py-2 text-center">
+                                                                <input
+                                                                    type="number"
+                                                                    min="0"
+                                                                    max={item.quantity}
+                                                                    value={q2}
+                                                                    onChange={(e) => {
+                                                                        const val = parseInt(e.target.value) || 0;
+                                                                        setQtySplits(prev => ({
+                                                                            ...prev,
+                                                                            [item.id]: [item.quantity - val, val]
+                                                                        }));
+                                                                    }}
+                                                                    className="w-16 px-1.5 py-1 border border-gray-300 rounded text-center text-xs font-bold"
+                                                                />
+                                                            </td>
+                                                            <td className="px-3 py-2 text-center">
+                                                                {isValid ? (
+                                                                    <span className="text-green-650 font-bold">✓ Ok</span>
+                                                                ) : (
+                                                                    <span className="text-red-650 font-bold">⚠️ Erro</span>
+                                                                )}
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="bg-gray-50 px-6 py-4 flex justify-end gap-3 border-t border-gray-200">
+                                <button
+                                    onClick={() => {
+                                        setShowPartitionModal(false);
+                                        setPartitionReason('');
+                                        setQtySplits({});
+                                    }}
+                                    className="px-4 py-2 bg-gray-300 text-gray-700 text-sm font-semibold rounded-lg hover:bg-gray-400 transition-colors"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    onClick={handleSuggestPartition}
+                                    disabled={!partitionReason || partitionReason.trim().length < 10}
+                                    className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${partitionReason && partitionReason.trim().length >= 10
+                                        ? 'bg-purple-600 text-white hover:bg-purple-700'
+                                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                        }`}
+                                >
+                                    Sugerir Partição
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Freight Split Approval Modal */}
+                {showFreightModal && (
+                    <div
+                        className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+                        onClick={(e) => {
+                            if (e.target === e.currentTarget) {
+                                setShowFreightModal(false);
+                                setFreightC1('');
+                                setFreightC2('');
+                            }
+                        }}
+                    >
+                        <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+                            <h3 className="text-xl font-bold text-gray-900 mb-2">
+                                Aprovar Partição - Rateio de Frete
+                            </h3>
+                            <p className="text-xs text-gray-500 mb-4">
+                                Rateie o valor do frete original do pedido pai entre os pedidos filhos (C1 e C2).
+                            </p>
+                            
+                            <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 mb-4 text-xs">
+                                <div className="flex justify-between font-semibold text-gray-700">
+                                    <span>Frete Original (Pai):</span>
+                                    <span>{formatCurrency(selectedPO.shipping_cost || 0)}</span>
+                                </div>
+                            </div>
+
+                            <div className="space-y-4 mb-6">
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                        Frete do Pedido Filho 1 (C1) <span className="text-red-500">*</span>
+                                    </label>
+                                    <input
+                                        type="number"
+                                        step="0.0001"
+                                        value={freightC1}
+                                        onChange={(e) => setFreightC1(e.target.value)}
+                                        placeholder="Ex: 50.0000"
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-800 font-semibold focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                        Frete do Pedido Filho 2 (C2) <span className="text-red-500">*</span>
+                                    </label>
+                                    <input
+                                        type="number"
+                                        step="0.0001"
+                                        value={freightC2}
+                                        onChange={(e) => setFreightC2(e.target.value)}
+                                        placeholder="Ex: 50.0000"
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-800 font-semibold focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                                    />
+                                </div>
+
+                                {(() => {
+                                    const f1 = parseFloat(freightC1) || 0;
+                                    const f2 = parseFloat(freightC2) || 0;
+                                    const sum = f1 + f2;
+                                    const parentFreight = parseFloat(selectedPO.shipping_cost) || 0;
+                                    const diff = Math.abs(sum - parentFreight);
+                                    const isValid = diff <= 0.01;
+                                    
+                                    return (
+                                        <div className={`p-3 rounded-lg border text-xs font-semibold ${isValid ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
+                                            <div className="flex justify-between">
+                                                <span>Soma Alocada:</span>
+                                                <span>{formatCurrency(sum)}</span>
+                                            </div>
+                                            <div className="flex justify-between mt-1 text-[10px]">
+                                                <span>Status:</span>
+                                                <span>{isValid ? '✓ Valor bate exatamente!' : `⚠️ Falta R$ ${(parentFreight - sum).toFixed(4)}`}</span>
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
+                            </div>
+
+                            <div className="flex gap-3 justify-end">
+                                <button
+                                    onClick={() => {
+                                        setShowFreightModal(false);
+                                        setFreightC1('');
+                                        setFreightC2('');
+                                    }}
+                                    className="px-4 py-2 bg-gray-300 text-gray-700 text-sm font-semibold rounded-lg hover:bg-gray-400 transition-colors"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    onClick={async () => {
+                                        const f1 = parseFloat(freightC1) || 0;
+                                        const f2 = parseFloat(freightC2) || 0;
+                                        const parentFreight = parseFloat(selectedPO.shipping_cost) || 0;
+                                        if (Math.abs(f1 + f2 - parentFreight) > 0.01) {
+                                            showError(`A soma do frete dos filhos (${formatCurrency(f1 + f2)}) deve ser exatamente igual ao frete original do pai (${formatCurrency(parentFreight)})`);
+                                            return;
+                                        }
+                                        
+                                        try {
+                                            const response = await api.post(`/kanban/pos/${selectedPO.id}/approve-partition`, {
+                                                freight_c1: f1,
+                                                freight_c2: f2
+                                            });
+                                            showSuccess(response.data.message);
+                                            setShowFreightModal(false);
+                                            setFreightC1('');
+                                            setFreightC2('');
+                                            await fetchBoard();
+                                            handleCloseModal();
+                                        } catch (err) {
+                                            showError(err.response?.data?.detail || 'Falha ao aprovar partição');
+                                        }
+                                    }}
+                                    className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-bold rounded-lg transition-colors"
+                                >
+                                    Aprovar e Ratear Frete
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Nested Link Cost Modal */}
+                {showLinkCostModal && (
+                    <div
+                        className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[60] p-4"
+                        onClick={(e) => {
+                            if (e.target === e.currentTarget) {
+                                setShowLinkCostModal(false);
+                                setLinkingItem(null);
+                            }
+                        }}
+                    >
+                        <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full mx-4 overflow-hidden border border-gray-150 animate-scale-up">
+                            {/* Modal Header */}
+                            <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                    <span className="text-xl">💰</span>
+                                    <div>
+                                        <h3 className="font-bold text-base md:text-lg">
+                                            Vincular Custo do Material
+                                        </h3>
+                                        <p className="text-[10px] text-slate-350 font-medium">
+                                            Item SKU: <span className="font-mono bg-slate-800 px-1 py-0.5 rounded font-bold">{linkingItem?.sku}</span>
+                                        </p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => {
+                                        setShowLinkCostModal(false);
+                                        setLinkingItem(null);
+                                    }}
+                                    className="text-slate-400 hover:text-white transition-colors cursor-pointer"
+                                >
+                                    <X className="w-5 h-5" />
+                                </button>
+                            </div>
+
+                            {/* Search bar for existing materials */}
+                            <div className="p-6 pb-2 border-b border-gray-100 bg-slate-50 relative">
+                                <label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">
+                                    🔍 Buscar outro material existente
+                                </label>
+                                <div className="relative">
+                                    <input
+                                        type="text"
+                                        value={searchQuery}
+                                        onChange={(e) => handleSearchMaterials(e.target.value)}
+                                        placeholder="Digite parte do SKU ou Nome para buscar..."
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-semibold text-gray-800 focus:ring-2 focus:ring-slate-500 focus:outline-none"
+                                    />
+                                    {loadingSearchResults && (
+                                        <span className="absolute right-3 top-2.5 text-[10px] text-gray-400 animate-pulse font-medium">Buscando...</span>
+                                    )}
+                                </div>
+
+                                {/* Floating search results list */}
+                                {searchResults.length > 0 && (
+                                    <div className="absolute left-6 right-6 z-70 bg-white border border-gray-200 rounded-lg shadow-xl mt-1 max-h-48 overflow-y-auto">
+                                        <ul className="divide-y divide-gray-100">
+                                            {searchResults.map((mat) => (
+                                                <li
+                                                    key={mat.id || mat.sku}
+                                                    onClick={() => handleSelectMaterial(mat)}
+                                                    className="px-4 py-2 hover:bg-slate-100 cursor-pointer text-xs flex flex-col gap-0.5 font-medium"
+                                                >
+                                                    <span className="font-bold text-slate-900">{mat.sku}</span>
+                                                    <span className="text-gray-500 text-[10px]">{mat.nome}</span>
+                                                    <span className="text-[10px] text-slate-700">MP: R$ {parseFloat(mat.custo_mp_kg).toFixed(2)}/kg | Rend: {parseFloat(mat.rendimento).toFixed(2)} kg/un</span>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Cost form */}
+                            <form onSubmit={handleSaveCostLink} className="p-6 space-y-4">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                            SKU do Material <span className="text-red-500">*</span>
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={costForm.sku}
+                                            onChange={(e) => handleCostFormChange('sku', e.target.value)}
+                                            required
+                                            disabled
+                                            className="w-full px-3 py-2 bg-gray-100 border border-gray-300 rounded-lg text-xs font-bold text-gray-500 cursor-not-allowed"
+                                        />
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                            Nome / Descrição <span className="text-red-500">*</span>
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={costForm.nome}
+                                            onChange={(e) => handleCostFormChange('nome', e.target.value)}
+                                            required
+                                            placeholder="Ex: Filme Termoencolhível Promaflex"
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-semibold text-gray-800 focus:ring-2 focus:ring-slate-500 focus:outline-none"
+                                        />
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                            Custo MP por kg (R$) <span className="text-red-500">*</span>
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={costForm.custo_mp_kg}
+                                            onChange={(e) => handleCostFormChange('custo_mp_kg', e.target.value)}
+                                            required
+                                            placeholder="Ex: 14.50"
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-bold text-gray-800 focus:ring-2 focus:ring-slate-500 focus:outline-none"
+                                        />
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                            Rendimento (kg / un) <span className="text-red-500">*</span>
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={costForm.rendimento}
+                                            onChange={(e) => handleCostFormChange('rendimento', e.target.value)}
+                                            required
+                                            placeholder="Ex: 0.1250"
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-bold text-gray-800 focus:ring-2 focus:ring-slate-500 focus:outline-none"
+                                        />
+                                    </div>
+
+                                    <div className="md:col-span-2">
+                                        <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                            Índice de Impostos (%) <span className="text-red-500">*</span>
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={costForm.indice_impostos}
+                                            onChange={(e) => handleCostFormChange('indice_impostos', e.target.value)}
+                                            required
+                                            placeholder="Ex: 22.25"
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-bold text-gray-800 focus:ring-2 focus:ring-slate-500 focus:outline-none"
+                                        />
+                                    </div>
+                                </div>
+
+                                {/* Modal Footer Actions */}
+                                <div className="flex gap-3 justify-end pt-4 border-t border-gray-150">
                                     <button
+                                        type="button"
                                         onClick={() => {
-                                            setShowPartitionModal(false)
-                                            setPartitionReason('')
+                                            setShowLinkCostModal(false);
+                                            setLinkingItem(null);
                                         }}
-                                        className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors"
+                                        className="px-4 py-2 bg-gray-200 text-gray-700 text-xs font-bold rounded-lg hover:bg-gray-300 transition-colors cursor-pointer"
                                     >
                                         Cancelar
                                     </button>
                                     <button
-                                        onClick={handleSuggestPartition}
-                                        disabled={!partitionReason || partitionReason.trim().length < 10}
-                                        className={`px-4 py-2 rounded-lg transition-colors ${partitionReason && partitionReason.trim().length >= 10
-                                            ? 'bg-purple-600 text-white hover:bg-purple-700'
-                                            : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                                            }`}
+                                        type="submit"
+                                        disabled={savingCost}
+                                        className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 shadow-md"
                                     >
-                                        Sugerir Partição
+                                        {savingCost ? 'Salvando...' : 'Confirmar Vínculo'}
                                     </button>
                                 </div>
-                            </div>
+                            </form>
                         </div>
                     </div>
                 )}

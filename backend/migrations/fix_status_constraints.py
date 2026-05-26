@@ -64,12 +64,19 @@ def run_migration():
                     'DRAFT',
                     'SUBMITTED',
                     'APPROVED',
+                    'MANUFACTURING',
+                    'SHIPPING',
+                    'FINANCE',
+                    'COMPLETED',
+                    'CANCELLED',
+                    'WAITING_COMMERCIAL_PARTITION',
+                    'ANALISE_CREDITO',
+                    'ARCHIVED',
+                    'ARCHIVED_PARTITIONED',
+                    'WAITING_MATERIAL',
                     'IN_PROGRESS',
                     'WAITING_DISPATCH',
-                    'WAITING_COMMERCIAL_PARTITION',
-                    'AUDIT_PENDING',
-                    'COMPLETED',
-                    'CANCELLED'
+                    'AUDIT_PENDING'
                 ]
                 for status in statuses:
                     print(f"{get_timestamp()}   - {status}")
@@ -81,12 +88,19 @@ def run_migration():
                         'DRAFT',
                         'SUBMITTED',
                         'APPROVED',
+                        'MANUFACTURING',
+                        'SHIPPING',
+                        'FINANCE',
+                        'COMPLETED',
+                        'CANCELLED',
+                        'WAITING_COMMERCIAL_PARTITION',
+                        'ANALISE_CREDITO',
+                        'ARCHIVED',
+                        'ARCHIVED_PARTITIONED',
+                        'WAITING_MATERIAL',
                         'IN_PROGRESS',
                         'WAITING_DISPATCH',
-                        'WAITING_COMMERCIAL_PARTITION',
-                        'AUDIT_PENDING',
-                        'COMPLETED',
-                        'CANCELLED'
+                        'AUDIT_PENDING'
                     ));
                 """))
                 print(f"{get_timestamp()} [SUCCESS] New constraint added")

@@ -47,11 +47,21 @@ STATUS_DISPLAY_MAP = {
     "AUDIT_PENDING": "Financeiro",
     "COMPLETED": "Financeiro",
     "ANALISE_CREDITO": "Financeiro",
-    "CANCELLED": "Cancelado"
+    "CANCELLED": "Cancelado",
+    "WAITING_MATERIAL": "PCP",
+    "ARCHIVED_PARTITIONED": "Arquivado"
 }
 
-# Reverse mapping for API compatibility
-DISPLAY_TO_DB_STATUS = {v: k for k, v in STATUS_DISPLAY_MAP.items()}
+# Reverse mapping for API compatibility - mapped to primary DB status to avoid fallback duplicates
+DISPLAY_TO_DB_STATUS = {
+    "Comercial": "SUBMITTED",
+    "PCP": "APPROVED",
+    "Produção/Embalagem": "MANUFACTURING",
+    "Faturamento/Expedição": "SHIPPING",
+    "Financeiro": "FINANCE",
+    "Cancelado": "CANCELLED",
+    "Arquivado": "ARCHIVED_PARTITIONED"
+}
 
 # Status flow for bidirectional movement - Standardized 5 Columns
 STATUS_FLOW = {
@@ -68,7 +78,9 @@ STATUS_FLOW = {
     "IN_PROGRESS": {"next": "SHIPPING", "prev": "APPROVED"},
     "WAITING_DISPATCH": {"next": "FINANCE", "prev": "IN_PROGRESS"},
     "AUDIT_PENDING": {"next": "COMPLETED", "prev": "WAITING_DISPATCH"},
-    "ANALISE_CREDITO": {"next": "COMPLETED", "prev": None}
+    "ANALISE_CREDITO": {"next": "COMPLETED", "prev": None},
+    "WAITING_MATERIAL": {"next": "APPROVED", "prev": "SUBMITTED"},
+    "ARCHIVED_PARTITIONED": {"next": None, "prev": None}
 }
 
 
@@ -180,7 +192,7 @@ async def get_kanban_board(
     # Financeiro: FINANCE (fallback AUDIT_PENDING, COMPLETED, ANALISE_CREDITO)
     status_columns = [
         ("Comercial", ["SUBMITTED", "DRAFT", "WAITING_COMMERCIAL_PARTITION"]),
-        ("PCP", ["APPROVED"]),
+        ("PCP", ["APPROVED", "WAITING_MATERIAL"]),
         ("Produção/Embalagem", ["MANUFACTURING", "IN_PROGRESS"]),
         ("Faturamento/Expedição", ["SHIPPING", "WAITING_DISPATCH"]),
         ("Financeiro", ["FINANCE", "AUDIT_PENDING", "COMPLETED", "ANALISE_CREDITO"])
@@ -693,7 +705,7 @@ async def get_handoff_history(
     now_naive = to_naive(datetime.utcnow())
     po_created_naive = to_naive(po.created_at)
     
-    is_archived = (po.status_macro == "ARCHIVED")
+    is_archived = (po.status_macro in ["ARCHIVED", "ARCHIVED_PARTITIONED"])
     if is_archived:
         # SLA timer stops at last archiving transition log
         last_transition_naive = to_naive(logs[-1].created_at) if logs else to_naive(po.updated_at)
@@ -773,12 +785,22 @@ async def get_handoff_history(
     if po_created_naive:
         total_elapsed_hours = (now_naive - po_created_naive).total_seconds() / 3600.0
         
+    # Calculate freeze hold time
+    hold_time_seconds = po.total_hold_time_seconds or 0
+    if po.sla_paused_at:
+        p_at = po.sla_paused_at.replace(tzinfo=None) if po.sla_paused_at.tzinfo else po.sla_paused_at
+        hold_time_seconds += int((datetime.utcnow() - p_at).total_seconds())
+        
+    hold_time_hours = hold_time_seconds / 3600.0
+    total_elapsed_hours = max(0.0, total_elapsed_hours - hold_time_hours)
+        
     # Current Area elapsed
     current_area_elapsed_hours = 0.0
     if is_archived:
         current_area_elapsed_hours = 0.0
     elif formatted_history:
         current_area_elapsed_hours = formatted_history[-1]["duration_seconds"] / 3600.0
+        current_area_elapsed_hours = max(0.0, current_area_elapsed_hours - hold_time_hours)
         
     # Construct chronological transitions history
     transitions = []
@@ -789,7 +811,7 @@ async def get_handoff_history(
         "date": po_created_naive.strftime("%d/%m/%Y %H:%M:%S") if po_created_naive else "",
         "user": creator_name,
         "from_to": f"Criado ➔ {initial_area}",
-        "reason": ""
+        "reason": "Conferido" if initial_area == "Comercial" else ""
     })
     
     # Subsequent movements
@@ -1473,6 +1495,7 @@ async def return_po_status(
     """
     Return PO to the previous status in the workflow.
     Requires a mandatory reason (min 10 chars) and logs in AuditLog.
+    Enforces the mandatory return labels dropdown.
     """
     if not reason or len(reason.strip()) < 10:
         raise HTTPException(
@@ -1480,6 +1503,12 @@ async def return_po_status(
             detail="Motivo da devolução deve ter pelo menos 10 caracteres"
         )
     
+    # Enforce dropdown return labels
+    valid_labels = ["[Particionamento]", "[Ajuste de Personalização]", "[Erro de Dados ONET]", "[Outros]"]
+    reason_clean = reason.strip()
+    if not any(reason_clean.startswith(label) for label in valid_labels):
+        reason_clean = f"[Outros]: {reason_clean}"
+        
     po = db.query(PurchaseOrder).filter(
         PurchaseOrder.id == po_id,
         PurchaseOrder.tenant_id == current_user.tenant_id
@@ -1510,7 +1539,7 @@ async def return_po_status(
         po.partition_metadata = {}
     meta = dict(po.partition_metadata)
     meta["priority_note"] = {
-        "text": reason,
+        "text": reason_clean,
         "from_area": STATUS_DISPLAY_MAP.get(from_status, from_status),
         "target_area": STATUS_DISPLAY_MAP.get(prev_status, prev_status),
         "timestamp": datetime.utcnow().isoformat(),
@@ -1525,10 +1554,10 @@ async def return_po_status(
         from_status=from_status,
         to_status=prev_status,
         current_user=current_user,
-        justification=f"DEVOLUÇÃO: {reason}",
+        justification=f"DEVOLUÇÃO: {reason_clean}",
         is_exception=False,
         extra_data={
-            "return_reason": reason,
+            "return_reason": reason_clean,
             "action_type": "RETURN"
         }
     )
@@ -1541,50 +1570,172 @@ async def return_po_status(
         "po_id": po_id,
         "from_status": STATUS_DISPLAY_MAP.get(from_status, from_status),
         "to_status": STATUS_DISPLAY_MAP.get(prev_status, prev_status),
-        "reason": reason
+        "reason": reason_clean
     }
 
 
+from pydantic import BaseModel
+from typing import Dict, List
+
+class SuggestPartitionBody(BaseModel):
+    po_id: Optional[str] = None
+    reason: Optional[str] = None
+    qty_splits: Optional[Dict[str, List[int]]] = None
+
 @router.post("/suggest-partition")
 async def suggest_partition(
-    po_id: str,
-    reason: str,
+    payload: Optional[SuggestPartitionBody] = None,
+    po_id: Optional[str] = None,
+    reason: Optional[str] = None,
     current_user: UserInfo = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
-    PCP-specific action: Suggest partition and move PO back to Comercial
-    with WAITING_COMMERCIAL_PARTITION status.
+    PCP-specific action: Suggest partition, create child POs, move PO status to WAITING_COMMERCIAL_PARTITION.
     """
-    if not reason or len(reason.strip()) < 10:
+    # Resolve parameters
+    resolved_po_id = (payload.po_id if payload else None) or po_id
+    resolved_reason = (payload.reason if payload else None) or reason
+    qty_splits = payload.qty_splits if payload else None
+    
+    if not resolved_reason or len(resolved_reason.strip()) < 10:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Motivo da sugestão de partição deve ter pelo menos 10 caracteres"
         )
-    
+        
     po = db.query(PurchaseOrder).filter(
-        PurchaseOrder.id == po_id,
+        PurchaseOrder.id == resolved_po_id,
         PurchaseOrder.tenant_id == current_user.tenant_id
     ).first()
     
     if not po:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Pedido {po_id} não encontrado"
+            detail=f"Pedido {resolved_po_id} não encontrado"
         )
-    
-    # Verify PO is in PCP stage
+        
     if po.status_macro != "APPROVED":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Sugestão de partição só pode ser feita no estágio PCP"
         )
-    
-    # Update status to WAITING_COMMERCIAL_PARTITION
+        
+    total_quantity = sum(item.quantity for item in po.items)
+    if total_quantity <= 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Não é possível sugerir partição para um pedido com quantidade total menor ou igual a 1"
+        )
+        
+    # Update parent status to WAITING_COMMERCIAL_PARTITION
     from_status = po.status_macro
     po.status_macro = "WAITING_COMMERCIAL_PARTITION"
-    po.partition_reason = reason
+    po.partition_reason = resolved_reason
     po.updated_at = datetime.utcnow()
+    
+    import math
+    # Create Child 1 and Child 2 immediately
+    child1 = PurchaseOrder(
+        tenant_id=po.tenant_id,
+        po_number=f"{po.po_number}-C1",
+        status_macro="WAITING_COMMERCIAL_PARTITION",
+        parent_po_id=po.id,
+        shipping_cost=0.0000, # 4-decimal precision internally!
+        is_partitioned=False,
+        partition_reason=resolved_reason,
+        partition_metadata={
+            "client_name": po.client_name,
+            "expected_delivery_date": po.expected_delivery_date.isoformat() if po.expected_delivery_date else None,
+            "parent_po_number": po.po_number,
+            "partition_type": "CHILD_1"
+        }
+    )
+    child2 = PurchaseOrder(
+        tenant_id=po.tenant_id,
+        po_number=f"{po.po_number}-C2",
+        status_macro="WAITING_COMMERCIAL_PARTITION",
+        parent_po_id=po.id,
+        shipping_cost=0.0000, # 4-decimal precision internally!
+        is_partitioned=False,
+        partition_reason=resolved_reason,
+        partition_metadata={
+            "client_name": po.client_name,
+            "expected_delivery_date": po.expected_delivery_date.isoformat() if po.expected_delivery_date else None,
+            "parent_po_number": po.po_number,
+            "partition_type": "CHILD_2"
+        }
+    )
+    db.add(child1)
+    db.add(child2)
+    db.flush() # get child IDs
+
+    # Copy items with split quantities
+    for idx, item in enumerate(po.items):
+        q1, q2 = 0, 0
+        if qty_splits and (str(item.id) in qty_splits or item.sku in qty_splits):
+            split = qty_splits.get(str(item.id)) or qty_splits.get(item.sku)
+            q1, q2 = int(split[0]), int(split[1])
+            if q1 + q2 != item.quantity:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"A soma das quantidades divididas ({q1} + {q2}) para o item {item.sku} deve ser igual à quantidade original ({item.quantity})"
+                )
+        else:
+            # Fallback auto split
+            if item.quantity > 1:
+                q1 = int(math.ceil(item.quantity / 2.0))
+                q2 = item.quantity - q1
+            else:
+                if idx % 2 == 0:
+                    q1 = 1
+                    q2 = 0
+                else:
+                    q1 = 0
+                    q2 = 1
+                    
+        # Add to child 1 if quantity > 0
+        if q1 > 0:
+            c1_item = OrderItem(
+                po_id=child1.id,
+                tenant_id=po.tenant_id,
+                sku=item.sku,
+                quantity=q1,
+                price=item.price,
+                status_item=item.status_item,
+                unit_value=item.unit_value,
+                item_total_value=float(item.price) * q1,
+                is_personalized=item.is_personalized,
+                is_new_client=item.is_new_client,
+                customization_notes=item.customization_notes,
+                attachment_path=item.attachment_path,
+                extra_metadata=item.extra_metadata
+            )
+            db.add(c1_item)
+            
+        # Add to child 2 if quantity > 0
+        if q2 > 0:
+            c2_item = OrderItem(
+                po_id=child2.id,
+                tenant_id=po.tenant_id,
+                sku=item.sku,
+                quantity=q2,
+                price=item.price,
+                status_item=item.status_item,
+                unit_value=item.unit_value,
+                item_total_value=float(item.price) * q2,
+                is_personalized=item.is_personalized,
+                is_new_client=item.is_new_client,
+                customization_notes=item.customization_notes,
+                attachment_path=item.attachment_path,
+                extra_metadata=item.extra_metadata
+            )
+            db.add(c2_item)
+            
+    db.flush()
+    # Compute total values
+    child1.po_total_value = sum(float(it.item_total_value or 0) for it in child1.items)
+    child2.po_total_value = sum(float(it.item_total_value or 0) for it in child2.items)
     
     # Create audit log
     log_po_status_transition(
@@ -1593,11 +1744,13 @@ async def suggest_partition(
         from_status=from_status,
         to_status="WAITING_COMMERCIAL_PARTITION",
         current_user=current_user,
-        justification=f"SUGESTÃO DE PARTIÇÃO: {reason}",
+        justification=f"SUGESTÃO DE PARTIÇÃO: {resolved_reason}",
         is_exception=False,
         extra_data={
-            "partition_reason": reason,
-            "action_type": "SUGGEST_PARTITION"
+            "partition_reason": resolved_reason,
+            "action_type": "SUGGEST_PARTITION",
+            "child1_id": str(child1.id),
+            "child2_id": str(child2.id)
         }
     )
     
@@ -1606,10 +1759,12 @@ async def suggest_partition(
     return {
         "success": True,
         "message": "Sugestão de partição enviada para Comercial",
-        "po_id": po_id,
+        "po_id": resolved_po_id,
         "from_status": STATUS_DISPLAY_MAP.get(from_status, from_status),
         "to_status": STATUS_DISPLAY_MAP.get("WAITING_COMMERCIAL_PARTITION", "Aguardando Partição"),
-        "reason": reason
+        "reason": resolved_reason,
+        "child1_id": str(child1.id),
+        "child2_id": str(child2.id)
     }
 
 
@@ -1748,3 +1903,236 @@ async def nuke_tenant_data(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erro ao higienizar banco: {str(exc)}"
         )
+
+
+class ApprovePartitionBody(BaseModel):
+    freight_c1: float
+    freight_c2: float
+
+@router.post("/pos/{po_id}/approve-partition")
+async def approve_partition(
+    po_id: str,
+    body: ApprovePartitionBody,
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Commercial approves the partition by manually allocating freight split.
+    """
+    import uuid
+    po = db.query(PurchaseOrder).filter(
+        PurchaseOrder.id == po_id,
+        PurchaseOrder.tenant_id == current_user.tenant_id
+    ).first()
+    
+    if not po:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Pedido {po_id} não encontrado"
+        )
+        
+    if po.status_macro != "WAITING_COMMERCIAL_PARTITION":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Pedido não está aguardando partição. Status atual: {po.status_macro}"
+        )
+        
+    children = db.query(PurchaseOrder).filter(
+        PurchaseOrder.parent_po_id == po.id,
+        PurchaseOrder.tenant_id == current_user.tenant_id
+    ).order_by(PurchaseOrder.created_at).all()
+    
+    if len(children) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Este pedido não possui filhos criados para aprovar a partição"
+        )
+        
+    # High-Precision Decimals check (4 decimal places)
+    parent_freight = float(po.shipping_cost or 0)
+    split_sum = body.freight_c1 + body.freight_c2
+    
+    if abs(split_sum - parent_freight) > 0.01:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"A soma do frete dos filhos (R$ {split_sum:.4f}) deve ser igual ao frete do pai (R$ {parent_freight:.4f})"
+        )
+        
+    # Apply high-precision freight splits
+    children[0].shipping_cost = round(body.freight_c1, 4)
+    children[1].shipping_cost = round(body.freight_c2, 4)
+    
+    # Move parent PO to ARCHIVED_PARTITIONED
+    from_status = po.status_macro
+    po.status_macro = "ARCHIVED_PARTITIONED"
+    po.updated_at = datetime.utcnow()
+    
+    # Move children to PCP (APPROVED)
+    for child in children:
+        child.status_macro = "APPROVED"
+        child.updated_at = datetime.utcnow()
+        
+    # Log parent transition
+    log_po_status_transition(
+        db=db,
+        po=po,
+        from_status=from_status,
+        to_status="ARCHIVED_PARTITIONED",
+        current_user=current_user,
+        justification="Partição aprovada pelo comercial. Pedido pai arquivado.",
+        extra_data={"action_type": "APPROVE_PARTITION_PARENT"}
+    )
+    
+    # Log children transitions
+    for child in children:
+        log_po_status_transition(
+            db=db,
+            po=child,
+            from_status="WAITING_COMMERCIAL_PARTITION",
+            to_status="APPROVED",
+            current_user=current_user,
+            justification=f"Partição criada a partir de {po.po_number}. Movido para PCP.",
+            extra_data={"action_type": "APPROVE_PARTITION_CHILD", "parent_po_number": po.po_number}
+        )
+        
+    db.commit()
+    
+    return {
+        "success": True,
+        "message": "Partição aprovada com sucesso",
+        "parent_po_id": po_id,
+        "child1": {"id": str(children[0].id), "po_number": children[0].po_number, "freight": float(children[0].shipping_cost)},
+        "child2": {"id": str(children[1].id), "po_number": children[1].po_number, "freight": float(children[1].shipping_cost)}
+    }
+
+
+@router.post("/pos/{po_id}/pause-material")
+async def pause_material(
+    po_id: str,
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Pause the SLA of the PO by setting it to WAITING_MATERIAL and recording sla_paused_at.
+    """
+    po = db.query(PurchaseOrder).filter(
+        PurchaseOrder.id == po_id,
+        PurchaseOrder.tenant_id == current_user.tenant_id
+    ).first()
+    
+    if not po:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Pedido {po_id} não encontrado"
+        )
+        
+    from_status = po.status_macro
+    po.status_macro = "WAITING_MATERIAL"
+    po.sla_paused_at = datetime.utcnow()
+    po.updated_at = datetime.utcnow()
+    
+    # Log status transition
+    log_po_status_transition(
+        db=db,
+        po=po,
+        from_status=from_status,
+        to_status="WAITING_MATERIAL",
+        current_user=current_user,
+        justification="Aguardar Insumo: SLA de produção congelado.",
+        extra_data={"action_type": "PAUSE_MATERIAL"}
+    )
+    
+    db.commit()
+    
+    return {
+        "success": True,
+        "message": "Pedido pausado (Aguardando Insumo) com sucesso",
+        "po_id": po_id,
+        "status": po.status_macro
+    }
+
+
+@router.post("/pos/{po_id}/resume-material")
+async def resume_material(
+    po_id: str,
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Resume the SLA of the PO, updating hold duration delta and logging in AuditLog.
+    """
+    po = db.query(PurchaseOrder).filter(
+        PurchaseOrder.id == po_id,
+        PurchaseOrder.tenant_id == current_user.tenant_id
+    ).first()
+    
+    if not po:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Pedido {po_id} não encontrado"
+        )
+        
+    if po.status_macro != "WAITING_MATERIAL":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Pedido não está em pausa de material. Status atual: {po.status_macro}"
+        )
+        
+    now = datetime.utcnow()
+    paused_at = po.sla_paused_at
+    hold_seconds = 0
+    
+    if paused_at:
+        # If timezone-aware vs timezone-naive, make them naive
+        p_at = paused_at.replace(tzinfo=None) if paused_at.tzinfo else paused_at
+        hold_seconds = int((now - p_at).total_seconds())
+        po.total_hold_time_seconds = (po.total_hold_time_seconds or 0) + hold_seconds
+        
+    po.sla_paused_at = None
+    from_status = po.status_macro
+    po.status_macro = "APPROVED" # Move back to PCP (APPROVED)
+    po.updated_at = now
+    
+    # Calculate formatted duration for justification
+    total_held = po.total_hold_time_seconds or 0
+    # Current pause duration formatting
+    cur_held = hold_seconds
+    
+    hrs = cur_held // 3600
+    mins = (cur_held % 3600) // 60
+    secs = cur_held % 60
+    
+    duration_str = ""
+    if hrs > 0:
+        duration_str += f"{hrs}h "
+    if mins > 0 or hrs > 0:
+        duration_str += f"{mins}m "
+    duration_str += f"{secs}s"
+    
+    justification = f"SLA retomado. O pedido ficou pausado por {duration_str.strip()}"
+    
+    # Log status transition
+    log_po_status_transition(
+        db=db,
+        po=po,
+        from_status=from_status,
+        to_status="APPROVED",
+        current_user=current_user,
+        justification=justification,
+        extra_data={
+            "action_type": "RESUME_MATERIAL",
+            "hold_seconds": cur_held,
+            "total_hold_seconds": total_held,
+            "duration_formatted": duration_str.strip()
+        }
+    )
+    
+    db.commit()
+    
+    return {
+        "success": True,
+        "message": "SLA retomado com sucesso",
+        "po_id": po_id,
+        "status": po.status_macro,
+        "justification": justification
+    }

@@ -120,35 +120,46 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
         const indicators = []
         const metadata = safepo.extra_metadata || {}
 
-        if (metadata.is_export) {
+        const isPersonalized = metadata.is_personalized || metadata.is_urgent || safepo.priority === 'high' || (safepo.items && safepo.items.some(it => it.is_personalized))
+        if (isPersonalized) {
             indicators.push({
-                ...STRATEGIC_INDICATORS.is_export,
+                label: 'Personalizado',
+                key: 'is_personalized',
+                icon: Zap,
+                color: 'red',
+                tooltip: 'Personalizado - Pedido Customizado'
+            })
+        }
+
+        const isNewClient = metadata.is_new_client || safepo.is_new_client || metadata.is_first_order || false
+        if (isNewClient) {
+            indicators.push({
+                label: 'Cliente Novo',
+                key: 'is_new_client',
+                icon: Star,
+                color: 'amber',
+                tooltip: 'Cliente Novo - Garantir qualidade premium'
+            })
+        }
+
+        if (metadata.is_export || safepo.is_export) {
+            indicators.push({
+                label: 'Exportação',
                 key: 'is_export',
-                icon: Globe
+                icon: Globe,
+                color: 'blue',
+                tooltip: 'Pedido de exportação - Documentação internacional'
             })
         }
 
-        if (metadata.is_first_order) {
+        const isReplacement = safepo.is_replacement || metadata.is_replacement || false
+        if (isReplacement) {
             indicators.push({
-                ...STRATEGIC_INDICATORS.is_first_order,
-                key: 'is_first_order',
-                icon: Star
-            })
-        }
-
-        if (metadata.is_replacement) {
-            indicators.push({
-                ...STRATEGIC_INDICATORS.is_replacement,
+                label: 'Troca/Reposição',
                 key: 'is_replacement',
-                icon: RefreshCw
-            })
-        }
-
-        if (metadata.is_urgent || safepo.priority === 'high') {
-            indicators.push({
-                ...STRATEGIC_INDICATORS.is_urgent,
-                key: 'is_urgent',
-                icon: Zap
+                icon: RefreshCw,
+                color: 'cyan',
+                tooltip: 'Troca/Reposição - SLA Prioritário (50%)'
             })
         }
 
@@ -157,6 +168,23 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
 
     const strategicIndicators = getStrategicIndicators()
     const slaStatus = getSLAStatus()
+
+    // Calculate SLA elapsed percentage for premium progress indicator on card
+    const slaPercent = useMemo(() => {
+        if (!safepo.created_at || (!safepo.expected_delivery_date && !safepo.data_limite)) return null
+        const start = new Date(safepo.created_at).getTime()
+        const originalEnd = new Date(safepo.expected_delivery_date || safepo.data_limite).getTime()
+        const now = new Date().getTime()
+        if (originalEnd <= start) return 100
+        
+        let totalSlaDuration = originalEnd - start
+        if (isReplacement) {
+            totalSlaDuration = totalSlaDuration * 0.5
+        }
+        
+        const percent = ((now - start) / totalSlaDuration) * 100
+        return Math.max(0, Math.min(100, percent))
+    }, [safepo.created_at, safepo.expected_delivery_date, safepo.data_limite, isReplacement])
 
     // Check if this PO is waiting for partition decision
     const isWaitingPartition = safepo.extra_metadata?.waiting_partition ||
@@ -181,12 +209,12 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
                 {isReplacement && (
                     <div className="mb-2">
                         <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold bg-cyan-100 text-cyan-800 border border-cyan-300">
-                            🔄 TROCA
+                            🔄 TROCA/REPOSIÇÃO
                         </span>
                     </div>
                 )}
 
-                <p className="text-xs text-gray-700 font-semibold mb-1">
+                <p className="font-bold text-gray-800 mb-1" style={{ fontSize: '12px' }}>
                     Cliente: {safepo.client_name}
                 </p>
                 <p className="text-[10px] text-gray-500 mb-2">
@@ -201,6 +229,18 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
                         {formatDate(safepo.expected_delivery_date)}
                     </span>
                 </div>
+
+                {/* Mini SLA progress bar in compact view */}
+                {slaPercent !== null && (
+                    <div className="mt-2" title={isReplacement ? 'SLA Prioritário (Troca)' : 'Progresso de SLA'}>
+                        <div className="w-full bg-gray-150 rounded-full h-1 overflow-hidden border border-gray-200">
+                            <div 
+                                className={`h-full transition-all duration-500 ${isReplacement ? 'bg-cyan-500' : 'bg-emerald-500'}`} 
+                                style={{ width: `${slaPercent}%` }}
+                            />
+                        </div>
+                    </div>
+                )}
             </div>
         )
     }
@@ -220,12 +260,12 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
                 </div>
             )}
 
-            {/* Cyan Badge for Replacement (Troca) */}
+            {/* Cyan Badge for Replacement (Troca/Reposição) */}
             {isReplacement && (
-                <div className="mb-3 px-3 py-2 bg-cyan-50 border border-cyan-350 rounded-lg flex items-center gap-2">
+                <div className="mb-3 px-3 py-2 bg-cyan-50 border border-cyan-300 rounded-lg flex items-center gap-2" title="SLA Prioritário (Troca)">
                     <RefreshCw className="w-4 h-4 text-cyan-600 animate-spin-slow" />
                     <span className="text-xs font-extrabold text-cyan-700">
-                        🔄 CRÉDITO PRÉ-APROVADO (TROCA)
+                        🔄 CRÉDITO PRÉ-APROVADO (TROCA/REPOSIÇÃO)
                     </span>
                 </div>
             )}
@@ -255,7 +295,7 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
                             </div>
                         )}
                     </div>
-                    <p className="text-xs text-gray-800 font-semibold mb-0.5">
+                    <p className="font-bold text-gray-800 mb-0.5" style={{ fontSize: '12px' }}>
                         Cliente: {safepo.client_name}
                     </p>
                     <p className="text-[11px] text-gray-500">
@@ -372,6 +412,22 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
                     </div>
                 )}
             </div>
+
+            {/* SLA Progress Bar on Card */}
+            {slaPercent !== null && (
+                <div className="mt-3 pt-3 border-t border-gray-100" title={isReplacement ? 'SLA Prioritário (Troca)' : 'Progresso de SLA'}>
+                    <div className="flex justify-between text-[10px] text-gray-500 font-semibold mb-1">
+                        <span>SLA {isReplacement ? '(Prioritário)' : ''}</span>
+                        <span>{slaPercent.toFixed(0)}%</span>
+                    </div>
+                    <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden border border-gray-250">
+                        <div 
+                            className={`h-full transition-all duration-500 ${isReplacement ? 'bg-cyan-500' : 'bg-emerald-500'}`} 
+                            style={{ width: `${slaPercent}%` }}
+                        />
+                    </div>
+                </div>
+            )}
 
             {/* SLA Indicator */}
             {slaStatus !== 'green' && (
