@@ -29,7 +29,7 @@ const KanbanPage = () => {
     const [searchTerm, setSearchTerm] = useState('')
     const [compactView, setCompactView] = useState(false)
     const [selectedPO, setSelectedPO] = useState(null)
-    const [isMetadataExpanded, setIsMetadataExpanded] = useState(false)
+    const [isDetailsOpen, setIsDetailsOpen] = useState(false)
     const [showDetailsModal, setShowDetailsModal] = useState(false)
     const [editingCommission, setEditingCommission] = useState(false)
     const [commissionValue, setCommissionValue] = useState('')
@@ -408,9 +408,17 @@ const KanbanPage = () => {
 
     const handleCardClick = async (po) => {
         setSelectedPO(po)
-        setIsMetadataExpanded(false) // Accordion state: Ensure the 'Detalhe do Pedido' accordion defaults to CLOSED so the modal looks clean upon opening.
+        setIsDetailsOpen(false) // Accordion state: Ensure the 'Detalhe do Pedido' accordion defaults to CLOSED so the modal looks clean upon opening.
         setShowDetailsModal(true)
         setHandoffHistory(null)
+
+        // Fetch up-to-date PO details from database to ensure fresh fields (like shipping_cost) are loaded
+        try {
+            const poResponse = await api.get(`/kanban/pos/${po.id}`)
+            setSelectedPO(poResponse.data)
+        } catch (err) {
+            console.error('Error fetching PO details:', err)
+        }
 
         // Reset Financeiro checklist
         setChecklistFinanceiro({
@@ -586,6 +594,18 @@ const KanbanPage = () => {
                 ...updatedChecklist
             })
 
+            setSelectedPO(prev => {
+                if (!prev) return prev;
+                return {
+                    ...prev,
+                    partition_metadata: {
+                        ...(prev.partition_metadata || {}),
+                        logistics_checklist: updatedChecklist
+                    }
+                };
+            });
+            fetchBoard();
+
             if (response.data.can_dispatch) {
                 showSuccess('✅ Checklist completo! Pronto para despacho.')
             }
@@ -606,7 +626,7 @@ const KanbanPage = () => {
 
         try {
             // Upload file
-            const uploadResponse = await api.post('/upload', formData, {
+            const uploadResponse = await api.post('/import/upload-attachment', formData, {
                 headers: { 'Content-Type': 'multipart/form-data' }
             })
 
@@ -620,6 +640,18 @@ const KanbanPage = () => {
                 po_id: selectedPO.id,
                 ...updatedChecklist
             })
+
+            setSelectedPO(prev => {
+                if (!prev) return prev;
+                return {
+                    ...prev,
+                    partition_metadata: {
+                        ...(prev.partition_metadata || {}),
+                        logistics_checklist: updatedChecklist
+                    }
+                };
+            });
+            fetchBoard();
 
             showSuccess(`${field === 'foto_carga_path' ? 'Foto da Carga' : 'Foto do Canhoto/NF'} enviada com sucesso`)
 
@@ -1569,8 +1601,9 @@ const KanbanPage = () => {
                                                                                 <div className="flex flex-wrap gap-2.5">
                                                                                     <button
                                                                                         onClick={() => {
-                                                                                            setFreightC1('');
-                                                                                            setFreightC2('');
+                                                                                            const originalFreight = parseFloat(selectedPO.shipping_cost) || 0;
+                                                                                            setFreightC1((originalFreight / 2).toFixed(4));
+                                                                                            setFreightC2((originalFreight - originalFreight / 2).toFixed(4));
                                                                                             setShowFreightModal(true);
                                                                                         }}
                                                                                         className="inline-flex items-center justify-center px-3.5 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-lg cursor-pointer transition-colors shadow-2xs"
@@ -1724,7 +1757,7 @@ const KanbanPage = () => {
                                                                             </div>
                                                                         )}
                                                                         {!isActive ? (
-                                                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                                                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                                                                                 <div>
                                                                                     <span className="text-xs text-gray-500 font-semibold uppercase block">Embalagem</span>
                                                                                     <span className="font-semibold text-gray-800">{selectedPO.extra_metadata?.packaging_type || 'Não selecionado'}</span>
@@ -1732,10 +1765,6 @@ const KanbanPage = () => {
                                                                                 <div>
                                                                                     <span className="text-xs text-gray-500 font-semibold uppercase block">Data Programada</span>
                                                                                     <span className="font-semibold text-gray-800">{selectedPO.extra_metadata?.data_programada ? new Date(selectedPO.extra_metadata.data_programada + 'T00:00:00').toLocaleDateString('pt-BR') : 'Não agendada'}</span>
-                                                                                </div>
-                                                                                <div>
-                                                                                    <span className="text-xs text-gray-500 font-semibold uppercase block">Impedimento de Produção</span>
-                                                                                    <span className="font-medium text-gray-700">{getRobustImpediment() || 'Nenhum impedimento'}</span>
                                                                                 </div>
                                                                             </div>
                                                                         ) : (
@@ -1770,19 +1799,7 @@ const KanbanPage = () => {
                                                                                     />
                                                                                 </div>
 
-                                                                                <div className="md:col-span-2">
-                                                                                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
-                                                                                        Impedimento de Produção (Opcional)
-                                                                                    </label>
-                                                                                    <textarea
-                                                                                        value={localFields.production_impediment || ''}
-                                                                                        onChange={(e) => handleChangeLocalField('production_impediment', e.target.value)}
-                                                                                        onBlur={() => handleBlurLocalField('production_impediment')}
-                                                                                        placeholder="Descreva gargalos de matéria-prima ou maquinário..."
-                                                                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-850 font-medium"
-                                                                                        rows="2"
-                                                                                    />
-                                                                                </div>
+
 
                                                                                 {/* Sugerir Partição Button inside PCP Panel */}
                                                                                 <div className="md:col-span-2 mt-2 p-3.5 bg-purple-50 border border-purple-150 rounded-lg flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
@@ -2396,28 +2413,30 @@ const KanbanPage = () => {
                                     })()}
                                 </div>
 
-                                {/* PO-Level Metadata Accordion */}
-                                <div className="mb-6 border border-gray-200 rounded-lg overflow-hidden bg-white shadow-3xs">
-                                    <button
-                                        onClick={() => setIsMetadataExpanded(!isMetadataExpanded)}
-                                        className="w-full flex items-center justify-between p-4 bg-gray-50 hover:bg-gray-100 transition-colors text-left font-bold text-gray-900 text-sm cursor-pointer"
-                                    >
-                                        <span className="flex items-center gap-2">
-                                            <span>📋</span> Clique para ver detalhes
-                                        </span>
-                                        {isMetadataExpanded ? <ChevronDown className="w-5 h-5 text-gray-500" /> : <ChevronRight className="w-5 h-5 text-gray-500" />}
-                                    </button>
-                                    {isMetadataExpanded && (
-                                        <div className="p-4 bg-white border-t border-gray-200">
-                                            <MetadataVisualizer
-                                                metadata={selectedPO.extra_metadata || {}}
-                                                itemId={selectedPO.id}
-                                                onUpdate={null}
-                                                readOnly={true}
-                                            />
-                                        </div>
-                                    )}
-                                </div>
+                                 {/* PO-Level Metadata Accordion */}
+                                 <div className="mb-6 border border-gray-200 rounded-lg overflow-hidden bg-white shadow-3xs">
+                                     <button
+                                         onClick={() => setIsDetailsOpen(!isDetailsOpen)}
+                                         className="w-full flex items-center justify-between p-4 bg-gray-50 hover:bg-gray-100 transition-colors text-left font-bold text-gray-900 text-sm cursor-pointer"
+                                     >
+                                         <span className="flex items-center gap-2">
+                                             <span>📋</span> Clique para ver detalhes
+                                         </span>
+                                         <span className="text-gray-500 font-mono font-bold text-base leading-none select-none">
+                                             {isDetailsOpen ? '−' : '+'}
+                                         </span>
+                                     </button>
+                                     {isDetailsOpen && (
+                                         <div className="p-4 bg-white border-t border-gray-200">
+                                             <MetadataVisualizer
+                                                 metadata={selectedPO.extra_metadata || {}}
+                                                 itemId={selectedPO.id}
+                                                 onUpdate={null}
+                                                 readOnly={true}
+                                             />
+                                         </div>
+                                     )}
+                                 </div>
 
                                 {/* Items List */}
                                 {selectedPO.items && selectedPO.items.length > 0 && (
@@ -2488,8 +2507,8 @@ const KanbanPage = () => {
                                                             <td className="px-4 py-3 font-mono text-xs text-gray-650">{record.date}</td>
                                                             <td className="px-4 py-3 text-xs text-gray-600 font-semibold">{record.user}</td>
                                                             <td className="px-4 py-3 text-xs font-bold text-gray-900">{record.from_to}</td>
-                                                            <td className="px-4 py-3 text-xs text-gray-650 italic font-normal max-w-xs truncate" title={index === 0 && (record.from_to || '').includes('Criado ➔ Comercial') ? 'Conferido' : (record.reason || '—')}>
-                                                                {index === 0 && (record.from_to || '').includes('Criado ➔ Comercial') ? 'Conferido' : (record.reason || '—')}
+                                                            <td className="px-4 py-3 text-xs text-gray-650 italic font-normal max-w-xs truncate" title={record.reason || 'Sem justificativa'}>
+                                                                {record.reason || 'Sem justificativa'}
                                                             </td>
                                                         </tr>
                                                     ))}

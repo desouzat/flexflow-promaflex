@@ -854,10 +854,27 @@ async def get_handoff_history(
     transitions.append({
         "date": po_created_naive.strftime("%d/%m/%Y %H:%M:%S") if po_created_naive else "",
         "user": creator_name,
-        "from_to": f"Criado ➔ {initial_area}",
-        "reason": "Conferido" if initial_area == "Comercial" else ""
+        "from_to": f"Mesa Conf ➔ {initial_area}",
+        "reason": "CONFERIDO"
     })
     
+    # Standardize area names for Solutions Engineer mapping
+    def get_std_area_name(area_str):
+        if not area_str:
+            return ""
+        s = area_str.upper().strip()
+        if "COMERCIAL" in s:
+            return "COMERCIAL"
+        if "PCP" in s:
+            return "PCP"
+        if "PRODUÇÃO" in s or "PRODUCAO" in s or "EMBALAGEM" in s:
+            return "PRODUÇÃO"
+        if "FATURAMENTO" in s or "EXPEDIÇÃO" in s or "EXPEDICAO" in s:
+            return "FATURAMENTO"
+        if "FINANCEIRO" in s or "FINANCE" in s:
+            return "FINANCEIRO"
+        return s
+
     # Subsequent movements
     for log in logs:
         log_user = "Sistema"
@@ -867,15 +884,51 @@ async def get_handoff_history(
         from_area = STATUS_DISPLAY_MAP.get(log.from_status, log.from_status) if log.from_status else "Comercial"
         to_area = STATUS_DISPLAY_MAP.get(log.to_status, log.to_status) if log.to_status != "ARCHIVED" else "Arquivado"
         
-        reason = log.justification or ""
-        if log.extra_data:
-            if log.extra_data.get("return_reason"):
-                reason = log.extra_data.get("return_reason")
-            elif log.extra_data.get("partition_reason"):
-                reason = log.extra_data.get("partition_reason")
-            elif log.extra_data.get("audit_comment"):
-                reason = log.extra_data.get("audit_comment")
-                
+        std_from = get_std_area_name(from_area)
+        std_to = get_std_area_name(to_area)
+        
+        # Apply the Solutions Engineer's Reason Map strictly:
+        mapped_reason = None
+        
+        db_from = log.from_status
+        db_to = log.to_status
+        
+        if db_from == "APPROVED" and db_to == "SUBMITTED":
+            mapped_reason = "PARTICIONAMENTO"
+        elif db_from in ["MANUFACTURING", "IN_PROGRESS"] and db_to in ["APPROVED", "WAITING_MATERIAL"]:
+            mapped_reason = "VERIFICAR POSSIBILIDADES COM TIME DE NEGÓCIOS"
+        elif db_from in ["WAITING_DISPATCH", "SHIPPING"] and db_to in ["FINANCE", "AUDIT_PENDING", "COMPLETED", "ANALISE_CREDITO"]:
+            mapped_reason = "LIBERADO"
+        elif db_from in ["SUBMITTED", "DRAFT"] and db_to in ["FINANCE", "AUDIT_PENDING", "COMPLETED", "ANALISE_CREDITO"]:
+            mapped_reason = "ENVIO ANÁLISE DE CRÉDITO"
+            
+        # Fallback to display name mappings:
+        if not mapped_reason:
+            if std_from == "COMERCIAL" and std_to == "FINANCEIRO":
+                mapped_reason = "ENVIO ANÁLISE DE CRÉDITO"
+            elif std_from == "PCP" and std_to == "COMERCIAL":
+                mapped_reason = "PARTICIONAMENTO"
+            elif std_from == "PRODUÇÃO" and std_to == "PCP":
+                mapped_reason = "VERIFICAR POSSIBILIDADES COM TIME DE NEGÓCIOS"
+            elif std_from == "FATURAMENTO" and std_to == "FINANCEIRO":
+                mapped_reason = "LIBERADO"
+
+        if mapped_reason:
+            reason = mapped_reason
+        else:
+            reason = log.justification or ""
+            if log.extra_data:
+                if log.extra_data.get("return_reason"):
+                    reason = log.extra_data.get("return_reason")
+                elif log.extra_data.get("partition_reason"):
+                    reason = log.extra_data.get("partition_reason")
+                elif log.extra_data.get("audit_comment"):
+                    reason = log.extra_data.get("audit_comment")
+
+        # NO MORE [Outros] by default: If no specific reason exists, use a descriptive transition string
+        if not reason or reason.strip() in ["", "—", "-", "None", "null"]:
+            reason = f"Movimentação padrão de {from_area} para {to_area}"
+            
         transitions.append({
             "date": to_naive(log.created_at).strftime("%d/%m/%Y %H:%M:%S") if log.created_at else "",
             "user": log_user,
@@ -1329,6 +1382,9 @@ async def update_logistics_checklist(
     meta["logistics_checklist"] = logistics_checklist
     po.partition_metadata = meta
     po.updated_at = datetime.utcnow()
+    
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(po, "partition_metadata")
     
     # Check if all requirements are met
     checklist_complete = (

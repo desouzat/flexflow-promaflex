@@ -806,13 +806,18 @@ async def confirm_staging(
                         first_item_delivery = item.delivery_date
                         break
 
+            # Calculate total freight cost from items if freight_cost + additional_costs is 0
+            original_freight = po.freight_cost + po.additional_costs
+            if original_freight == 0 and po.items:
+                original_freight = sum(float(item.freight or 0.0) for item in po.items)
+
             new_po = PurchaseOrder(
                 id=uuid.uuid4(),
                 tenant_id=tenant_uuid,
                 po_number=po.po_number,
                 status_macro=po_status_macro,
                 created_by=user_uuid,
-                shipping_cost=po.freight_cost + po.additional_costs,
+                shipping_cost=original_freight,
                 po_total_value=po.po_total_value,
                 partition_metadata={
                     "client_name": po.client_name,

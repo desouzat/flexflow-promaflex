@@ -195,7 +195,7 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
         return (
             <div
                 onClick={() => onCardClick?.(safepo)}
-                className={`bg-white rounded-lg shadow-sm border border-gray-200 border-l-4 ${getSLABorderColor(slaStatus)} p-3 hover:shadow-md transition-shadow cursor-pointer`}
+                className={`bg-white rounded-lg shadow-sm border ${safepo.sla_paused_at ? 'ring-2 ring-gray-300 ring-offset-1 border-gray-300 shadow-gray-250' : 'border-gray-200'} border-l-4 ${getSLABorderColor(slaStatus)} p-3 hover:shadow-md transition-shadow cursor-pointer`}
             >
                 <div className="flex items-center justify-between mb-2">
                     <h3 className="font-semibold text-gray-900 text-sm">
@@ -205,6 +205,14 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
                         {getStatusIcon(safepo.status)}
                     </div>
                 </div>
+
+                {safepo.sla_paused_at && (
+                    <div className="mb-2">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-gray-100 text-gray-700 border border-gray-300 animate-pulse">
+                            ⏸️ SLA PAUSADO (AGUARDANDO INSUMO)
+                        </span>
+                    </div>
+                )}
 
                 {isReplacement && (
                     <div className="mb-2">
@@ -248,8 +256,17 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
     return (
         <div
             onClick={() => onCardClick?.(safepo)}
-            className={`bg-white rounded-lg shadow-sm border border-gray-200 border-l-4 ${getSLABorderColor(slaStatus)} p-4 hover:shadow-md transition-shadow cursor-pointer`}
+            className={`bg-white rounded-lg shadow-sm border ${safepo.sla_paused_at ? 'ring-2 ring-gray-300 ring-offset-1 border-gray-300 shadow-gray-250' : 'border-gray-200'} border-l-4 ${getSLABorderColor(slaStatus)} p-4 hover:shadow-md transition-shadow cursor-pointer`}
         >
+            {/* Gray Badge for Paused SLA */}
+            {safepo.sla_paused_at && (
+                <div className="mb-3 px-3 py-2 bg-gray-100 border border-gray-300 rounded-lg flex items-center gap-2 animate-pulse" title="⏸️ SLA PAUSADO (AGUARDANDO INSUMO)">
+                    <span className="text-xs font-extrabold text-gray-600 flex items-center gap-1.5">
+                        <span>⏸️</span> SLA PAUSADO (AGUARDANDO INSUMO)
+                    </span>
+                </div>
+            )}
+
             {/* Purple Badge for Partition Decision */}
             {isWaitingPartition && (
                 <div className="mb-3 px-3 py-2 bg-purple-100 border border-purple-300 rounded-lg flex items-center gap-2">

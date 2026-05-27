@@ -336,11 +336,13 @@ const ImportPage = () => {
                 // Check if multi-PO (po_list exists and has multiple POs)
                 if (response.data.po_list && response.data.po_list.length > 0) {
                     // Multi-PO support
-                    const poList = response.data.po_list.map(po => ({
-                        po_number: po.po_number,
-                        client_name: po.client_name,
-                        freight_cost: 0,
-                        additional_costs: 0,
+                    const poList = response.data.po_list.map(po => {
+                        const sumFreight = po.items.reduce((sum, item) => sum + (parseFloat(item.freight) || 0), 0);
+                        return {
+                            po_number: po.po_number,
+                            client_name: po.client_name,
+                            freight_cost: sumFreight,
+                            additional_costs: 0,
                         po_total_value: po.po_total_value || null,  // PO-level total from ONET
                         has_integrity_error: po.has_integrity_error || false,
                         integrity_error_message: po.integrity_error_message || null,
@@ -380,7 +382,8 @@ const ImportPage = () => {
                                 finance_justification: null
                             }
                         }))
-                    }))
+                    }
+                })
 
                     setStagingData({
                         isMultiPO: poList.length > 1,
@@ -403,7 +406,7 @@ const ImportPage = () => {
                         po_list: [{
                             po_number: response.data.po_number,
                             client_name: response.data.client_name,
-                            freight_cost: 0,
+                            freight_cost: response.data.items.reduce((sum, item) => sum + (parseFloat(item.freight) || 0), 0),
                             additional_costs: 0,
                             po_total_value: response.data.po_total_value || null,
                             has_integrity_error: response.data.has_integrity_error || false,
