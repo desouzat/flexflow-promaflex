@@ -312,7 +312,10 @@ const MetadataVisualizer = ({ metadata, itemId, onUpdate, readOnly = false }) =>
                                     'troca/reposição',
                                     'is personalized',
                                     'nome do cliente',
-                                    'apply sla reduction'
+                                    'apply sla reduction',
+                                    'description',
+                                    'descrição',
+                                    'descriçao'
                                 ].includes(k);
                             })
                             .map((key) => (

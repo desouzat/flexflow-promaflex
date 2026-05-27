@@ -12,7 +12,7 @@ import {
     Package, DollarSign, Calendar, User, FileText, Globe,
     Star, RefreshCw as RefreshIcon, Zap, AlertCircle, Upload,
     CheckCircle, Edit2, Save, XCircle, Truck, Lock, Unlock,
-    ArrowUpRight, ShieldAlert
+    ArrowUpRight, ShieldAlert, ChevronLeft, ChevronRight, Split
 } from 'lucide-react'
 
 const KanbanPage = () => {
@@ -29,6 +29,7 @@ const KanbanPage = () => {
     const [searchTerm, setSearchTerm] = useState('')
     const [compactView, setCompactView] = useState(false)
     const [selectedPO, setSelectedPO] = useState(null)
+    const [isMetadataExpanded, setIsMetadataExpanded] = useState(false)
     const [showDetailsModal, setShowDetailsModal] = useState(false)
     const [editingCommission, setEditingCommission] = useState(false)
     const [commissionValue, setCommissionValue] = useState('')
@@ -263,6 +264,15 @@ const KanbanPage = () => {
             // Auto refresh
             await fetchBoard()
             
+            if (selectedPO) {
+                try {
+                    const poRes = await api.get(`/kanban/pos/${selectedPO.id}`)
+                    setSelectedPO(poRes.data)
+                } catch (e) {
+                    console.error("Failed to refresh selected PO", e)
+                }
+            }
+            
             setShowLinkCostModal(false)
             setLinkingItem(null)
         } catch (err) {
@@ -398,6 +408,7 @@ const KanbanPage = () => {
 
     const handleCardClick = async (po) => {
         setSelectedPO(po)
+        setIsMetadataExpanded(false) // Accordion state: Ensure the 'Detalhe do Pedido' accordion defaults to CLOSED so the modal looks clean upon opening.
         setShowDetailsModal(true)
         setHandoffHistory(null)
 
@@ -885,12 +896,10 @@ const KanbanPage = () => {
         if (selectedPO.status === 'Produção/Embalagem') {
             const statusProd = meta.status_producao || ''
             const qReal = parseFloat(meta.qtd_real_produzida)
-            const perda = parseFloat(meta.perda_tecnica)
             
             return (
-                (statusProd === 'Finalizado' || statusProd === 'FINISH') &&
-                !isNaN(qReal) && qReal > 0 &&
-                !isNaN(perda) && perda >= 0
+                (statusProd === 'Finalizado' || statusProd === 'FINISH' || statusProd === 'Concluído') &&
+                !isNaN(qReal) && qReal > 0
             )
         }
 
@@ -934,11 +943,9 @@ const KanbanPage = () => {
         if (selectedPO.status === 'Produção/Embalagem') {
             const statusProd = meta.status_producao || '';
             const qReal = parseFloat(meta.qtd_real_produzida);
-            const perda = parseFloat(meta.perda_tecnica);
             
-            if (statusProd !== 'Finalizado' && statusProd !== 'FINISH') missing.push('Status de Produção (FINISH)');
+            if (statusProd !== 'Finalizado' && statusProd !== 'FINISH' && statusProd !== 'Concluído') missing.push('Status de Produção (Concluído)');
             if (isNaN(qReal) || qReal <= 0) missing.push('Quantidade Real Produzida (>0)');
-            if (isNaN(perda) || perda < 0) missing.push('Perda Técnica (>=0)');
         }
 
         if (selectedPO.status === 'Faturamento/Expedição') {
@@ -1096,22 +1103,81 @@ const KanbanPage = () => {
                     >
                         <div className="bg-white rounded-lg shadow-xl max-w-5xl w-full max-h-[90vh] overflow-hidden flex flex-col">
                             {/* Modal Header */}
-                            <div className="flex items-center justify-between p-6 border-b border-gray-200 bg-gray-50">
-                                <div>
-                                    <h2 className="text-2xl font-bold text-gray-900">
-                                        Pedido #{selectedPO.po_number}
-                                    </h2>
-                                    <p className="text-sm text-gray-600 mt-1">
-                                        {getRobustName(selectedPO.client_name || selectedPO.supplier_name)}
-                                    </p>
-                                </div>
-                                <button
-                                    onClick={handleCloseModal}
-                                    className="p-2 hover:bg-gray-200 rounded-lg transition-colors"
-                                >
-                                    <X className="w-6 h-6 text-gray-600" />
-                                </button>
-                            </div>
+                            {(() => {
+                                const activeColumn = boardData?.columns?.find(col => col.status === selectedPO.status);
+                                const columnPOs = activeColumn ? filterPOs(activeColumn.pos) : [];
+                                const currentPOIndex = columnPOs.findIndex(po => po.id === selectedPO.id);
+                                const hasPrevPO = currentPOIndex > 0;
+                                const hasNextPO = currentPOIndex >= 0 && currentPOIndex < columnPOs.length - 1;
+
+                                const handlePrevPO = () => {
+                                    if (hasPrevPO) {
+                                        handleCardClick(columnPOs[currentPOIndex - 1]);
+                                    }
+                                };
+
+                                const handleNextPO = () => {
+                                    if (hasNextPO) {
+                                        handleCardClick(columnPOs[currentPOIndex + 1]);
+                                    }
+                                };
+
+                                const salesperson = selectedPO.vendedor || selectedPO.extra_metadata?.salesperson || selectedPO.extra_metadata?.vendedor;
+
+                                return (
+                                    <div className="flex items-center justify-between p-6 border-b border-gray-200 bg-gray-50">
+                                        <div>
+                                            <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-3 flex-wrap">
+                                                <span>Pedido #{selectedPO.po_number}</span>
+                                                {/* Navigation Arrows */}
+                                                {columnPOs.length > 1 && (
+                                                    <div className="flex items-center gap-1.5 ml-4">
+                                                        <button
+                                                            onClick={handlePrevPO}
+                                                            disabled={!hasPrevPO}
+                                                            className={`p-1.5 rounded-lg border transition-all ${
+                                                                hasPrevPO 
+                                                                    ? 'border-gray-300 bg-white text-gray-700 hover:bg-gray-100 cursor-pointer shadow-3xs' 
+                                                                    : 'border-gray-200 bg-gray-50 text-gray-400 cursor-not-allowed opacity-50'
+                                                            }`}
+                                                            title="Pedido Anterior"
+                                                        >
+                                                            <ChevronLeft className="w-4 h-4" />
+                                                        </button>
+                                                        <span className="text-xs font-semibold text-gray-500 font-mono">
+                                                            {currentPOIndex + 1} de {columnPOs.length}
+                                                        </span>
+                                                        <button
+                                                            onClick={handleNextPO}
+                                                            disabled={!hasNextPO}
+                                                            className={`p-1.5 rounded-lg border transition-all ${
+                                                                hasNextPO 
+                                                                    ? 'border-gray-300 bg-white text-gray-700 hover:bg-gray-100 cursor-pointer shadow-3xs' 
+                                                                    : 'border-gray-200 bg-gray-50 text-gray-400 cursor-not-allowed opacity-50'
+                                                            }`}
+                                                            title="Próximo Pedido"
+                                                        >
+                                                            <ChevronRight className="w-4 h-4" />
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </h2>
+                                            <p className="text-sm text-gray-650 mt-1 flex flex-wrap gap-x-4">
+                                                <span><strong>Cliente:</strong> {getRobustName(selectedPO.client_name || selectedPO.supplier_name)}</span>
+                                                {salesperson && (
+                                                    <span><strong>Vendedor:</strong> {getRobustName(salesperson)}</span>
+                                                )}
+                                            </p>
+                                        </div>
+                                        <button
+                                            onClick={handleCloseModal}
+                                            className="p-2 hover:bg-gray-200 rounded-lg transition-colors cursor-pointer"
+                                        >
+                                            <X className="w-6 h-6 text-gray-600" />
+                                        </button>
+                                    </div>
+                                );
+                            })()}
 
                             {/* Modal Content */}
                             <div className="flex-1 overflow-y-auto p-6">
@@ -1592,6 +1658,21 @@ const KanbanPage = () => {
                                                                                                 selectedPO.items.map((item) => {
                                                                                                     const unitCost = parseFloat(item.total_cost) || parseFloat(item.cost_mp) || parseFloat(item.extra_metadata?.total_cost) || parseFloat(item.extra_metadata?.cost_mp) || 0;
                                                                                                     const hasCost = unitCost > 0;
+                                                                                                    const costDateStr = (() => {
+                                                                                                        const iso = item.extra_metadata?.cost_updated_at;
+                                                                                                        if (!iso) return 'Recente';
+                                                                                                        try {
+                                                                                                            const d = new Date(iso);
+                                                                                                            const day = String(d.getDate()).padStart(2, '0');
+                                                                                                            const month = String(d.getMonth() + 1).padStart(2, '0');
+                                                                                                            const year = d.getFullYear();
+                                                                                                            const hours = String(d.getHours()).padStart(2, '0');
+                                                                                                            const minutes = String(d.getMinutes()).padStart(2, '0');
+                                                                                                            return `${day}/${month}/${year} ${hours}:${minutes}`;
+                                                                                                        } catch (e) {
+                                                                                                            return 'Recente';
+                                                                                                        }
+                                                                                                    })();
                                                                                                     return (
                                                                                                         <tr key={item.id || item.sku} className="hover:bg-gray-50">
                                                                                                             <td className="px-3 py-2 font-semibold text-gray-900">
@@ -1605,9 +1686,14 @@ const KanbanPage = () => {
                                                                                                             <td className="px-3 py-2 text-center text-gray-700 font-medium">{item.quantity}</td>
                                                                                                             <td className="px-3 py-2 text-center">
                                                                                                                 {hasCost ? (
-                                                                                                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-800 border border-green-200">
-                                                                                                                        ✅ Vinculado
-                                                                                                                    </span>
+                                                                                                                    <div className="flex flex-col items-center gap-1">
+                                                                                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-3xs uppercase tracking-wider">
+                                                                                                                            <span className="text-[10px]">✅</span> Vinculado
+                                                                                                                        </span>
+                                                                                                                        <span className="text-[9px] text-gray-500 font-semibold block leading-tight text-center">
+                                                                                                                            por {item.extra_metadata?.cost_updated_by || 'Sistema'} em {costDateStr}
+                                                                                                                        </span>
+                                                                                                                    </div>
                                                                                                                 ) : (
                                                                                                                     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
                                                                                                                         ⚠️ Sem Custo
@@ -1729,7 +1815,9 @@ const KanbanPage = () => {
                                                                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
                                                                                 <div>
                                                                                     <span className="text-xs text-gray-500 font-semibold uppercase block">Status de Produção</span>
-                                                                                    <span className="font-semibold text-gray-850">{selectedPO.extra_metadata?.status_producao === 'FINISH' || selectedPO.extra_metadata?.status_producao === 'Finalizado' ? 'Finalizado (FINISH)' : 'Em andamento (START)'}</span>
+                                                                                    <span className="font-semibold text-gray-850">
+                                                                                        {['FINISH', 'Finalizado', 'Concluído'].includes(selectedPO.extra_metadata?.status_producao) ? 'Concluído (FINISH)' : 'Em andamento (START)'}
+                                                                                    </span>
                                                                                 </div>
                                                                                 <div>
                                                                                     <span className="text-xs text-gray-500 font-semibold uppercase block">Quantidade Real Produzida</span>
@@ -1753,7 +1841,7 @@ const KanbanPage = () => {
                                                                                     >
                                                                                         <option value="">Selecione...</option>
                                                                                         <option value="START">Em Andamento (START)</option>
-                                                                                        <option value="FINISH">Finalizado (FINISH)</option>
+                                                                                        <option value="Concluído">Concluído (FINISH)</option>
                                                                                     </select>
                                                                                 </div>
 
@@ -2308,6 +2396,29 @@ const KanbanPage = () => {
                                     })()}
                                 </div>
 
+                                {/* PO-Level Metadata Accordion */}
+                                <div className="mb-6 border border-gray-200 rounded-lg overflow-hidden bg-white shadow-3xs">
+                                    <button
+                                        onClick={() => setIsMetadataExpanded(!isMetadataExpanded)}
+                                        className="w-full flex items-center justify-between p-4 bg-gray-50 hover:bg-gray-100 transition-colors text-left font-bold text-gray-900 text-sm cursor-pointer"
+                                    >
+                                        <span className="flex items-center gap-2">
+                                            <span>📋</span> Clique para ver detalhes
+                                        </span>
+                                        {isMetadataExpanded ? <ChevronDown className="w-5 h-5 text-gray-500" /> : <ChevronRight className="w-5 h-5 text-gray-500" />}
+                                    </button>
+                                    {isMetadataExpanded && (
+                                        <div className="p-4 bg-white border-t border-gray-200">
+                                            <MetadataVisualizer
+                                                metadata={selectedPO.extra_metadata || {}}
+                                                itemId={selectedPO.id}
+                                                onUpdate={null}
+                                                readOnly={true}
+                                            />
+                                        </div>
+                                    )}
+                                </div>
+
                                 {/* Items List */}
                                 {selectedPO.items && selectedPO.items.length > 0 && (
                                     <div className="mb-6">
@@ -2377,8 +2488,8 @@ const KanbanPage = () => {
                                                             <td className="px-4 py-3 font-mono text-xs text-gray-650">{record.date}</td>
                                                             <td className="px-4 py-3 text-xs text-gray-600 font-semibold">{record.user}</td>
                                                             <td className="px-4 py-3 text-xs font-bold text-gray-900">{record.from_to}</td>
-                                                            <td className="px-4 py-3 text-xs text-gray-650 italic font-normal max-w-xs truncate" title={record.reason}>
-                                                                {record.reason || '—'}
+                                                            <td className="px-4 py-3 text-xs text-gray-650 italic font-normal max-w-xs truncate" title={index === 0 && (record.from_to || '').includes('Criado ➔ Comercial') ? 'Conferido' : (record.reason || '—')}>
+                                                                {index === 0 && (record.from_to || '').includes('Criado ➔ Comercial') ? 'Conferido' : (record.reason || '—')}
                                                             </td>
                                                         </tr>
                                                     ))}
@@ -2529,8 +2640,8 @@ const KanbanPage = () => {
                                     onClick={handleReturnStatus}
                                     disabled={!returnLabel || !returnReasonText || returnReasonText.trim().length < 10}
                                     className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${returnLabel && returnReasonText && returnReasonText.trim().length >= 10
-                                        ? 'bg-orange-605 text-white hover:bg-orange-700'
-                                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                        ? 'bg-orange-600 text-white hover:bg-orange-700 font-bold shadow-md cursor-pointer'
+                                        : 'bg-gray-300 text-gray-500 cursor-not-allowed border border-gray-310'
                                         }`}
                                 >
                                     Devolver

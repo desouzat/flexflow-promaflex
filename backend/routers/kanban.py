@@ -25,7 +25,7 @@ from backend.schemas.kanban_schema import (
 from backend.schemas.auth_schema import UserInfo
 from backend.database import get_db
 from backend.routers.auth import get_current_user
-from backend.models import PurchaseOrder, OrderItem
+from backend.models import PurchaseOrder, OrderItem, MaterialCost
 
 router = APIRouter(prefix="/api/kanban", tags=["Kanban"])
 
@@ -210,23 +210,45 @@ async def get_kanban_board(
             # Calculate metrics
             metrics = calculate_po_metrics(po)
             
-            # Convert items
-            items = [
-                POItemResponse(
-                    id=str(item.id),
-                    sku=item.sku,
-                    quantity=item.quantity,
-                    price=Decimal(str(item.price)),
-                    status_item=item.status_item,
-                    margin_item=Decimal("0.00"),  # Calculate if needed
-                    total_cost=Decimal("0.00"),  # Calculate if needed
-                    manual_commission_rate=Decimal(str(item.extra_metadata.get("manual_commission_rate"))) if item.extra_metadata and "manual_commission_rate" in item.extra_metadata else None,
-                    extra_metadata=item.extra_metadata,
-                    created_at=item.created_at,
-                    updated_at=item.updated_at
+            # Convert items resolving material costs
+            items = []
+            for item in po.items:
+                # Query MaterialCost to find cost industrial
+                material = db.query(MaterialCost).filter(
+                    MaterialCost.tenant_id == po.tenant_id,
+                    MaterialCost.sku == item.sku
+                ).first()
+                
+                unit_cost = Decimal("0.00")
+                cost_meta = {}
+                if material:
+                    unit_cost = Decimal(str(material.custo_mp_kg)) * Decimal(str(material.rendimento))
+                    cost_meta = {
+                        "total_cost": float(unit_cost),
+                        "cost_mp": float(unit_cost),
+                        "cost_updated_by": material.updated_by_user.name if material.updated_by_user else "Sistema",
+                        "cost_updated_at": material.updated_at.isoformat() if material.updated_at else None
+                    }
+                
+                item_extra = dict(item.extra_metadata or {})
+                if cost_meta:
+                    item_extra.update(cost_meta)
+                    
+                items.append(
+                    POItemResponse(
+                        id=str(item.id),
+                        sku=item.sku,
+                        quantity=item.quantity,
+                        price=Decimal(str(item.price)),
+                        status_item=item.status_item,
+                        margin_item=Decimal("0.00"),
+                        total_cost=unit_cost,
+                        manual_commission_rate=Decimal(str(item.extra_metadata.get("manual_commission_rate"))) if item.extra_metadata and "manual_commission_rate" in item.extra_metadata else None,
+                        extra_metadata=item_extra,
+                        created_at=item.created_at,
+                        updated_at=item.updated_at
+                    )
                 )
-                for item in po.items
-            ]
             
             # Get commission rate from metadata or calculate
             commission_rate = None
@@ -476,23 +498,45 @@ async def get_purchase_order(
     # Calculate metrics
     metrics = calculate_po_metrics(po)
     
-    # Convert items
-    items = [
-        POItemResponse(
-            id=str(item.id),
-            sku=item.sku,
-            quantity=item.quantity,
-            price=Decimal(str(item.price)),
-            status_item=item.status_item,
-            margin_item=Decimal("0.00"),
-            total_cost=Decimal("0.00"),
-            manual_commission_rate=Decimal(str(item.extra_metadata.get("manual_commission_rate"))) if item.extra_metadata and "manual_commission_rate" in item.extra_metadata else None,
-            extra_metadata=item.extra_metadata,
-            created_at=item.created_at,
-            updated_at=item.updated_at
+    # Convert items resolving material costs
+    items = []
+    for item in po.items:
+        # Query MaterialCost to find cost industrial
+        material = db.query(MaterialCost).filter(
+            MaterialCost.tenant_id == po.tenant_id,
+            MaterialCost.sku == item.sku
+        ).first()
+        
+        unit_cost = Decimal("0.00")
+        cost_meta = {}
+        if material:
+            unit_cost = Decimal(str(material.custo_mp_kg)) * Decimal(str(material.rendimento))
+            cost_meta = {
+                "total_cost": float(unit_cost),
+                "cost_mp": float(unit_cost),
+                "cost_updated_by": material.updated_by_user.name if material.updated_by_user else "Sistema",
+                "cost_updated_at": material.updated_at.isoformat() if material.updated_at else None
+            }
+        
+        item_extra = dict(item.extra_metadata or {})
+        if cost_meta:
+            item_extra.update(cost_meta)
+            
+        items.append(
+            POItemResponse(
+                id=str(item.id),
+                sku=item.sku,
+                quantity=item.quantity,
+                price=Decimal(str(item.price)),
+                status_item=item.status_item,
+                margin_item=Decimal("0.00"),
+                total_cost=unit_cost,
+                manual_commission_rate=Decimal(str(item.extra_metadata.get("manual_commission_rate"))) if item.extra_metadata and "manual_commission_rate" in item.extra_metadata else None,
+                extra_metadata=item_extra,
+                created_at=item.created_at,
+                updated_at=item.updated_at
+            )
         )
-        for item in po.items
-    ]
     
     # Get commission rate
     commission_rate = None
@@ -1270,8 +1314,7 @@ async def update_logistics_checklist(
         )
     
     # Update logistics checklist in metadata
-    if not po.partition_metadata:
-        po.partition_metadata = {}
+    meta = dict(po.partition_metadata or {})
     
     logistics_checklist = {
         "endereco_conferido": request.endereco_conferido,
@@ -1283,7 +1326,8 @@ async def update_logistics_checklist(
         "updated_at": datetime.utcnow().isoformat()
     }
     
-    po.partition_metadata["logistics_checklist"] = logistics_checklist
+    meta["logistics_checklist"] = logistics_checklist
+    po.partition_metadata = meta
     po.updated_at = datetime.utcnow()
     
     # Check if all requirements are met

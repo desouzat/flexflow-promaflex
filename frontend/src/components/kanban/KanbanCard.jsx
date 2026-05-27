@@ -232,7 +232,7 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
 
                 {/* Mini SLA progress bar in compact view */}
                 {slaPercent !== null && (
-                    <div className="mt-2" title={isReplacement ? 'SLA Prioritário (Troca)' : 'Progresso de SLA'}>
+                    <div className="mt-2" title={isReplacement ? '🔥 SLA DE TROCA ATIVO' : 'Progresso de SLA'}>
                         <div className="w-full bg-gray-150 rounded-full h-1 overflow-hidden border border-gray-200">
                             <div 
                                 className={`h-full transition-all duration-500 ${isReplacement ? 'bg-cyan-500' : 'bg-emerald-500'}`} 
@@ -262,10 +262,10 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
 
             {/* Cyan Badge for Replacement (Troca/Reposição) */}
             {isReplacement && (
-                <div className="mb-3 px-3 py-2 bg-cyan-50 border border-cyan-300 rounded-lg flex items-center gap-2" title="SLA Prioritário (Troca)">
+                <div className="mb-3 px-3 py-2 bg-cyan-55 border border-cyan-300 rounded-lg flex items-center gap-2 animate-pulse" title="🔥 SLA DE TROCA ATIVO">
                     <RefreshCw className="w-4 h-4 text-cyan-600 animate-spin-slow" />
                     <span className="text-xs font-extrabold text-cyan-700">
-                        🔄 CRÉDITO PRÉ-APROVADO (TROCA/REPOSIÇÃO)
+                        🔥 SLA DE TROCA ATIVO
                     </span>
                 </div>
             )}
@@ -415,10 +415,14 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
 
             {/* SLA Progress Bar on Card */}
             {slaPercent !== null && (
-                <div className="mt-3 pt-3 border-t border-gray-100" title={isReplacement ? 'SLA Prioritário (Troca)' : 'Progresso de SLA'}>
+                <div className="mt-3 pt-3 border-t border-gray-100" title={isReplacement ? '🔥 SLA DE TROCA ATIVO' : 'Progresso de SLA'}>
                     <div className="flex justify-between text-[10px] text-gray-500 font-semibold mb-1">
-                        <span>SLA {isReplacement ? '(Prioritário)' : ''}</span>
-                        <span>{slaPercent.toFixed(0)}%</span>
+                        <span className={isReplacement ? 'text-cyan-700 font-extrabold animate-pulse' : ''}>
+                            {isReplacement ? '🔥 SLA DE TROCA ATIVO' : 'SLA'}
+                        </span>
+                        <span className={isReplacement ? 'text-cyan-600 font-extrabold' : ''}>
+                            {slaPercent.toFixed(0)}%
+                        </span>
                     </div>
                     <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden border border-gray-250">
                         <div 
