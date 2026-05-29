@@ -796,7 +796,7 @@ async def confirm_staging(
                 and item.extra_metadata.finance_justification
                 for item in po.items
             )
-            po_status_macro = "ANALISE_CREDITO" if has_blocked_item else "SUBMITTED"
+            po_status_macro = "FINANCE" if has_blocked_item else "APPROVED"
 
             # 3. Create new PurchaseOrder
             first_item_delivery = None
@@ -805,6 +805,21 @@ async def confirm_staging(
                     if item.delivery_date:
                         first_item_delivery = item.delivery_date
                         break
+
+            # Extract fields from staging items payload
+            is_personalized = any(item.extra_metadata.is_personalized for item in po.items if item.extra_metadata)
+            is_new_client = any(item.extra_metadata.is_new_client for item in po.items if item.extra_metadata)
+            is_export = any(item.extra_metadata.is_export for item in po.items if item.extra_metadata)
+            is_replacement = any(item.extra_metadata.is_replacement for item in po.items if item.extra_metadata)
+
+            customization_notes = None
+            attachment_path = None
+            for item in po.items:
+                if item.extra_metadata:
+                    if not customization_notes and item.extra_metadata.customization_notes:
+                        customization_notes = item.extra_metadata.customization_notes
+                    if not attachment_path and item.extra_metadata.attachment_path:
+                        attachment_path = item.extra_metadata.attachment_path
 
             # Calculate total freight cost from items if freight_cost + additional_costs is 0
             original_freight = po.freight_cost + po.additional_costs
@@ -821,7 +836,14 @@ async def confirm_staging(
                 po_total_value=po.po_total_value,
                 partition_metadata={
                     "client_name": po.client_name,
-                    "expected_delivery_date": first_item_delivery
+                    "expected_delivery_date": first_item_delivery,
+                    "packaging_type": po.packaging_type,
+                    "is_personalized": is_personalized,
+                    "is_new_client": is_new_client,
+                    "is_export": is_export,
+                    "is_replacement": is_replacement,
+                    "customization_notes": customization_notes,
+                    "attachment_path": attachment_path
                 }
             )
             db.add(new_po)

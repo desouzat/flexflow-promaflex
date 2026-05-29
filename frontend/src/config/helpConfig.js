@@ -20,7 +20,9 @@ export const HELP_CONFIG = {
             "🔒 BLOQUEIO DE CONFIRMAÇÃO: Não é possível confirmar PO com erros pendentes ou itens não checados",
             "🚚 RATEIO DE CUSTOS ADICIONAIS: Frete e Custos Adicionais informados no cabeçalho são rateados proporcionalmente entre todos os itens para o cálculo da margem individual.",
             "💸 REGRA DO FINANCIAL GATE: Pedidos que excedem o limite de crédito do cliente são bloqueados automaticamente pelo Financial Gate, necessitando de liberação manual.",
-            "🔄 BYPASS DE TROCA/REPOSIÇÃO: Itens bloqueados marcados com a flag de 'Troca/Reposição' ativam o bypass financeiro e recebem o status 'CRÉDITO PRÉ-APROVADO (TROCA)'."
+            "🔄 BYPASS DE TROCA/REPOSIÇÃO: Itens bloqueados marcados com a flag de 'Troca/Reposição' ativam o bypass financeiro e recebem o status 'CRÉDITO PRÉ-APROVADO (TROCA)'.",
+            "📦 SELEÇÃO DE EMBALAGEM OBRIGATÓRIA: O tipo de embalagem deve ser selecionado obrigatoriamente na Mesa de Conferência antes de confirmar o pedido.",
+            "📸 REGISTRO FOTOGRÁFICO E NFE OBRIGATÓRIOS PARA FECHAMENTO: A Nota Fiscal com Canhoto Assinado e a Foto da Carga, juntamente com o número da NF-e, são estritamente obrigatórios para concluir o pedido na Expedição."
         ],
         nextSteps: [
             "Revisar cada item importado no painel de staging",
@@ -55,7 +57,8 @@ export const HELP_CONFIG = {
             "🔄 FLAG REPOSIÇÃO: Pedidos de reposição têm SLA reduzido em 50% (Ex: 10 dias → 5 dias)",
             "🔒 BLOQUEIO DE CRÉDITO: Sistema verifica automaticamente o limite de crédito do cliente. Se excedido, o pedido é bloqueado até liberação manual",
             "✅ Todos os campos obrigatórios devem estar preenchidos antes de avançar para PCP",
-            "🟣 AGUARDANDO PARTIÇÃO: Pedidos com badge roxo 'Aguardando Decisão de Partição' foram sugeridos para divisão pelo PCP e aguardam decisão comercial"
+            "🟣 AGUARDANDO PARTIÇÃO: Pedidos com badge roxo 'Aguardando Decisão de Partição' foram sugeridos para divisão pelo PCP e aguardam decisão comercial",
+            "🟣 Partição de Pedido: C1 mantém a data original; C2 recebe a nova data sugerida pelo PCP."
         ],
         nextSteps: [
             "Revisar dados importados e validar os 19 campos obrigatórios",

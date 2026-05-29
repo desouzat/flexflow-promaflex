@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { Upload, FileSpreadsheet, AlertCircle, CheckCircle, X, HelpCircle, Paperclip, Trash2, Cloud, ChevronLeft, ChevronRight, Globe, RefreshCw, DollarSign, CheckSquare, Square, Lock, Unlock } from 'lucide-react'
+import { Upload, FileSpreadsheet, AlertCircle, CheckCircle, X, HelpCircle, Paperclip, Trash2, Cloud, ChevronLeft, ChevronRight, Globe, RefreshCw, DollarSign, CheckSquare, Square, Lock, Unlock, Package } from 'lucide-react'
 import api from '../utils/api'
 import { showSuccess, showError, showLoading, dismissToast } from '../utils/toast'
 import { useNotifications } from '../context/NotificationContext'
@@ -1219,33 +1219,37 @@ const ImportPage = () => {
                                             {formatCurrency(currentPO.po_total_value || calculatePOTotal(currentPO))}
                                         </p>
                                     </div>
-                                    <div>
-                                        <label className="text-sm font-medium text-gray-700">📊 Margem Global PO</label>
-                                        {(() => {
-                                            const poMarginInfo = calculatePOMargins(currentPO);
-                                            if (poMarginInfo.status === 'PENDENTE_PCP') {
+                                    {['admin', 'master'].includes((user?.role || '').toLowerCase()) ? (
+                                        <div>
+                                            <label className="text-sm font-medium text-gray-700">📊 Margem Global PO</label>
+                                            {(() => {
+                                                const poMarginInfo = calculatePOMargins(currentPO);
+                                                if (poMarginInfo.status === 'PENDENTE_PCP') {
+                                                    return (
+                                                        <div>
+                                                            <p className="text-xs font-bold text-gray-500 mt-1 uppercase bg-gray-100 border border-gray-300 px-2.5 py-0.5 rounded-full inline-block">
+                                                                PENDENTE PCP
+                                                            </p>
+                                                        </div>
+                                                    );
+                                                }
                                                 return (
-                                                    <div>
-                                                        <p className="text-xs font-bold text-gray-500 mt-1 uppercase bg-gray-100 border border-gray-300 px-2.5 py-0.5 rounded-full inline-block">
-                                                            PENDENTE PCP
-                                                        </p>
+                                                    <div className="mt-1">
+                                                         <span className={`inline-flex items-center px-3 py-0.5 rounded-full text-sm font-bold border shadow-sm ${
+                                                             poMarginInfo.badgeColor === 'green' ? 'bg-green-100 text-green-800 border-green-300' :
+                                                             poMarginInfo.badgeColor === 'yellow' ? 'bg-yellow-100 text-yellow-800 border-yellow-300' :
+                                                             poMarginInfo.badgeColor === 'orange' ? 'bg-orange-100 text-orange-800 border-orange-300' :
+                                                             'bg-red-100 text-red-800 border-red-300'
+                                                         }`}>
+                                                             {poMarginInfo.formattedMargin}
+                                                         </span>
                                                     </div>
                                                 );
-                                            }
-                                            return (
-                                                <div className="mt-1">
-                                                     <span className={`inline-flex items-center px-3 py-0.5 rounded-full text-sm font-bold border shadow-sm ${
-                                                         poMarginInfo.badgeColor === 'green' ? 'bg-green-100 text-green-800 border-green-300' :
-                                                         poMarginInfo.badgeColor === 'yellow' ? 'bg-yellow-100 text-yellow-800 border-yellow-300' :
-                                                         poMarginInfo.badgeColor === 'orange' ? 'bg-orange-100 text-orange-800 border-orange-300' :
-                                                         'bg-red-100 text-red-800 border-red-300'
-                                                     }`}>
-                                                         {poMarginInfo.formattedMargin}
-                                                     </span>
-                                                </div>
-                                            );
-                                        })()}
-                                    </div>
+                                            })()}
+                                        </div>
+                                    ) : (
+                                        <div />
+                                    )}
                                 </div>
 
                                 {/* Integrity Check Warning Banner */}
@@ -1269,7 +1273,7 @@ const ImportPage = () => {
                                 )}
 
                                 {/* PO-Level Cost Fields */}
-                                <div className="grid grid-cols-2 gap-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+                                <div className="grid grid-cols-3 gap-4 p-4 bg-green-50 border border-green-200 rounded-lg">
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-2">
                                             <DollarSign className="w-4 h-4 inline mr-1" />
@@ -1282,7 +1286,7 @@ const ImportPage = () => {
                                             value={currentPO.freight_cost !== undefined && currentPO.freight_cost !== null ? currentPO.freight_cost : 0}
                                             onChange={(e) => handlePOFieldChange('freight_cost', e.target.value, e)}
                                             onFocus={(e) => e.target.select()}
-                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent animate-fade-in"
                                             placeholder="0.00"
                                         />
                                     </div>
@@ -1298,9 +1302,26 @@ const ImportPage = () => {
                                             value={currentPO.additional_costs !== undefined && currentPO.additional_costs !== null ? currentPO.additional_costs : 0}
                                             onChange={(e) => handlePOFieldChange('additional_costs', e.target.value, e)}
                                             onFocus={(e) => e.target.select()}
-                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent animate-fade-in"
                                             placeholder="0.00"
                                         />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-2 text-cyan-905">
+                                            <Package className="w-4 h-4 inline mr-1 text-cyan-700" />
+                                            Tipo de Embalagem <span className="text-red-500 font-bold">*</span>
+                                        </label>
+                                        <select
+                                            value={currentPO.packaging_type || ''}
+                                            onChange={(e) => handlePOFieldChange('packaging_type', e.target.value)}
+                                            className="w-full px-3 py-2 border border-gray-305 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-800 font-medium"
+                                        >
+                                            <option value="">Selecione...</option>
+                                            <option value="Padrão">Padrão</option>
+                                            <option value="Pallet">Pallet</option>
+                                            <option value="Caixa">Caixa</option>
+                                            <option value="Filme">Filme</option>
+                                        </select>
                                     </div>
                                 </div>
                             </div>
@@ -1435,83 +1456,85 @@ const ImportPage = () => {
                                                                     {formatCurrency(item.item_total_value || (item.quantity * item.price_unit))}
                                                                 </p>
                                                             </div>
-                                                            <div>
-                                                                <label className="text-xs font-medium text-gray-600 block">Margem</label>
-                                                                {marginResult.status === 'PENDENTE_PCP' ? (
-                                                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-800 border border-gray-300">
-                                                                        PENDENTE PCP
-                                                                    </span>
-                                                                ) : (
-                                                                    <div className="relative group inline-block">
-                                                                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold border cursor-help shadow-sm transition-all duration-250 hover:scale-105 ${
-                                                                            marginResult.badgeColor === 'green' ? 'bg-green-100 text-green-800 border-green-300' :
-                                                                            marginResult.badgeColor === 'yellow' ? 'bg-yellow-100 text-yellow-800 border-yellow-300' :
-                                                                            marginResult.badgeColor === 'orange' ? 'bg-orange-100 text-orange-800 border-orange-300' :
-                                                                            'bg-red-100 text-red-800 border-red-300'
-                                                                        }`}>
-                                                                            {marginResult.formattedMargin}
+                                                            {['admin', 'master'].includes((user?.role || '').toLowerCase()) && (
+                                                                <div>
+                                                                    <label className="text-xs font-medium text-gray-600 block">Margem</label>
+                                                                    {marginResult.status === 'PENDENTE_PCP' ? (
+                                                                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-800 border border-gray-300">
+                                                                            PENDENTE PCP
                                                                         </span>
-                                                                        
-                                                                        {/* Tooltip Popover "O Extrato" */}
-                                                                        <div className="absolute z-50 hidden group-hover:block bg-slate-900 text-slate-100 p-4 rounded-xl shadow-2xl w-80 text-xs border border-slate-700 -top-2 left-full ml-3 pointer-events-none animate-fade-in">
-                                                                            <h4 className="font-bold text-white mb-2 border-b border-slate-700 pb-1 flex items-center justify-between">
-                                                                                <span>📊 Extrato de Margem</span>
-                                                                                <span className="text-[10px] text-slate-400 font-normal">Fórmula Celso</span>
-                                                                            </h4>
-                                                                            <div className="space-y-1.5 font-sans">
-                                                                                <div className="flex justify-between">
-                                                                                    <span className="text-slate-400">(+) Valor Bruto:</span>
-                                                                                    <span className="font-mono">{formatCurrency(marginResult.breakdown.gross)}</span>
-                                                                                </div>
-                                                                                <div className="flex justify-between text-amber-400">
-                                                                                    <span className="text-slate-400">(-) Ajuste VP (Prazo):</span>
-                                                                                    <span className="font-mono">-{formatCurrency(marginResult.breakdown.vpDiscount)}</span>
-                                                                                </div>
-                                                                                <div className="flex justify-between border-t border-slate-800 pt-0.5">
-                                                                                    <span className="text-slate-400 font-semibold">(=) Valor Presente (VP):</span>
-                                                                                    <span className="font-semibold font-mono">{formatCurrency(marginResult.breakdown.vp)}</span>
-                                                                                </div>
-                                                                                <div className="flex justify-between text-red-400">
-                                                                                    <span className="text-slate-400">(-) Impostos (22.25%):</span>
-                                                                                    <span className="font-mono">-{formatCurrency(marginResult.breakdown.taxes)}</span>
-                                                                                </div>
-                                                                                {marginResult.breakdown.commission > 0 && (
-                                                                                    <div className="flex justify-between text-red-400">
-                                                                                        <span className="text-slate-400">(-) Comissão ({commRate}%):</span>
-                                                                                        <span className="font-mono">-{formatCurrency(marginResult.breakdown.commission)}</span>
+                                                                    ) : (
+                                                                        <div className="relative group inline-block">
+                                                                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold border cursor-help shadow-sm transition-all duration-250 hover:scale-105 ${
+                                                                                marginResult.badgeColor === 'green' ? 'bg-green-100 text-green-800 border-green-300' :
+                                                                                marginResult.badgeColor === 'yellow' ? 'bg-yellow-100 text-yellow-800 border-yellow-300' :
+                                                                                marginResult.badgeColor === 'orange' ? 'bg-orange-100 text-orange-800 border-orange-300' :
+                                                                                'bg-red-100 text-red-800 border-red-300'
+                                                                            }`}>
+                                                                                {marginResult.formattedMargin}
+                                                                            </span>
+                                                                            
+                                                                            {/* Tooltip Popover "O Extrato" */}
+                                                                            <div className="absolute z-50 hidden group-hover:block bg-slate-900 text-slate-100 p-4 rounded-xl shadow-2xl w-80 text-xs border border-slate-700 -top-2 left-full ml-3 pointer-events-none animate-fade-in">
+                                                                                <h4 className="font-bold text-white mb-2 border-b border-slate-700 pb-1 flex items-center justify-between">
+                                                                                    <span>📊 Extrato de Margem</span>
+                                                                                    <span className="text-[10px] text-slate-400 font-normal">Fórmula Celso</span>
+                                                                                </h4>
+                                                                                <div className="space-y-1.5 font-sans">
+                                                                                    <div className="flex justify-between">
+                                                                                        <span className="text-slate-400">(+) Valor Bruto:</span>
+                                                                                        <span className="font-mono">{formatCurrency(marginResult.breakdown.gross)}</span>
                                                                                     </div>
-                                                                                )}
-                                                                                {marginResult.breakdown.freight > 0 && (
-                                                                                    <div className="flex justify-between text-red-400">
-                                                                                        <span className="text-slate-400">(-) Frete:</span>
-                                                                                        <span className="font-mono">-{formatCurrency(marginResult.breakdown.freight)}</span>
+                                                                                    <div className="flex justify-between text-amber-400">
+                                                                                        <span className="text-slate-400">(-) Ajuste VP (Prazo):</span>
+                                                                                        <span className="font-mono">-{formatCurrency(marginResult.breakdown.vpDiscount)}</span>
                                                                                     </div>
-                                                                                )}
-                                                                                <div className="border-t border-slate-800 my-1"></div>
-                                                                                <div className="flex justify-between text-emerald-400 font-bold">
-                                                                                    <span className="text-slate-300">(=) Margem Absoluta:</span>
-                                                                                    <span className="font-mono">{formatCurrency(marginResult.breakdown.absoluteMargin)}</span>
-                                                                                </div>
-                                                                                <div className="flex justify-between text-slate-300">
-                                                                                    <span className="text-slate-400">(/) Custo Industrial:</span>
-                                                                                    <span className="font-mono">{formatCurrency(marginResult.breakdown.costs)}</span>
-                                                                                </div>
-                                                                                <div className="border-t border-slate-700 pt-1.5 flex justify-between items-center">
-                                                                                    <span className="font-bold text-white">Margem Final (%):</span>
-                                                                                    <span className={`font-mono text-sm font-bold ${
-                                                                                        marginResult.badgeColor === 'green' ? 'text-green-400' :
-                                                                                        marginResult.badgeColor === 'yellow' ? 'text-yellow-400' :
-                                                                                        marginResult.badgeColor === 'orange' ? 'text-orange-400' :
-                                                                                        'text-red-400'
-                                                                                    }`}>
-                                                                                        {marginResult.formattedMargin}
-                                                                                    </span>
+                                                                                    <div className="flex justify-between border-t border-slate-800 pt-0.5">
+                                                                                        <span className="text-slate-400 font-semibold">(=) Valor Presente (VP):</span>
+                                                                                        <span className="font-semibold font-mono">{formatCurrency(marginResult.breakdown.vp)}</span>
+                                                                                    </div>
+                                                                                    <div className="flex justify-between text-red-400">
+                                                                                        <span className="text-slate-400">(-) Impostos (22.25%):</span>
+                                                                                        <span className="font-mono">-{formatCurrency(marginResult.breakdown.taxes)}</span>
+                                                                                    </div>
+                                                                                    {marginResult.breakdown.commission > 0 && (
+                                                                                        <div className="flex justify-between text-red-400">
+                                                                                            <span className="text-slate-400">(-) Comissão ({commRate}%):</span>
+                                                                                            <span className="font-mono">-{formatCurrency(marginResult.breakdown.commission)}</span>
+                                                                                        </div>
+                                                                                    )}
+                                                                                    {marginResult.breakdown.freight > 0 && (
+                                                                                        <div className="flex justify-between text-red-400">
+                                                                                            <span className="text-slate-400">(-) Frete:</span>
+                                                                                            <span className="font-mono">-{formatCurrency(marginResult.breakdown.freight)}</span>
+                                                                                        </div>
+                                                                                    )}
+                                                                                    <div className="border-t border-slate-800 my-1"></div>
+                                                                                    <div className="flex justify-between text-emerald-400 font-bold">
+                                                                                        <span className="text-slate-300">(=) Margem Absoluta:</span>
+                                                                                        <span className="font-mono">{formatCurrency(marginResult.breakdown.absoluteMargin)}</span>
+                                                                                    </div>
+                                                                                    <div className="flex justify-between text-slate-300">
+                                                                                        <span className="text-slate-400">(/) Custo Industrial:</span>
+                                                                                        <span className="font-mono">{formatCurrency(marginResult.breakdown.costs)}</span>
+                                                                                    </div>
+                                                                                    <div className="border-t border-slate-700 pt-1.5 flex justify-between items-center">
+                                                                                        <span className="font-bold text-white">Margem Final (%):</span>
+                                                                                        <span className={`font-mono text-sm font-bold ${
+                                                                                            marginResult.badgeColor === 'green' ? 'text-green-400' :
+                                                                                            marginResult.badgeColor === 'yellow' ? 'text-yellow-400' :
+                                                                                            marginResult.badgeColor === 'orange' ? 'text-orange-400' :
+                                                                                            'text-red-400'
+                                                                                        }`}>
+                                                                                            {marginResult.formattedMargin}
+                                                                                        </span>
+                                                                                    </div>
                                                                                 </div>
                                                                             </div>
                                                                         </div>
-                                                                    </div>
-                                                                )}
-                                                            </div>
+                                                                    )}
+                                                                </div>
+                                                            )}
                                                         </div>
                                                     );
                                                 })()}

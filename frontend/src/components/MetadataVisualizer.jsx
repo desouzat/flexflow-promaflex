@@ -51,8 +51,10 @@ const KEY_TRANSLATIONS = {
     'Payment Terms': 'Condição Pagamento',
     customization_notes: 'Descritivo Customização',
     'Customization Notes': 'Descritivo Customização',
-    finance_justification: 'Justificativa Financeiro',
-    'Finance Justification': 'Justificativa Financeiro',
+    finance_justification: 'Parecer de Crédito',
+    'Finance Justification': 'Parecer de Crédito',
+    total_cost: 'Custo Total',
+    'Total Cost': 'Custo Total',
     delay: 'Atraso (Dias)',
     Delay: 'Atraso (Dias)',
     shipping_cost: 'Custo de Envio',
@@ -151,7 +153,7 @@ const MetadataVisualizer = ({ metadata, itemId, onUpdate, readOnly = false }) =>
                 return (
                     <div style={{ marginLeft: `${indent}px` }} className="flex items-center gap-1.5 mt-0.5">
                         <a 
-                            href={`/api/uploads/download?path=${encodeURIComponent(value)}`} 
+                            href={`${(import.meta.env.VITE_API_URL || 'http://localhost:8000/api').replace(/\/api$/, '')}/api/uploads/download?path=${encodeURIComponent((value || '').replace(/^\//, ''))}`} 
                             target="_blank" 
                             rel="noopener noreferrer"
                             className="inline-flex items-center justify-center p-2 bg-blue-50 border border-blue-200 hover:bg-blue-100 text-blue-600 hover:text-blue-850 rounded-lg transition-all shadow-xs"
@@ -315,7 +317,12 @@ const MetadataVisualizer = ({ metadata, itemId, onUpdate, readOnly = false }) =>
                                     'apply sla reduction',
                                     'description',
                                     'descrição',
-                                    'descriçao'
+                                    'descriçao',
+                                    'attachment_filename',
+                                    'cost_mp',
+                                    'cost_updated_by',
+                                    'cost_updated_at',
+                                    'production_impediment'
                                 ].includes(k);
                             })
                             .map((key) => (

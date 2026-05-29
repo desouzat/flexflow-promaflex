@@ -615,5 +615,102 @@ def test_process_time_header():
     assert "X-Process-Time" in response.headers or "x-process-time" in response.headers
 
 
+# ============================================================================
+# TEST: INTELLIGENT ROUTING LOGIC
+# ============================================================================
+
+def test_routing_logic(auth_headers):
+    """Test that a clean PO routes to APPROVED (PCP) and a blocked PO routes to FINANCE (Credit Analysis)"""
+    # 1. Clean PO Payload
+    payload_clean = {
+        "pos": [
+            {
+                "po_number": "po-clean-123",
+                "client_name": "Clean Client Ltd",
+                "freight_cost": 100.0,
+                "additional_costs": 0.0,
+                "po_total_value": 1100.0,
+                "packaging_type": "Palete",
+                "items": [
+                    {
+                        "sku": "SKU-CLEAN",
+                        "quantity": 10,
+                        "price_unit": 100.0,
+                        "unit_value": 100.0,
+                        "item_total_value": 1000.0,
+                        "block_status": "LIBERADO",
+                        "extra_metadata": {
+                            "is_personalized": False,
+                            "is_new_client": False
+                        }
+                    }
+                ]
+            }
+        ]
+    }
+
+    # Confirm clean PO
+    response = client.post(
+        "/api/import/confirm-staging",
+        headers={"Authorization": f"Bearer {auth_headers}"} if isinstance(auth_headers, str) else auth_headers,
+        json=payload_clean
+    )
+    assert response.status_code == 200
+    
+    # 2. Blocked PO Payload
+    payload_blocked = {
+        "pos": [
+            {
+                "po_number": "po-blocked-123",
+                "client_name": "Blocked Client Ltd",
+                "freight_cost": 100.0,
+                "additional_costs": 0.0,
+                "po_total_value": 1100.0,
+                "packaging_type": "Fardo Plástico",
+                "items": [
+                    {
+                        "sku": "SKU-BLOCKED",
+                        "quantity": 10,
+                        "price_unit": 100.0,
+                        "unit_value": 100.0,
+                        "item_total_value": 1000.0,
+                        "block_status": "BLOQUEADO",
+                        "extra_metadata": {
+                            "is_personalized": True,
+                            "is_new_client": True,
+                            "finance_justification": "Limiar de crédito excedido no ERP"
+                        }
+                    }
+                ]
+            }
+        ]
+    }
+
+    # Confirm blocked PO
+    response = client.post(
+        "/api/import/confirm-staging",
+        headers={"Authorization": f"Bearer {auth_headers}"} if isinstance(auth_headers, str) else auth_headers,
+        json=payload_blocked
+    )
+    assert response.status_code == 200
+
+    # 3. Retrieve POs from kanban and assert status
+    response_pos = client.get(
+        "/api/kanban/pos",
+        headers={"Authorization": f"Bearer {auth_headers}"} if isinstance(auth_headers, str) else auth_headers
+    )
+    assert response_pos.status_code == 200
+    pos_list = response_pos.json()
+
+    clean_po = next((po for po in pos_list if po["po_number"] == "po-clean-123"), None)
+    blocked_po = next((po for po in pos_list if po["po_number"] == "po-blocked-123"), None)
+
+    assert clean_po is not None
+    assert clean_po["status_macro"] in ("APPROVED", "PCP")
+
+    assert blocked_po is not None
+    assert blocked_po["status_macro"] in ("FINANCE", "Financeiro")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

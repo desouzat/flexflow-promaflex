@@ -68,9 +68,10 @@ STATUS_FLOW = {
     "SUBMITTED": {"next": "APPROVED", "prev": None},
     "APPROVED": {"next": "MANUFACTURING", "prev": "SUBMITTED"},
     "MANUFACTURING": {"next": "SHIPPING", "prev": "APPROVED"},
-    "SHIPPING": {"next": "FINANCE", "prev": "MANUFACTURING"},
+    "SHIPPING": {"next": "ARCHIVED", "prev": "MANUFACTURING"},
     "FINANCE": {"next": "COMPLETED", "prev": "SHIPPING"},
     "COMPLETED": {"next": None, "prev": "FINANCE"},
+    "ARCHIVED": {"next": None, "prev": "SHIPPING"},
     
     # Legacy flow fallbacks
     "DRAFT": {"next": "SUBMITTED", "prev": None},
@@ -195,7 +196,8 @@ async def get_kanban_board(
         ("PCP", ["APPROVED", "WAITING_MATERIAL"]),
         ("Produção/Embalagem", ["MANUFACTURING", "IN_PROGRESS"]),
         ("Faturamento/Expedição", ["SHIPPING", "WAITING_DISPATCH"]),
-        ("Financeiro", ["FINANCE", "AUDIT_PENDING", "COMPLETED", "ANALISE_CREDITO"])
+        ("Financeiro", ["FINANCE", "AUDIT_PENDING", "ANALISE_CREDITO"]),
+        ("Concluídos", ["ARCHIVED", "ARCHIVED_PARTITIONED", "COMPLETED"])
     ]
     
     # Group POs by status
@@ -829,13 +831,9 @@ async def get_handoff_history(
     if po_created_naive:
         total_elapsed_hours = (now_naive - po_created_naive).total_seconds() / 3600.0
         
-    # Calculate freeze hold time
-    hold_time_seconds = po.total_hold_time_seconds or 0
-    if po.sla_paused_at:
-        p_at = po.sla_paused_at.replace(tzinfo=None) if po.sla_paused_at.tzinfo else po.sla_paused_at
-        hold_time_seconds += int((datetime.utcnow() - p_at).total_seconds())
-        
-    hold_time_hours = hold_time_seconds / 3600.0
+    # Calculate freeze hold time - SLA counter NEVER pauses as requested by sponsor
+    hold_time_seconds = 0
+    hold_time_hours = 0.0
     total_elapsed_hours = max(0.0, total_elapsed_hours - hold_time_hours)
         
     # Current Area elapsed
@@ -851,11 +849,12 @@ async def get_handoff_history(
     
     # Initial status transition (po creation)
     initial_area = STATUS_DISPLAY_MAP.get(initial_status, initial_status)
+    initial_reason = "CONFERIDO" if initial_area == "Comercial" else "[Outros]"
     transitions.append({
         "date": po_created_naive.strftime("%d/%m/%Y %H:%M:%S") if po_created_naive else "",
         "user": creator_name,
         "from_to": f"Mesa Conf ➔ {initial_area}",
-        "reason": "CONFERIDO"
+        "reason": initial_reason
     })
     
     # Standardize area names for Solutions Engineer mapping
@@ -893,25 +892,16 @@ async def get_handoff_history(
         db_from = log.from_status
         db_to = log.to_status
         
-        if db_from == "APPROVED" and db_to == "SUBMITTED":
-            mapped_reason = "PARTICIONAMENTO"
-        elif db_from in ["MANUFACTURING", "IN_PROGRESS"] and db_to in ["APPROVED", "WAITING_MATERIAL"]:
-            mapped_reason = "VERIFICAR POSSIBILIDADES COM TIME DE NEGÓCIOS"
-        elif db_from in ["WAITING_DISPATCH", "SHIPPING"] and db_to in ["FINANCE", "AUDIT_PENDING", "COMPLETED", "ANALISE_CREDITO"]:
-            mapped_reason = "LIBERADO"
-        elif db_from in ["SUBMITTED", "DRAFT"] and db_to in ["FINANCE", "AUDIT_PENDING", "COMPLETED", "ANALISE_CREDITO"]:
+        if std_from == "COMERCIAL" and std_to == "FINANCEIRO":
             mapped_reason = "ENVIO ANÁLISE DE CRÉDITO"
-            
-        # Fallback to display name mappings:
-        if not mapped_reason:
-            if std_from == "COMERCIAL" and std_to == "FINANCEIRO":
-                mapped_reason = "ENVIO ANÁLISE DE CRÉDITO"
-            elif std_from == "PCP" and std_to == "COMERCIAL":
-                mapped_reason = "PARTICIONAMENTO"
-            elif std_from == "PRODUÇÃO" and std_to == "PCP":
-                mapped_reason = "VERIFICAR POSSIBILIDADES COM TIME DE NEGÓCIOS"
-            elif std_from == "FATURAMENTO" and std_to == "FINANCEIRO":
-                mapped_reason = "LIBERADO"
+        elif std_from == "PCP" and std_to == "COMERCIAL":
+            mapped_reason = "PARTICIONAMENTO"
+        elif std_from == "PRODUÇÃO" and std_to == "PCP":
+            mapped_reason = "VERIFICAR POSSIBILIDADES COM TIME DE NEGÓCIOS"
+        elif std_from == "FATURAMENTO" and std_to == "FINANCEIRO":
+            mapped_reason = "LIBERADO"
+        elif (std_from == "MESA CONF" or "MESA" in std_from) and std_to == "COMERCIAL":
+            mapped_reason = "CONFERIDO"
 
         if mapped_reason:
             reason = mapped_reason
@@ -925,9 +915,9 @@ async def get_handoff_history(
                 elif log.extra_data.get("audit_comment"):
                     reason = log.extra_data.get("audit_comment")
 
-        # NO MORE [Outros] by default: If no specific reason exists, use a descriptive transition string
+        # Default to '[Outros]' if no specific mapping exists
         if not reason or reason.strip() in ["", "—", "-", "None", "null"]:
-            reason = f"Movimentação padrão de {from_area} para {to_area}"
+            reason = "[Outros]"
             
         transitions.append({
             "date": to_naive(log.created_at).strftime("%d/%m/%Y %H:%M:%S") if log.created_at else "",
@@ -1013,6 +1003,8 @@ async def update_po_area_fields(
             item.extra_metadata = item_meta
             
     po.updated_at = datetime.utcnow()
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(po, "partition_metadata")
     db.commit()
     db.refresh(po)
     
@@ -1367,7 +1359,7 @@ async def update_logistics_checklist(
         )
     
     # Update logistics checklist in metadata
-    meta = dict(po.partition_metadata or {})
+    meta = {**po.partition_metadata} if po.partition_metadata else {}
     
     logistics_checklist = {
         "endereco_conferido": request.endereco_conferido,
@@ -1383,9 +1375,6 @@ async def update_logistics_checklist(
     po.partition_metadata = meta
     po.updated_at = datetime.utcnow()
     
-    from sqlalchemy.orm.attributes import flag_modified
-    flag_modified(po, "partition_metadata")
-    
     # Check if all requirements are met
     checklist_complete = (
         request.endereco_conferido and
@@ -1400,7 +1389,10 @@ async def update_logistics_checklist(
     
     can_dispatch = checklist_complete and evidence_complete
     
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(po, "partition_metadata")
     db.commit()
+    db.refresh(po)
     
     message = "Checklist de logística atualizado com sucesso"
     if can_dispatch:
@@ -1533,6 +1525,28 @@ async def advance_po_status(
         # Production must have items processed
         pass  # Add production-specific validations if needed
     
+    elif current_status == "SHIPPING":
+        # Expedition must have NFE number, carrier, and checklist complete
+        meta = po.partition_metadata or {}
+        nfe = meta.get("numero_nfe") or ""
+        carrier = meta.get("transportadora") or ""
+        if not nfe:
+            validation_errors.append("Número NF-e é obrigatório")
+        if not carrier:
+            validation_errors.append("Transportadora é obrigatória")
+        if "logistics_checklist" in meta:
+            checklist = meta["logistics_checklist"]
+            if not all([
+                checklist.get("endereco_conferido"),
+                checklist.get("peso_validado"),
+                checklist.get("etiquetas_impressas"),
+                checklist.get("foto_carga_path"),
+                checklist.get("foto_canhoto_path")
+            ]):
+                validation_errors.append("Checklist de logística deve estar completo (Endereço, Peso, Etiquetas, Foto da Carga e Nota Fiscal com Canhoto Assinado)")
+        else:
+            validation_errors.append("Checklist de logística não encontrado")
+            
     elif current_status == "WAITING_DISPATCH":
         # Dispatch must have logistics checklist complete
         if po.partition_metadata and "logistics_checklist" in po.partition_metadata:
@@ -1565,12 +1579,14 @@ async def advance_po_status(
         po.partition_metadata = meta
     
     # Log status transition
+    justification = "FINALIZADO" if next_status == "ARCHIVED" else None
     log_po_status_transition(
         db=db,
         po=po,
         from_status=current_status,
         to_status=next_status,
         current_user=current_user,
+        justification=justification,
         is_exception=False
     )
     
@@ -1677,10 +1693,112 @@ async def return_po_status(
 from pydantic import BaseModel
 from typing import Dict, List
 
+class CreditApprovalBody(BaseModel):
+    audit_comment: str
+
+@router.post("/pos/{po_id}/approve-credit")
+async def approve_credit(
+    po_id: str,
+    body: CreditApprovalBody,
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    po = db.query(PurchaseOrder).filter(
+        PurchaseOrder.id == po_id,
+        PurchaseOrder.tenant_id == current_user.tenant_id
+    ).first()
+    
+    if not po:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Pedido {po_id} não encontrado"
+        )
+        
+    from_status = po.status_macro
+    po.status_macro = "APPROVED"
+    po.updated_at = datetime.utcnow()
+    
+    if po.partition_metadata is None:
+        po.partition_metadata = {}
+    meta = dict(po.partition_metadata)
+    meta["audit_comment"] = body.audit_comment
+    meta["block_status"] = "LIBERADO"
+    po.partition_metadata = meta
+    
+    for item in po.items:
+        if item.extra_metadata:
+            item_meta = dict(item.extra_metadata)
+            item_meta["block_status"] = "LIBERADO"
+            item.extra_metadata = item_meta
+        item.status_item = "APPROVED"
+        
+    log_po_status_transition(
+        db=db,
+        po=po,
+        from_status=from_status,
+        to_status="APPROVED",
+        current_user=current_user,
+        justification=f"CRÉDITO APROVADO: {body.audit_comment}",
+        is_exception=False
+    )
+    
+    db.commit()
+    return {"success": True, "message": "Crédito aprovado com sucesso. Pedido enviado para o PCP."}
+
+@router.post("/pos/{po_id}/maintain-block")
+async def maintain_block(
+    po_id: str,
+    body: CreditApprovalBody,
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    po = db.query(PurchaseOrder).filter(
+        PurchaseOrder.id == po_id,
+        PurchaseOrder.tenant_id == current_user.tenant_id
+    ).first()
+    
+    if not po:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Pedido {po_id} não encontrado"
+        )
+        
+    from_status = po.status_macro
+    po.status_macro = "SUBMITTED"
+    po.updated_at = datetime.utcnow()
+    
+    if po.partition_metadata is None:
+        po.partition_metadata = {}
+    meta = dict(po.partition_metadata)
+    meta["audit_comment"] = body.audit_comment
+    meta["block_status"] = "BLOQUEADO"
+    po.partition_metadata = meta
+    
+    for item in po.items:
+        if item.extra_metadata:
+            item_meta = dict(item.extra_metadata)
+            item_meta["block_status"] = "BLOQUEADO"
+            item.extra_metadata = item_meta
+        item.status_item = "ANALISE_CREDITO"
+        
+    log_po_status_transition(
+        db=db,
+        po=po,
+        from_status=from_status,
+        to_status="SUBMITTED",
+        current_user=current_user,
+        justification=f"MANTER BLOQUEIO: {body.audit_comment}",
+        is_exception=False
+    )
+    
+    db.commit()
+    return {"success": True, "message": "Bloqueio mantido. Pedido devolvido para o Comercial."}
+
 class SuggestPartitionBody(BaseModel):
     po_id: Optional[str] = None
     reason: Optional[str] = None
     qty_splits: Optional[Dict[str, List[int]]] = None
+    new_delivery_date: Optional[str] = None
 
 @router.post("/suggest-partition")
 async def suggest_partition(
@@ -1697,11 +1815,18 @@ async def suggest_partition(
     resolved_po_id = (payload.po_id if payload else None) or po_id
     resolved_reason = (payload.reason if payload else None) or reason
     qty_splits = payload.qty_splits if payload else None
+    new_delivery_date_val = payload.new_delivery_date if payload else None
     
     if not resolved_reason or len(resolved_reason.strip()) < 10:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Motivo da sugestão de partição deve ter pelo menos 10 caracteres"
+        )
+        
+    if not new_delivery_date_val:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Nova data de entrega prevista é obrigatória"
         )
         
     po = db.query(PurchaseOrder).filter(
@@ -1746,7 +1871,7 @@ async def suggest_partition(
         partition_reason=resolved_reason,
         partition_metadata={
             "client_name": po.client_name,
-            "expected_delivery_date": po.expected_delivery_date.isoformat() if po.expected_delivery_date else None,
+            "expected_delivery_date": new_delivery_date_val,
             "parent_po_number": po.po_number,
             "partition_type": "CHILD_1"
         }
@@ -1761,7 +1886,7 @@ async def suggest_partition(
         partition_reason=resolved_reason,
         partition_metadata={
             "client_name": po.client_name,
-            "expected_delivery_date": po.expected_delivery_date.isoformat() if po.expected_delivery_date else None,
+            "expected_delivery_date": new_delivery_date_val,
             "parent_po_number": po.po_number,
             "partition_type": "CHILD_2"
         }
@@ -2050,6 +2175,18 @@ async def approve_partition(
         
     # High-Precision Decimals check (4 decimal places)
     parent_freight = float(po.shipping_cost or 0)
+    if parent_freight == 0 and po.items:
+        first_item = po.items[0]
+        if first_item.extra_metadata:
+            meta_freight = first_item.extra_metadata.get("freight") or first_item.extra_metadata.get("Freight")
+            if meta_freight:
+                try:
+                    parent_freight = float(meta_freight)
+                except ValueError:
+                    pass
+        if parent_freight > 0:
+            po.shipping_cost = parent_freight
+
     split_sum = body.freight_c1 + body.freight_c2
     
     if abs(split_sum - parent_freight) > 0.01:

@@ -12,7 +12,7 @@ import {
     Package, DollarSign, Calendar, User, FileText, Globe,
     Star, RefreshCw as RefreshIcon, Zap, AlertCircle, Upload,
     CheckCircle, Edit2, Save, XCircle, Truck, Lock, Unlock,
-    ArrowUpRight, ShieldAlert, ChevronLeft, ChevronRight, Split
+    ArrowUpRight, ShieldAlert, ChevronLeft, ChevronRight, Split, Paperclip
 } from 'lucide-react'
 
 const KanbanPage = () => {
@@ -23,7 +23,19 @@ const KanbanPage = () => {
         return val;
     };
 
+    const getDownloadUrl = (path) => {
+        const cleanPath = (path || '').replace(/^\//, '');
+        const baseUrl = (import.meta.env.VITE_API_URL || 'http://localhost:8000/api').replace(/\/api$/, '');
+        const generated = `${baseUrl}/api/uploads/download?path=${encodeURIComponent(cleanPath)}`;
+        console.log("[FlexFlow Download Link] Generated path for download:", generated);
+        return generated;
+    };
+
     const [boardData, setBoardData] = useState(null)
+    const [openSKUs, setOpenSKUs] = useState({})
+    const toggleSKU = (skuId) => {
+        setOpenSKUs(prev => ({ ...prev, [skuId]: !prev[skuId] }));
+    }
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState(null)
     const [searchTerm, setSearchTerm] = useState('')
@@ -47,6 +59,16 @@ const KanbanPage = () => {
         nfe_chave_conferidas: false,
         evidencias_fotograficas_verificadas: false
     })
+
+    const isPOBlocked = selectedPO ? (
+        selectedPO.block_status === 'BLOQUEADO' || 
+        selectedPO.extra_metadata?.block_status === 'BLOQUEADO' || 
+        selectedPO.status_macro === 'ANALISE_CREDITO' || 
+        (selectedPO.items && selectedPO.items.some(item => 
+            item.block_status === 'BLOQUEADO' || 
+            item.extra_metadata?.block_status === 'BLOQUEADO'
+        ))
+    ) : false;
     
     const handleFinanceiroChecklistChange = (field, checked) => {
         setChecklistFinanceiro(prev => ({
@@ -68,7 +90,7 @@ const KanbanPage = () => {
     const getFinanceiroMissingFieldsTooltip = () => {
         const missing = [];
         if (!checklistFinanceiro.margem_comissoes_validadas) missing.push('validar margem e comissões');
-        if (!checklistFinanceiro.nfe_chave_conferidas) missing.push('conferir NFE e chave de acesso');
+        if (!checklistFinanceiro.nfe_chave_conferidas) missing.push('conferir NF-e');
         if (!checklistFinanceiro.evidencias_fotograficas_verificadas) missing.push('verificar evidências fotográficas');
         
         const commentLen = (localFields.audit_comment || '').trim().length;
@@ -87,6 +109,7 @@ const KanbanPage = () => {
     const [returnReason, setReturnReason] = useState('')
     const [showPartitionModal, setShowPartitionModal] = useState(false)
     const [partitionReason, setPartitionReason] = useState('')
+    const [newDeliveryDate, setNewDeliveryDate] = useState('')
     const [qtySplits, setQtySplits] = useState({})
     const [showFreightModal, setShowFreightModal] = useState(false)
     const [freightC1, setFreightC1] = useState('')
@@ -215,7 +238,7 @@ const KanbanPage = () => {
     }
 
     const handleCostFormChange = (field, val) => {
-        let cleaned = val
+        let cleaned = val ? val.replace(',', '.') : ''
         if (['custo_mp_kg', 'rendimento', 'indice_impostos'].includes(field)) {
             // Allow decimals (e.g. "0.", "0.05") but prevent "05", "00" etc.
             if (cleaned.startsWith('0') && cleaned.length > 1 && cleaned[1] !== '.') {
@@ -248,9 +271,9 @@ const KanbanPage = () => {
             const payload = {
                 sku: costForm.sku,
                 nome: costForm.nome,
-                custo_mp_kg: parseFloat(costForm.custo_mp_kg),
-                rendimento: parseFloat(costForm.rendimento),
-                indice_impostos: parseFloat(costForm.indice_impostos || '22.25')
+                custo_mp_kg: parseFloat(String(costForm.custo_mp_kg).replace(',', '.')),
+                rendimento: parseFloat(String(costForm.rendimento).replace(',', '.')),
+                indice_impostos: parseFloat(String(costForm.indice_impostos || '22.25').replace(',', '.'))
             }
             
             if (exists) {
@@ -379,8 +402,26 @@ const KanbanPage = () => {
                 ...meta,
                 production_impediment: impediment
             })
+            if (meta.logistics_checklist) {
+                setLogisticsChecklist(meta.logistics_checklist)
+            } else {
+                setLogisticsChecklist({
+                    endereco_conferido: false,
+                    peso_validado: false,
+                    etiquetas_impressas: false,
+                    foto_carga_path: null,
+                    foto_canhoto_path: null
+                })
+            }
         } else {
             setLocalFields({})
+            setLogisticsChecklist({
+                endereco_conferido: false,
+                peso_validado: false,
+                etiquetas_impressas: false,
+                foto_carga_path: null,
+                foto_canhoto_path: null
+            })
         }
     }, [selectedPO])
 
@@ -653,7 +694,7 @@ const KanbanPage = () => {
             });
             fetchBoard();
 
-            showSuccess(`${field === 'foto_carga_path' ? 'Foto da Carga' : 'Foto do Canhoto/NF'} enviada com sucesso`)
+            showSuccess(`${field === 'foto_carga_path' ? 'Foto da Carga' : 'Nota Fiscal com Canhoto Assinado'} enviada com sucesso`)
 
             if (response.data.can_dispatch) {
                 showSuccess('✅ Todas as evidências enviadas! Pronto para despacho.')
@@ -747,6 +788,11 @@ const KanbanPage = () => {
             return
         }
 
+        if (!newDeliveryDate) {
+            showError('Nova data de entrega prevista é obrigatória')
+            return
+        }
+
         // Validate splits sum up to parent quantity exactly for each item
         const payloadQtySplits = {};
         for (const item of selectedPO.items || []) {
@@ -764,12 +810,14 @@ const KanbanPage = () => {
                 {
                     po_id: selectedPO.id,
                     reason: partitionReason,
-                    qty_splits: payloadQtySplits
+                    qty_splits: payloadQtySplits,
+                    new_delivery_date: newDeliveryDate
                 }
             )
-            showSuccess(response.data.message)
+            showSuccess(`Sugestão enviada. Se aprovado, o C1 manterá a data original e o C2 assumirá a data ${formatDate(newDeliveryDate)}.`)
             setShowPartitionModal(false)
             setPartitionReason('')
+            setNewDeliveryDate('')
             setQtySplits({})
             fetchBoard()
             handleCloseModal()
@@ -788,6 +836,7 @@ const KanbanPage = () => {
             'Produção/Embalagem': 'Produção/Embalagem',
             'Faturamento/Expedição': 'Faturamento/Expedição',
             'Financeiro': 'Financeiro',
+            'Concluídos': 'Concluídos',
             'SUBMITTED': 'Comercial',
             'APPROVED': 'PCP',
             'MANUFACTURING': 'Produção/Embalagem',
@@ -797,7 +846,9 @@ const KanbanPage = () => {
             'WAITING_COMMERCIAL_PARTITION': 'Comercial',
             'PARTITION_REQUESTED': 'Comercial',
             'WAITING_MATERIAL': 'PCP',
-            'ARCHIVED_PARTITIONED': 'Arquivado'
+            'ARCHIVED_PARTITIONED': 'Concluídos',
+            'ARCHIVED': 'Concluídos',
+            'COMPLETED': 'Concluídos'
         };
         const upper = String(status).toUpperCase();
         return statusMap[status] || statusMap[upper] || status || 'Comercial';
@@ -809,8 +860,9 @@ const KanbanPage = () => {
             'Comercial': 'PCP',
             'PCP': 'Produção/Embalagem',
             'Produção/Embalagem': 'Faturamento/Expedição',
-            'Faturamento/Expedição': 'Financeiro',
-            'Financeiro': null
+            'Faturamento/Expedição': 'Concluídos',
+            'Financeiro': 'Concluídos',
+            'Concluídos': null
         }
         return statusFlow[mapped] || null
     }
@@ -821,7 +873,8 @@ const KanbanPage = () => {
             'PCP': 'Comercial',
             'Produção/Embalagem': 'PCP',
             'Faturamento/Expedição': 'Produção/Embalagem',
-            'Financeiro': 'Faturamento/Expedição'
+            'Financeiro': 'Faturamento/Expedição',
+            'Concluídos': 'Faturamento/Expedição'
         }
         return statusFlow[mapped] || null
     }
@@ -897,7 +950,7 @@ const KanbanPage = () => {
     }
 
     const canEditCommission = () => {
-        return user && (user.role === 'MASTER' || user.role === 'ADMIN')
+        return ['admin', 'master'].includes((user?.role || '').toLowerCase())
     }
 
     const isDispatchReady = () => {
@@ -937,7 +990,6 @@ const KanbanPage = () => {
 
         if (selectedPO.status === 'Faturamento/Expedição') {
             const nfe = meta.numero_nfe || ''
-            const accessKey = (meta.chave_acesso || '').replace(/\D/g, '')
             const carrier = meta.transportadora || ''
             
             const checklistDone = 
@@ -947,9 +999,7 @@ const KanbanPage = () => {
                 logisticsChecklist.foto_carga_path &&
                 logisticsChecklist.foto_canhoto_path
 
-            const isKeyValid = accessKey.length === 44
-
-            return nfe !== '' && isKeyValid && carrier !== '' && checklistDone
+            return nfe !== '' && carrier !== '' && checklistDone
         }
 
         if (selectedPO.status === 'Financeiro') {
@@ -982,12 +1032,9 @@ const KanbanPage = () => {
 
         if (selectedPO.status === 'Faturamento/Expedição') {
             const nfe = meta.numero_nfe || '';
-            const accessKey = (meta.chave_acesso || '').replace(/\D/g, '');
             const carrier = meta.transportadora || '';
-            const isKeyValid = accessKey.length === 44;
             
             if (nfe === '') missing.push('Número NF-e');
-            if (!isKeyValid) missing.push('Chave de Acesso (44 dígitos numéricos)');
             if (carrier === '') missing.push('Transportadora');
             
             const checklistMissing = [];
@@ -995,7 +1042,7 @@ const KanbanPage = () => {
             if (!logisticsChecklist.peso_validado) checklistMissing.push('Peso');
             if (!logisticsChecklist.etiquetas_impressas) checklistMissing.push('Etiquetas');
             if (!logisticsChecklist.foto_carga_path) checklistMissing.push('Foto da Carga');
-            if (!logisticsChecklist.foto_canhoto_path) checklistMissing.push('Foto do Canhoto');
+            if (!logisticsChecklist.foto_canhoto_path) checklistMissing.push('Nota Fiscal com Canhoto Assinado');
             
             if (checklistMissing.length > 0) {
                 missing.push(`Checklist pendente: ${checklistMissing.join(', ')}`);
@@ -1052,6 +1099,8 @@ const KanbanPage = () => {
         )
     }
 
+    const isArchived = selectedPO ? (['ARCHIVED', 'ARCHIVED_PARTITIONED', 'COMPLETED'].includes(selectedPO.status_macro) || selectedPO.status === 'Concluídos') : false;
+
     return (
         <ErrorBoundary>
             <div className="h-full flex flex-col">
@@ -1093,7 +1142,7 @@ const KanbanPage = () => {
                                 <RefreshCw className="w-5 h-5" />
                                 Atualizar
                             </button>
-                            {user?.role?.toLowerCase() === 'admin' && (
+                            {(user?.role || '').toLowerCase() === 'admin' && (
                                 <button
                                     onClick={handleNukeTenantData}
                                     className="border border-red-600 hover:bg-red-50 text-red-600 font-semibold px-4 py-2 rounded-lg flex items-center gap-2 transition-colors cursor-pointer"
@@ -1136,9 +1185,9 @@ const KanbanPage = () => {
                         <div className="bg-white rounded-lg shadow-xl max-w-5xl w-full max-h-[90vh] overflow-hidden flex flex-col">
                             {/* Modal Header */}
                             {(() => {
-                                const activeColumn = boardData?.columns?.find(col => col.status === selectedPO.status);
+                                const activeColumn = boardData?.columns?.find?.(col => col?.status === selectedPO?.status);
                                 const columnPOs = activeColumn ? filterPOs(activeColumn.pos) : [];
-                                const currentPOIndex = columnPOs.findIndex(po => po.id === selectedPO.id);
+                                const currentPOIndex = columnPOs?.findIndex?.(po => po?.id === selectedPO?.id);
                                 const hasPrevPO = currentPOIndex > 0;
                                 const hasNextPO = currentPOIndex >= 0 && currentPOIndex < columnPOs.length - 1;
 
@@ -1378,7 +1427,23 @@ const KanbanPage = () => {
                                     </h3>
                                     
                                     {(() => {
-                                        const stages = ['Comercial', 'PCP', 'Produção/Embalagem', 'Faturamento/Expedição', 'Financeiro'];
+                                        const isPOBlocked = 
+                                            selectedPO.block_status === 'BLOQUEADO' || 
+                                            selectedPO.extra_metadata?.block_status === 'BLOQUEADO' || 
+                                            selectedPO.status_macro === 'ANALISE_CREDITO' || 
+                                            (selectedPO.items && selectedPO.items.some(item => 
+                                                item.block_status === 'BLOQUEADO' || 
+                                                item.extra_metadata?.block_status === 'BLOQUEADO'
+                                            ));
+
+                                        const finance_justification = 
+                                            selectedPO.finance_justification || 
+                                            selectedPO.extra_metadata?.finance_justification || 
+                                            (selectedPO.items && selectedPO.items.find(item => item.extra_metadata?.finance_justification)?.extra_metadata?.finance_justification) ||
+                                            (selectedPO.items && selectedPO.items.find(item => item.finance_justification)?.finance_justification) ||
+                                            'Sem justificativa comercial registrada.';
+
+                                        const stages = ['Comercial', 'PCP', 'Produção/Embalagem', 'Faturamento/Expedição', 'Financeiro', 'Concluídos'];
                                         const currentStageIndex = stages.indexOf(mapStatusToStageName(selectedPO.status));
 
                                         return stages.map((stageName, idx) => {
@@ -1545,7 +1610,7 @@ const KanbanPage = () => {
                                                                             </div>
                                                                         </div>
 
-                                                                        {(() => {
+                                                                        {['admin', 'master'].includes((user?.role || '').toLowerCase()) && (() => {
                                                                             const marginInfo = calculatePOMargins(selectedPO);
                                                                             return (
                                                                                 <div className="bg-slate-50 border border-gray-200 rounded-lg p-4 mt-2">
@@ -1589,43 +1654,52 @@ const KanbanPage = () => {
                                                                         })()}
 
                                                                         {/* Commercial Partition Approval or Material Pause Panel */}
-                                                                        {selectedPO.status_macro === 'WAITING_COMMERCIAL_PARTITION' && (
+                                                                        {((selectedPO.status_macro === 'WAITING_COMMERCIAL_PARTITION') || (['DRAFT', 'SUBMITTED'].includes(selectedPO.status_macro) && (selectedPO.partition_reason || selectedPO.extra_metadata?.partition_reason))) && (
                                                                             <div className="mt-4 p-4 bg-purple-50 border border-purple-200 rounded-lg shadow-2xs">
                                                                                 <h4 className="text-sm font-bold text-purple-900 mb-2 flex items-center gap-1.5">
                                                                                     <Split className="w-4 h-4" />
                                                                                     <span>Sugestão de Partição Pendente (PCP)</span>
                                                                                 </h4>
                                                                                 <p className="text-xs text-purple-950 font-semibold mb-3">
-                                                                                    <strong>Justificativa Técnica:</strong> "{selectedPO.partition_reason || selectedPO.extra_metadata?.partition_reason}"
+                                                                                    <strong>Justificativa Técnica:</strong> "{selectedPO.partition_reason || selectedPO.extra_metadata?.partition_reason || 'Sem justificativa técnica registrada.'}"
                                                                                 </p>
-                                                                                <div className="flex flex-wrap gap-2.5">
-                                                                                    <button
-                                                                                        onClick={() => {
-                                                                                            const originalFreight = parseFloat(selectedPO.shipping_cost) || 0;
-                                                                                            setFreightC1((originalFreight / 2).toFixed(4));
-                                                                                            setFreightC2((originalFreight - originalFreight / 2).toFixed(4));
-                                                                                            setShowFreightModal(true);
-                                                                                        }}
-                                                                                        className="inline-flex items-center justify-center px-3.5 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-lg cursor-pointer transition-colors shadow-2xs"
-                                                                                    >
-                                                                                        Aprovar Partição (Ratear Frete)
-                                                                                    </button>
-                                                                                    <button
-                                                                                        onClick={async () => {
-                                                                                            try {
-                                                                                                const response = await api.post(`/kanban/pos/${selectedPO.id}/pause-material`);
-                                                                                                showSuccess(response.data.message);
-                                                                                                await fetchBoard();
-                                                                                                handleCloseModal();
-                                                                                            } catch (err) {
-                                                                                                showError(err.response?.data?.detail || 'Erro ao aguardar insumo');
-                                                                                            }
-                                                                                        }}
-                                                                                        className="inline-flex items-center justify-center px-3.5 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-xs font-bold rounded-lg cursor-pointer transition-colors shadow-2xs"
-                                                                                    >
-                                                                                        🧹 Aguardar Insumo (Pausar SLA)
-                                                                                    </button>
-                                                                                </div>
+                                                                                {selectedPO.status_macro === 'WAITING_COMMERCIAL_PARTITION' && (
+                                                                                    <div className="flex flex-wrap gap-2.5">
+                                                                                        <button
+                                                                                            onClick={() => {
+                                                                                                let originalFreight = parseFloat(selectedPO.shipping_cost) || 0;
+                                                                                                if (originalFreight === 0 && selectedPO.items && selectedPO.items.length > 0) {
+                                                                                                    const firstItem = selectedPO.items[0];
+                                                                                                    if (firstItem.extra_metadata) {
+                                                                                                        const metaFreight = firstItem.extra_metadata.freight || firstItem.extra_metadata.Freight;
+                                                                                                        originalFreight = parseFloat(metaFreight) || 0;
+                                                                                                    }
+                                                                                                }
+                                                                                                setFreightC1((originalFreight / 2).toFixed(4));
+                                                                                                setFreightC2((originalFreight - originalFreight / 2).toFixed(4));
+                                                                                                setShowFreightModal(true);
+                                                                                            }}
+                                                                                            className="inline-flex items-center justify-center px-3.5 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-lg cursor-pointer transition-colors shadow-2xs"
+                                                                                        >
+                                                                                            Aprovar Partição e Ratear Frete
+                                                                                        </button>
+                                                                                        <button
+                                                                                            onClick={async () => {
+                                                                                                try {
+                                                                                                    const response = await api.post(`/kanban/pos/${selectedPO.id}/pause-material`);
+                                                                                                    showSuccess(response.data.message);
+                                                                                                    await fetchBoard();
+                                                                                                    handleCloseModal();
+                                                                                                } catch (err) {
+                                                                                                    showError(err.response?.data?.detail || 'Erro ao aguardar insumo');
+                                                                                                }
+                                                                                            }}
+                                                                                            className="inline-flex items-center justify-center px-3.5 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-xs font-bold rounded-lg cursor-pointer transition-colors shadow-2xs"
+                                                                                        >
+                                                                                            Aguardar Insumo (Pausar SLA)
+                                                                                        </button>
+                                                                                    </div>
+                                                                                )}
                                                                             </div>
                                                                         )}
                                                                     </div>
@@ -1779,6 +1853,7 @@ const KanbanPage = () => {
                                                                                         className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-semibold text-gray-800"
                                                                                     >
                                                                                         <option value="">Selecione...</option>
+                                                                                        <option value="Padrão">Padrão</option>
                                                                                         <option value="Palete">Palete</option>
                                                                                         <option value="Caixa de Papelão">Caixa de Papelão</option>
                                                                                         <option value="Fardo Plástico">Fardo Plástico</option>
@@ -1902,14 +1977,10 @@ const KanbanPage = () => {
                                                                     <div className="space-y-4">
                                                                         {!isActive ? (
                                                                             <div className="space-y-3 text-sm">
-                                                                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 border-b border-gray-150 pb-3">
+                                                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-b border-gray-150 pb-3">
                                                                                     <div>
                                                                                         <span className="text-xs text-gray-500 font-semibold uppercase block">Número NF-e</span>
                                                                                         <span className="font-semibold text-gray-800">{selectedPO.extra_metadata?.numero_nfe || 'Não informado'}</span>
-                                                                                    </div>
-                                                                                    <div>
-                                                                                        <span className="text-xs text-gray-500 font-semibold uppercase block">Chave de Acesso</span>
-                                                                                        <span className="font-mono text-xs text-gray-800">{selectedPO.extra_metadata?.chave_acesso || 'Não informada'}</span>
                                                                                     </div>
                                                                                     <div>
                                                                                         <span className="text-xs text-gray-500 font-semibold uppercase block">Transportadora</span>
@@ -1919,7 +1990,7 @@ const KanbanPage = () => {
                                                                                 <div className="flex gap-4">
                                                                                     {logisticsChecklist.foto_carga_path && (
                                                                                         <a 
-                                                                                            href={`/api/uploads/download?path=${encodeURIComponent((logisticsChecklist.foto_carga_path || '').replace(/^\//, ''))}`}
+                                                                                            href={getDownloadUrl(logisticsChecklist.foto_carga_path)}
                                                                                             target="_blank" 
                                                                                             rel="noreferrer" 
                                                                                             className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 font-semibold underline"
@@ -1929,12 +2000,12 @@ const KanbanPage = () => {
                                                                                     )}
                                                                                     {logisticsChecklist.foto_canhoto_path && (
                                                                                         <a 
-                                                                                            href={`/api/uploads/download?path=${encodeURIComponent((logisticsChecklist.foto_canhoto_path || '').replace(/^\//, ''))}`}
+                                                                                            href={getDownloadUrl(logisticsChecklist.foto_canhoto_path)}
                                                                                             target="_blank" 
                                                                                             rel="noreferrer" 
                                                                                             className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 font-semibold underline"
                                                                                         >
-                                                                                            Visualizar Foto do Canhoto/NF
+                                                                                            Visualizar Nota Fiscal com Canhoto Assinado
                                                                                         </a>
                                                                                     )}
                                                                                 </div>
@@ -1988,8 +2059,8 @@ const KanbanPage = () => {
                                                                                     </div>
                                                                                 </div>
 
-                                                                                {/* NF, Key and Carrier */}
-                                                                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                                                                {/* NF and Carrier */}
+                                                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                                                                     <div>
                                                                                         <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
                                                                                             Número da NF-e <span className="text-red-500">*</span>
@@ -2002,32 +2073,6 @@ const KanbanPage = () => {
                                                                                             placeholder="Ex: 004123"
                                                                                             className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800 font-medium"
                                                                                         />
-                                                                                    </div>
-
-                                                                                    <div>
-                                                                                        <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
-                                                                                            Chave de Acesso NF-e (44 dígitos) <span className="text-red-500">*</span>
-                                                                                        </label>
-                                                                                        <div className="relative">
-                                                                                            <input
-                                                                                                type="text"
-                                                                                                maxLength={44}
-                                                                                                value={localFields.chave_acesso || ''}
-                                                                                                onChange={(e) => handleChangeLocalField('chave_acesso', e.target.value.replace(/\D/g, ''))}
-                                                                                                onBlur={() => handleBlurLocalField('chave_acesso')}
-                                                                                                placeholder="Digite os 44 números..."
-                                                                                                className="w-full pr-10 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800 font-mono font-medium"
-                                                                                            />
-                                                                                            <div className="absolute right-3 top-1/2 transform -translate-y-1/2 flex items-center">
-                                                                                                {(localFields.chave_acesso || '').replace(/\D/g, '').length === 44 ? (
-                                                                                                    <CheckCircle className="w-4 h-4 text-emerald-500" />
-                                                                                                ) : (
-                                                                                                    <span className="text-[10px] text-gray-400 font-semibold font-mono">
-                                                                                                        {(localFields.chave_acesso || '').replace(/\D/g, '').length}/44
-                                                                                                    </span>
-                                                                                                )}
-                                                                                            </div>
-                                                                                        </div>
                                                                                     </div>
 
                                                                                     <div>
@@ -2063,7 +2108,7 @@ const KanbanPage = () => {
                                                                                                         <span>Evidência da Carga Salva!</span>
                                                                                                     </div>
                                                                                                     <a 
-                                                                                                        href={`/api/uploads/download?path=${encodeURIComponent((logisticsChecklist.foto_carga_path || '').replace(/^\//, ''))}`}
+                                                                                                        href={getDownloadUrl(logisticsChecklist.foto_carga_path)}
                                                                                                         target="_blank" 
                                                                                                         rel="noreferrer" 
                                                                                                         className="text-xs text-blue-600 hover:text-blue-800 font-semibold underline block"
@@ -2111,21 +2156,21 @@ const KanbanPage = () => {
                                                                                         {/* Foto do Canhoto/NF */}
                                                                                         <div className="border-2 border-dashed border-cyan-200 bg-cyan-50/10 rounded-lg p-4 transition-colors">
                                                                                             <label className="block text-xs font-bold text-cyan-900 uppercase mb-2">
-                                                                                                Canhoto Assinado / Comprovante
+                                                                                                Nota Fiscal com Canhoto Assinado
                                                                                             </label>
                                                                                             {logisticsChecklist.foto_canhoto_path ? (
                                                                                                 <div className="space-y-2">
                                                                                                     <div className="flex items-center gap-2 text-green-600 font-semibold text-sm">
                                                                                                         <CheckCircle className="w-5 h-5 flex-shrink-0" />
-                                                                                                        <span>Evidência do Canhoto Salva!</span>
+                                                                                                        <span>Nota Fiscal com Canhoto Assinado Salva!</span>
                                                                                                     </div>
                                                                                                     <a 
-                                                                                                        href={`/api/uploads/download?path=${encodeURIComponent((logisticsChecklist.foto_canhoto_path || '').replace(/^\//, ''))}`}
+                                                                                                        href={getDownloadUrl(logisticsChecklist.foto_canhoto_path)}
                                                                                                         target="_blank" 
                                                                                                         rel="noreferrer" 
                                                                                                         className="text-xs text-blue-600 hover:text-blue-800 font-semibold underline block"
                                                                                                     >
-                                                                                                        Abrir Foto do Canhoto
+                                                                                                        Abrir Nota Fiscal com Canhoto Assinado
                                                                                                     </a>
                                                                                                     <div className="pt-1">
                                                                                                         <input
@@ -2159,7 +2204,7 @@ const KanbanPage = () => {
                                                                                                         className="flex items-center justify-center gap-2 px-4 py-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 cursor-pointer transition-colors text-xs font-semibold shadow-xs"
                                                                                                     >
                                                                                                         <Upload className="w-4 h-4" />
-                                                                                                        {uploadingEvidence ? 'Enviando...' : 'Enviar Foto do Canhoto'}
+                                                                                                        {uploadingEvidence ? 'Enviando...' : 'Enviar Nota Fiscal com Canhoto Assinado'}
                                                                                                     </label>
                                                                                                 </div>
                                                                                             )}
@@ -2170,238 +2215,326 @@ const KanbanPage = () => {
                                                                         )}
                                                                     </div>
                                                                 )}
-
                                                                 {stageName === 'Financeiro' && (
                                                                     <div className="space-y-4">
-                                                                        {/* Painel de Evidências da Expedição (Visual 360º) */}
-                                                                        <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg space-y-3">
-                                                                            <h5 className="text-xs font-bold text-slate-800 uppercase tracking-wider border-b border-slate-200 pb-2 flex items-center gap-1.5">
-                                                                                <span>📋</span> Evidências Físicas & Fiscais (Expedição)
-                                                                            </h5>
-                                                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                                                                {/* Chave de Acesso NF-e */}
-                                                                                <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-2xs space-y-1">
-                                                                                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block">NF-e & Chave de Acesso</span>
-                                                                                    <div className="text-xs font-semibold text-slate-800">
-                                                                                        Número NF-e: <span className="font-mono text-blue-600 font-bold">{selectedPO.extra_metadata?.numero_nfe || 'Não informado'}</span>
-                                                                                    </div>
-                                                                                    <div className="text-[11px] font-medium text-slate-600 font-mono break-all bg-slate-50 p-1.5 rounded border border-slate-200 mt-1">
-                                                                                        {selectedPO.extra_metadata?.chave_acesso || 'Chave não informada'}
+                                                                        {isPOBlocked ? (
+                                                                            <div className="space-y-4">
+                                                                                {/* Painel de Liberação de Crédito */}
+                                                                                <div className="p-4 bg-red-50 border border-red-200 rounded-lg space-y-3 shadow-2xs animate-fade-in">
+                                                                                    <h5 className="text-sm font-bold text-red-900 uppercase tracking-wider flex items-center gap-1.5">
+                                                                                        <span>🛡️</span> Painel de Liberação de Crédito
+                                                                                    </h5>
+                                                                                    <div className="p-3 bg-white border border-red-200 rounded-lg shadow-3xs">
+                                                                                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block mb-1">Justificativa Comercial</span>
+                                                                                        <p className="text-xs font-semibold text-slate-800 italic leading-relaxed">
+                                                                                            "{finance_justification}"
+                                                                                        </p>
                                                                                     </div>
                                                                                 </div>
 
-                                                                                {/* Foto da Carga */}
-                                                                                <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-2xs space-y-1 flex flex-col justify-between">
-                                                                                    <div>
-                                                                                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block">Foto da Carga Carregada</span>
-                                                                                        {logisticsChecklist.foto_carga_path ? (
-                                                                                            <div className="text-xs text-green-700 font-semibold flex items-center gap-1 mt-1">
-                                                                                                <span className="text-emerald-500">✓</span> Foto Salva com Sucesso!
-                                                                                            </div>
-                                                                                        ) : (
-                                                                                            <div className="text-xs text-amber-700 font-medium flex items-center gap-1 mt-1">
-                                                                                                <span>⚠</span> Nenhuma foto anexada
-                                                                                            </div>
-                                                                                        )}
-                                                                                    </div>
-                                                                                    {logisticsChecklist.foto_carga_path && (
-                                                                                        <a 
-                                                                                            href={`/api/uploads/download?path=${encodeURIComponent((logisticsChecklist.foto_carga_path || '').replace(/^\//, ''))}`}
-                                                                                            target="_blank" 
-                                                                                            rel="noreferrer" 
-                                                                                            className="text-xs text-blue-600 hover:text-blue-800 font-bold hover:underline block mt-2"
-                                                                                        >
-                                                                                            🔍 Visualizar Foto da Carga
-                                                                                        </a>
+                                                                                {/* Parecer do Financeiro */}
+                                                                                <div>
+                                                                                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                                                                        Parecer do Financeiro <span className="text-red-500">*</span>
+                                                                                    </label>
+                                                                                    {!isActive ? (
+                                                                                        <p className="text-sm text-gray-800 bg-gray-50 p-3 rounded-lg border border-gray-200 font-medium">
+                                                                                            {selectedPO.extra_metadata?.audit_comment || 'Nenhum comentário registrado.'}
+                                                                                        </p>
+                                                                                    ) : (
+                                                                                        <textarea
+                                                                                            value={localFields.audit_comment || ''}
+                                                                                            onChange={(e) => handleChangeLocalField('audit_comment', e.target.value)}
+                                                                                            onBlur={() => handleBlurLocalField('audit_comment')}
+                                                                                            placeholder="Descreva observações de auditoria, conferência de frete ou margem para liberação..."
+                                                                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-850 font-medium"
+                                                                                            rows="3"
+                                                                                        />
                                                                                     )}
                                                                                 </div>
 
-                                                                                {/* PDF Canhoto / Comprovante */}
-                                                                                <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-2xs space-y-1 flex flex-col justify-between">
-                                                                                    <div>
-                                                                                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block">Canhoto Assinado / NF</span>
-                                                                                        {logisticsChecklist.foto_canhoto_path ? (
-                                                                                            <div className="text-xs text-green-700 font-semibold flex items-center gap-1 mt-1">
-                                                                                                <span className="text-emerald-500">✓</span> Evidência Salva com Sucesso!
-                                                                                            </div>
-                                                                                        ) : (
-                                                                                            <div className="text-xs text-amber-700 font-medium flex items-center gap-1 mt-1">
-                                                                                                <span>⚠</span> Nenhum arquivo anexado
-                                                                                            </div>
-                                                                                        )}
-                                                                                    </div>
-                                                                                    {logisticsChecklist.foto_canhoto_path && (
-                                                                                        <a 
-                                                                                            href={`/api/uploads/download?path=${encodeURIComponent((logisticsChecklist.foto_canhoto_path || '').replace(/^\//, ''))}`}
-                                                                                            target="_blank" 
-                                                                                            rel="noreferrer" 
-                                                                                            className="text-xs text-blue-600 hover:text-blue-800 font-bold hover:underline block mt-2"
+                                                                                {/* Two Buttons inside the Panel */}
+                                                                                {isActive && (
+                                                                                    <div className="flex gap-3 mt-4">
+                                                                                        <button
+                                                                                            onClick={async () => {
+                                                                                                const comment = (localFields.audit_comment || '').trim();
+                                                                                                if (comment.length < 10) {
+                                                                                                    showError("Por favor, preencha o Parecer do Financeiro com pelo menos 10 caracteres.");
+                                                                                                    return;
+                                                                                                }
+                                                                                                try {
+                                                                                                    const response = await api.post(`/kanban/pos/${selectedPO.id}/approve-credit`, {
+                                                                                                        audit_comment: comment
+                                                                                                    });
+                                                                                                    showSuccess(response.data.message);
+                                                                                                    await fetchBoard();
+                                                                                                    handleCloseModal();
+                                                                                                } catch (err) {
+                                                                                                    showError(err.response?.data?.detail || "Erro ao aprovar crédito");
+                                                                                                }
+                                                                                            }}
+                                                                                            className="flex-1 py-2.5 px-4 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold text-xs uppercase tracking-wider transition-colors shadow-md cursor-pointer text-center border-0"
                                                                                         >
-                                                                                            📄 Abrir Canhoto Assinado
-                                                                                        </a>
-                                                                                    )}
-                                                                                </div>
-                                                                            </div>
-                                                                        </div>
-
-                                                                        {/* Checklist de Auditoria Financeira */}
-                                                                        <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg space-y-3">
-                                                                            <h5 className="text-xs font-bold text-slate-800 uppercase tracking-wider border-b border-slate-200 pb-2">
-                                                                                Checklist de Auditoria Financeira
-                                                                            </h5>
-                                                                            <div className="flex flex-col gap-2.5">
-                                                                                <label className="flex items-center gap-2.5 text-xs text-slate-700 font-semibold cursor-pointer">
-                                                                                    <input
-                                                                                        type="checkbox"
-                                                                                        checked={checklistFinanceiro.margem_comissoes_validadas}
-                                                                                        onChange={(e) => handleFinanceiroChecklistChange('margem_comissoes_validadas', e.target.checked)}
-                                                                                        className="w-4 h-4 text-emerald-600 border-gray-300 rounded focus:ring-emerald-500 cursor-pointer"
-                                                                                        disabled={!isActive}
-                                                                                    />
-                                                                                    <span>Margem e Comissões Validadas</span>
-                                                                                </label>
-                                                                                <label className="flex items-center gap-2.5 text-xs text-slate-700 font-semibold cursor-pointer">
-                                                                                    <input
-                                                                                        type="checkbox"
-                                                                                        checked={checklistFinanceiro.nfe_chave_conferidas}
-                                                                                        onChange={(e) => handleFinanceiroChecklistChange('nfe_chave_conferidas', e.target.checked)}
-                                                                                        className="w-4 h-4 text-emerald-600 border-gray-300 rounded focus:ring-emerald-500 cursor-pointer"
-                                                                                        disabled={!isActive}
-                                                                                    />
-                                                                                    <span>NFE e Chave de Acesso Conferidas</span>
-                                                                                </label>
-                                                                                <label className="flex items-center gap-2.5 text-xs text-slate-700 font-semibold cursor-pointer">
-                                                                                    <input
-                                                                                        type="checkbox"
-                                                                                        checked={checklistFinanceiro.evidencias_fotograficas_verificadas}
-                                                                                        onChange={(e) => handleFinanceiroChecklistChange('evidencias_fotograficas_verificadas', e.target.checked)}
-                                                                                        className="w-4 h-4 text-emerald-600 border-gray-300 rounded focus:ring-emerald-500 cursor-pointer"
-                                                                                        disabled={!isActive}
-                                                                                    />
-                                                                                    <span>Evidências Fotográficas Verificadas</span>
-                                                                                </label>
-                                                                            </div>
-                                                                        </div>
-
-                                                                        {/* Comissão */}
-                                                                        <div className="p-4 bg-slate-50 border border-gray-200 rounded-lg">
-                                                                            <div className="flex items-center justify-between mb-3 border-b border-gray-200 pb-2">
-                                                                                <h5 className="text-xs font-bold text-gray-700 uppercase tracking-wider">
-                                                                                    Taxa de Comissão Comercial
-                                                                                </h5>
-                                                                                {canEditCommission() && !editingCommission && isActive && (
-                                                                                    <button
-                                                                                        onClick={() => {
-                                                                                            setCommissionValue(selectedPO.commission_rate || '')
-                                                                                            setEditingCommission(true)
-                                                                                        }}
-                                                                                        className="flex items-center gap-1 px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-semibold transition-colors cursor-pointer shadow-xs"
-                                                                                    >
-                                                                                        <Edit2 className="w-3.5 h-3.5" />
-                                                                                        Ajustar Taxa Manual
-                                                                                    </button>
+                                                                                            [Aprovar Crédito]
+                                                                                        </button>
+                                                                                        <button
+                                                                                            onClick={async () => {
+                                                                                                const comment = (localFields.audit_comment || '').trim();
+                                                                                                if (comment.length < 10) {
+                                                                                                    showError("Por favor, preencha o Parecer do Financeiro com pelo menos 10 caracteres.");
+                                                                                                    return;
+                                                                                                }
+                                                                                                try {
+                                                                                                    const response = await api.post(`/kanban/pos/${selectedPO.id}/maintain-block`, {
+                                                                                                        audit_comment: comment
+                                                                                                    });
+                                                                                                    showSuccess(response.data.message);
+                                                                                                    await fetchBoard();
+                                                                                                    handleCloseModal();
+                                                                                                } catch (err) {
+                                                                                                    showError(err.response?.data?.detail || "Erro ao manter bloqueio");
+                                                                                                }
+                                                                                            }}
+                                                                                            className="flex-1 py-2.5 px-4 bg-orange-600 hover:bg-orange-700 text-white rounded-lg font-bold text-xs uppercase tracking-wider transition-colors shadow-md cursor-pointer text-center border-0"
+                                                                                        >
+                                                                                            [Manter Bloqueio]
+                                                                                        </button>
+                                                                                    </div>
                                                                                 )}
                                                                             </div>
+                                                                        ) : (
+                                                                            <div className="space-y-4">
+                                                                                {/* Painel de Evidências da Expedição (Visual 360º) */}
+                                                                                <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg space-y-3">
+                                                                                    <h5 className="text-xs font-bold text-slate-800 uppercase tracking-wider border-b border-slate-200 pb-2 flex items-center gap-1.5">
+                                                                                        <span>📋</span> Evidências Físicas & Fiscais (Expedição)
+                                                                                    </h5>
+                                                                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                                                                        {/* NF-e */}
+                                                                                        <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-2xs space-y-1">
+                                                                                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block">NF-e</span>
+                                                                                            <div className="text-xs font-semibold text-slate-800">
+                                                                                                Número NF-e: <span className="font-mono text-blue-600 font-bold">{selectedPO.extra_metadata?.numero_nfe || 'Não informado'}</span>
+                                                                                            </div>
+                                                                                        </div>
 
-                                                                            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-1">
-                                                                                <div>
-                                                                                    <span className="text-xs text-gray-500 font-semibold block uppercase">Comissão Cadastrada</span>
-                                                                                    <p className="text-lg font-bold text-gray-800">
-                                                                                        {selectedPO.commission_rate ? `${parseFloat(selectedPO.commission_rate).toFixed(2)}%` : 'N/A'}
-                                                                                    </p>
+                                                                                        {/* Foto da Carga */}
+                                                                                        <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-2xs space-y-1 flex flex-col justify-between">
+                                                                                            <div>
+                                                                                                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block">Foto da Carga Carregada</span>
+                                                                                                {logisticsChecklist.foto_carga_path ? (
+                                                                                                    <div className="text-xs text-green-700 font-semibold flex items-center gap-1 mt-1">
+                                                                                                        <span className="text-emerald-500">✓</span> Foto Salva com Sucesso!
+                                                                                                    </div>
+                                                                                                ) : (
+                                                                                                    <div className="text-xs text-amber-700 font-medium flex items-center gap-1 mt-1">
+                                                                                                        <span>⚠</span> Nenhuma foto anexada
+                                                                                                    </div>
+                                                                                                )}
+                                                                                            </div>
+                                                                                            {logisticsChecklist.foto_carga_path && (
+                                                                                                <a 
+                                                                                                    href={getDownloadUrl(logisticsChecklist.foto_carga_path)}
+                                                                                                    target="_blank" 
+                                                                                                    rel="noreferrer" 
+                                                                                                    className="text-xs text-blue-600 hover:text-blue-850 font-bold hover:underline block mt-2"
+                                                                                                >
+                                                                                                    🔍 Visualizar Foto da Carga
+                                                                                                </a>
+                                                                                            )}
+                                                                                        </div>
+
+                                                                                        {/* Nota Fiscal com Canhoto Assinado */}
+                                                                                        <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-2xs space-y-1 flex flex-col justify-between">
+                                                                                            <div>
+                                                                                                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block">Nota Fiscal com Canhoto Assinado</span>
+                                                                                                {logisticsChecklist.foto_canhoto_path ? (
+                                                                                                    <div className="text-xs text-green-700 font-semibold flex items-center gap-1 mt-1">
+                                                                                                        <span className="text-emerald-500">✓</span> Evidência Salva com Sucesso!
+                                                                                                    </div>
+                                                                                                ) : (
+                                                                                                    <div className="text-xs text-amber-700 font-medium flex items-center gap-1 mt-1">
+                                                                                                        <span>⚠</span> Nenhum arquivo anexado
+                                                                                                    </div>
+                                                                                                )}
+                                                                                            </div>
+                                                                                            {logisticsChecklist.foto_canhoto_path && (
+                                                                                                <a 
+                                                                                                    href={getDownloadUrl(logisticsChecklist.foto_canhoto_path)}
+                                                                                                    target="_blank" 
+                                                                                                    rel="noreferrer" 
+                                                                                                    className="text-xs text-blue-600 hover:text-blue-850 font-bold hover:underline block mt-2"
+                                                                                                >
+                                                                                                    📄 Abrir Nota Fiscal com Canhoto Assinado
+                                                                                                </a>
+                                                                                            )}
+                                                                                        </div>
+                                                                                    </div>
                                                                                 </div>
-                                                                                <div>
-                                                                                    <span className="text-xs text-gray-500 font-semibold block uppercase">Valor Bruto Comissão</span>
-                                                                                    <p className="text-lg font-bold text-emerald-700 font-mono">
-                                                                                        {formatCurrency(selectedPO.commission_value || 0)}
-                                                                                    </p>
+
+                                                                                {/* Checklist de Auditoria Financeira */}
+                                                                                <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg space-y-3">
+                                                                                    <h5 className="text-xs font-bold text-slate-800 uppercase tracking-wider border-b border-slate-200 pb-2">
+                                                                                        Checklist de Auditoria Financeira
+                                                                                    </h5>
+                                                                                    <div className="flex flex-col gap-2.5">
+                                                                                        <label className="flex items-center gap-2.5 text-xs text-slate-700 font-semibold cursor-pointer">
+                                                                                            <input
+                                                                                                type="checkbox"
+                                                                                                checked={checklistFinanceiro.margem_comissoes_validadas}
+                                                                                                onChange={(e) => handleFinanceiroChecklistChange('margem_comissoes_validadas', e.target.checked)}
+                                                                                                className="w-4 h-4 text-emerald-600 border-gray-300 rounded focus:ring-emerald-500 cursor-pointer"
+                                                                                                disabled={!isActive}
+                                                                                            />
+                                                                                            <span>Margem e Comissões Validadas</span>
+                                                                                        </label>
+                                                                                        <label className="flex items-center gap-2.5 text-xs text-slate-700 font-semibold cursor-pointer">
+                                                                                            <input
+                                                                                                type="checkbox"
+                                                                                                checked={checklistFinanceiro.nfe_chave_conferidas}
+                                                                                                onChange={(e) => handleFinanceiroChecklistChange('nfe_chave_conferidas', e.target.checked)}
+                                                                                                className="w-4 h-4 text-emerald-600 border-gray-300 rounded focus:ring-emerald-500 cursor-pointer"
+                                                                                                disabled={!isActive}
+                                                                                            />
+                                                                                            <span>NF-e Conferida</span>
+                                                                                        </label>
+                                                                                        <label className="flex items-center gap-2.5 text-xs text-slate-700 font-semibold cursor-pointer">
+                                                                                            <input
+                                                                                                type="checkbox"
+                                                                                                checked={checklistFinanceiro.evidencias_fotograficas_verificadas}
+                                                                                                onChange={(e) => handleFinanceiroChecklistChange('evidencias_fotograficas_verificadas', e.target.checked)}
+                                                                                                className="w-4 h-4 text-emerald-600 border-gray-300 rounded focus:ring-emerald-500 cursor-pointer"
+                                                                                                disabled={!isActive}
+                                                                                            />
+                                                                                            <span>Evidências Fotográficas Verificadas</span>
+                                                                                        </label>
+                                                                                    </div>
                                                                                 </div>
+
+                                                                                {/* Comissão */}
+                                                                                <div className="p-4 bg-slate-50 border border-gray-200 rounded-lg">
+                                                                                    <div className="flex items-center justify-between mb-3 border-b border-gray-200 pb-2">
+                                                                                        <h5 className="text-xs font-bold text-gray-700 uppercase tracking-wider">
+                                                                                            Taxa de Comissão Comercial
+                                                                                        </h5>
+                                                                                        {canEditCommission() && !editingCommission && isActive && (
+                                                                                            <button
+                                                                                                onClick={() => {
+                                                                                                    setCommissionValue(selectedPO.commission_rate || '')
+                                                                                                    setEditingCommission(true)
+                                                                                                }}
+                                                                                                className="flex items-center gap-1 px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-semibold transition-colors cursor-pointer shadow-xs"
+                                                                                            >
+                                                                                                <Edit2 className="w-3.5 h-3.5" />
+                                                                                                Ajustar Taxa Manual
+                                                                                            </button>
+                                                                                        )}
+                                                                                    </div>
+
+                                                                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-1">
+                                                                                        <div>
+                                                                                            <span className="text-xs text-gray-500 font-semibold block uppercase">Comissão Cadastrada</span>
+                                                                                            <p className="text-lg font-bold text-gray-800">
+                                                                                                {selectedPO.commission_rate ? `${parseFloat(selectedPO.commission_rate).toFixed(2)}%` : 'N/A'}
+                                                                                            </p>
+                                                                                        </div>
+                                                                                        <div>
+                                                                                            <span className="text-xs text-gray-500 font-semibold block uppercase">Valor Bruto Comissão</span>
+                                                                                            <p className="text-lg font-bold text-emerald-700 font-mono">
+                                                                                                {formatCurrency(selectedPO.commission_value || 0)}
+                                                                                            </p>
+                                                                                        </div>
+                                                                                        {['admin', 'master'].includes((user?.role || '').toLowerCase()) && (
+                                                                                            <div>
+                                                                                                <span className="text-xs text-gray-500 font-semibold block uppercase">Margem Operacional CM</span>
+                                                                                                <p className="text-lg font-bold text-gray-800">
+                                                                                                    {(() => {
+                                                                                                        const marginVal = parseFloat(selectedPO.margin_percentage);
+                                                                                                        return isNaN(marginVal) ? 'PENDENTE PCP' : (marginVal > 1000 ? '> 1000%' : `${marginVal.toFixed(2)}%`);
+                                                                                                    })()}
+                                                                                                </p>
+                                                                                            </div>
+                                                                                        )}
+                                                                                    </div>
+
+                                                                                    {editingCommission && (
+                                                                                        <div className="mt-4 p-3 bg-white border border-blue-200 rounded-lg space-y-3 shadow-xs">
+                                                                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                                                                <div>
+                                                                                                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                                                                                        Nova Alíquota de Comissão (%)
+                                                                                                    </label>
+                                                                                                    <input
+                                                                                                        type="number"
+                                                                                                        step="0.01"
+                                                                                                        min="0"
+                                                                                                        max="100"
+                                                                                                        value={commissionValue}
+                                                                                                        onChange={(e) => setCommissionValue(e.target.value)}
+                                                                                                        placeholder="Taxa em %"
+                                                                                                        className="w-full px-3 py-1.5 border border-gray-300 rounded text-sm text-gray-800 focus:ring-2 focus:ring-blue-500"
+                                                                                                    />
+                                                                                                </div>
+                                                                                                <div>
+                                                                                                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                                                                                        Justificativa de Ajuste (mín. 10 chars)
+                                                                                                    </label>
+                                                                                                    <input
+                                                                                                        type="text"
+                                                                                                        value={commissionJustification}
+                                                                                                        onChange={(e) => setCommissionJustification(e.target.value)}
+                                                                                                        placeholder="Explique a alteração da taxa..."
+                                                                                                        className="w-full px-3 py-1.5 border border-gray-300 rounded text-sm text-gray-800 focus:ring-2 focus:ring-blue-500"
+                                                                                                    />
+                                                                                                </div>
+                                                                                            </div>
+                                                                                            <div className="flex gap-2">
+                                                                                                <button
+                                                                                                    onClick={handleSaveCommission}
+                                                                                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded text-xs font-semibold cursor-pointer"
+                                                                                                >
+                                                                                                    <Save className="w-3.5 h-3.5" />
+                                                                                                    Gravar Alteração
+                                                                                                </button>
+                                                                                                <button
+                                                                                                    onClick={() => {
+                                                                                                        setEditingCommission(false)
+                                                                                                        setCommissionValue('')
+                                                                                                        setCommissionJustification('')
+                                                                                                    }}
+                                                                                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-200 hover:bg-gray-350 text-gray-700 rounded text-xs font-semibold cursor-pointer"
+                                                                                                >
+                                                                                                    <XCircle className="w-3.5 h-3.5" />
+                                                                                                    Cancelar
+                                                                                                </button>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    )}
+                                                                                </div>
+
+                                                                                {/* Comentário de Auditoria Financeira */}
                                                                                 <div>
-                                                                                    <span className="text-xs text-gray-500 font-semibold block uppercase">Margem Operacional CM</span>
-                                                                                    <p className="text-lg font-bold text-gray-800">
-                                                                                        {(() => {
-                                                                                            const marginVal = parseFloat(selectedPO.margin_percentage);
-                                                                                            return isNaN(marginVal) ? 'PENDENTE PCP' : (marginVal > 1000 ? '> 1000%' : `${marginVal.toFixed(2)}%`);
-                                                                                        })()}
-                                                                                    </p>
+                                                                                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                                                                        Comentários e Parecer de Auditoria Financeira <span className="text-red-500">*</span>
+                                                                                    </label>
+                                                                                    {!isActive ? (
+                                                                                        <p className="text-sm text-gray-800 bg-gray-50 p-3 rounded-lg border border-gray-200 font-medium">
+                                                                                            {selectedPO.extra_metadata?.audit_comment || 'Nenhum comentário registrado.'}
+                                                                                        </p>
+                                                                                    ) : (
+                                                                                        <textarea
+                                                                                            value={localFields.audit_comment || ''}
+                                                                                            onChange={(e) => handleChangeLocalField('audit_comment', e.target.value)}
+                                                                                            onBlur={() => handleBlurLocalField('audit_comment')}
+                                                                                            placeholder="Descreva observações de auditoria, conferência de frete ou margem para liberação..."
+                                                                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-850 font-medium"
+                                                                                            rows="3"
+                                                                                        />
+                                                                                    )}
                                                                                 </div>
                                                                             </div>
-
-                                                                            {editingCommission && (
-                                                                                <div className="mt-4 p-3 bg-white border border-blue-200 rounded-lg space-y-3 shadow-xs">
-                                                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                                                                        <div>
-                                                                                            <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
-                                                                                                Nova Alíquota de Comissão (%)
-                                                                                            </label>
-                                                                                            <input
-                                                                                                type="number"
-                                                                                                step="0.01"
-                                                                                                min="0"
-                                                                                                max="100"
-                                                                                                value={commissionValue}
-                                                                                                onChange={(e) => setCommissionValue(e.target.value)}
-                                                                                                placeholder="Taxa em %"
-                                                                                                className="w-full px-3 py-1.5 border border-gray-300 rounded text-sm text-gray-800 focus:ring-2 focus:ring-blue-500"
-                                                                                            />
-                                                                                        </div>
-                                                                                        <div>
-                                                                                            <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
-                                                                                                Justificativa de Ajuste (mín. 10 chars)
-                                                                                            </label>
-                                                                                            <input
-                                                                                                type="text"
-                                                                                                value={commissionJustification}
-                                                                                                onChange={(e) => setCommissionJustification(e.target.value)}
-                                                                                                placeholder="Explique a alteração da taxa..."
-                                                                                                className="w-full px-3 py-1.5 border border-gray-300 rounded text-sm text-gray-800 focus:ring-2 focus:ring-blue-500"
-                                                                                            />
-                                                                                        </div>
-                                                                                    </div>
-                                                                                    <div className="flex gap-2">
-                                                                                        <button
-                                                                                            onClick={handleSaveCommission}
-                                                                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded text-xs font-semibold cursor-pointer"
-                                                                                        >
-                                                                                            <Save className="w-3.5 h-3.5" />
-                                                                                            Gravar Alteração
-                                                                                        </button>
-                                                                                        <button
-                                                                                            onClick={() => {
-                                                                                                setEditingCommission(false)
-                                                                                                setCommissionValue('')
-                                                                                                setCommissionJustification('')
-                                                                                            }}
-                                                                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-200 hover:bg-gray-350 text-gray-700 rounded text-xs font-semibold cursor-pointer"
-                                                                                        >
-                                                                                            <XCircle className="w-3.5 h-3.5" />
-                                                                                            Cancelar
-                                                                                        </button>
-                                                                                    </div>
-                                                                                </div>
-                                                                            )}
-                                                                        </div>
-
-                                                                        {/* Comentário de Auditoria Financeira */}
-                                                                        <div>
-                                                                            <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
-                                                                                Comentários e Parecer de Auditoria Financeira <span className="text-red-500">*</span>
-                                                                            </label>
-                                                                            {!isActive ? (
-                                                                                <p className="text-sm text-gray-800 bg-gray-50 p-3 rounded-lg border border-gray-200 font-medium">
-                                                                                    {selectedPO.extra_metadata?.audit_comment || 'Nenhum comentário registrado.'}
-                                                                                </p>
-                                                                            ) : (
-                                                                                <textarea
-                                                                                    value={localFields.audit_comment || ''}
-                                                                                    onChange={(e) => handleChangeLocalField('audit_comment', e.target.value)}
-                                                                                    onBlur={() => handleBlurLocalField('audit_comment')}
-                                                                                    placeholder="Descreva observações de auditoria, conferência de frete ou margem para liberação..."
-                                                                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-850 font-medium"
-                                                                                    rows="3"
-                                                                                />
-                                                                            )}
-                                                                        </div>
+                                                                        )}
                                                                     </div>
                                                                 )}
                                                             </div>
@@ -2412,31 +2545,6 @@ const KanbanPage = () => {
                                         });
                                     })()}
                                 </div>
-
-                                 {/* PO-Level Metadata Accordion */}
-                                 <div className="mb-6 border border-gray-200 rounded-lg overflow-hidden bg-white shadow-3xs">
-                                     <button
-                                         onClick={() => setIsDetailsOpen(!isDetailsOpen)}
-                                         className="w-full flex items-center justify-between p-4 bg-gray-50 hover:bg-gray-100 transition-colors text-left font-bold text-gray-900 text-sm cursor-pointer"
-                                     >
-                                         <span className="flex items-center gap-2">
-                                             <span>📋</span> Clique para ver detalhes
-                                         </span>
-                                         <span className="text-gray-500 font-mono font-bold text-base leading-none select-none">
-                                             {isDetailsOpen ? '−' : '+'}
-                                         </span>
-                                     </button>
-                                     {isDetailsOpen && (
-                                         <div className="p-4 bg-white border-t border-gray-200">
-                                             <MetadataVisualizer
-                                                 metadata={selectedPO.extra_metadata || {}}
-                                                 itemId={selectedPO.id}
-                                                 onUpdate={null}
-                                                 readOnly={true}
-                                             />
-                                         </div>
-                                     )}
-                                 </div>
 
                                 {/* Items List */}
                                 {selectedPO.items && selectedPO.items.length > 0 && (
@@ -2449,7 +2557,20 @@ const KanbanPage = () => {
                                                 <div key={item.id || idx} className="border border-gray-200 rounded-lg p-4 bg-white shadow-3xs">
                                                     <div className="flex items-start justify-between mb-3">
                                                         <div>
-                                                            <h4 className="font-bold text-gray-900">{item.sku}</h4>
+                                                            <h4 className="font-bold text-gray-900 flex items-center gap-1.5">
+                                                                {item.sku}
+                                                                {(item.attachment_path || item.extra_metadata?.attachment_path) && (
+                                                                    <a 
+                                                                        href={getDownloadUrl(item.attachment_path || item.extra_metadata?.attachment_path)}
+                                                                        target="_blank"
+                                                                        rel="noopener noreferrer"
+                                                                        className="inline-flex items-center text-blue-600 hover:text-blue-800"
+                                                                        title="Visualizar anexo de personalização"
+                                                                    >
+                                                                        <Paperclip className="w-3.5 h-3.5" />
+                                                                    </a>
+                                                                )}
+                                                            </h4>
                                                             <p className="text-sm text-gray-600 font-medium">
                                                                 Quantidade: {item.quantity} | Preço Unitário: {formatCurrency(item.price_unit || item.price || item.unit_value)}
                                                             </p>
@@ -2459,17 +2580,35 @@ const KanbanPage = () => {
                                                         </span>
                                                     </div>
 
-                                                    {/* Metadata Visualizer for each item */}
-                                                    {item.extra_metadata && Object.keys(item.extra_metadata).length > 0 && (
-                                                        <div className="mt-3">
-                                                            <MetadataVisualizer
-                                                                metadata={item.extra_metadata}
-                                                                itemId={item.id}
-                                                                onUpdate={handleMetadataUpdate}
-                                                                readOnly={true}
-                                                            />
-                                                        </div>
-                                                    )}
+                                                    {/* Collapsible Accordion at SKU Level */}
+                                                    {item.extra_metadata && Object.keys(item.extra_metadata).length > 0 && (() => {
+                                                        const isOpen = !!openSKUs[item.id || idx];
+                                                        return (
+                                                            <div className="mt-3 border border-gray-150 rounded-lg overflow-hidden bg-slate-50">
+                                                                <button
+                                                                    onClick={() => toggleSKU(item.id || idx)}
+                                                                    className="w-full flex items-center justify-between p-2.5 hover:bg-slate-100 transition-colors text-left font-bold text-gray-800 text-xs cursor-pointer select-none"
+                                                                >
+                                                                    <span className="flex items-center gap-1.5 text-gray-700">
+                                                                        <span>📋</span> Detalhe do Pedido
+                                                                    </span>
+                                                                    <span className="text-gray-500 font-mono font-bold text-sm leading-none select-none">
+                                                                        {isOpen ? '−' : '+'}
+                                                                    </span>
+                                                                </button>
+                                                                {isOpen && (
+                                                                    <div className="p-3 bg-white border-t border-gray-150">
+                                                                        <MetadataVisualizer
+                                                                            metadata={item.extra_metadata}
+                                                                            itemId={item.id}
+                                                                            onUpdate={handleMetadataUpdate}
+                                                                            readOnly={true}
+                                                                        />
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })()}
                                                 </div>
                                             ))}
                                         </div>
@@ -2523,7 +2662,7 @@ const KanbanPage = () => {
                             <div className="flex items-center justify-between gap-3 p-6 border-t border-gray-200 bg-gray-50">
                                 <div className="flex items-center gap-3">
                                     {/* Return Button - visible for PCP and subsequent stages */}
-                                    {canReturn(selectedPO) && selectedPO.status_macro !== 'ARCHIVED' && (
+                                    {canReturn(selectedPO) && !isArchived && !isPOBlocked && (
                                         <button
                                             onClick={() => setShowReturnModal(true)}
                                             className="flex items-center gap-2 px-4 py-2 bg-orange-600 border border-orange-500 text-white rounded-lg hover:bg-orange-700 transition-colors font-bold text-sm cursor-pointer shadow-md"
@@ -2536,7 +2675,7 @@ const KanbanPage = () => {
 
                                 <div className="flex items-center gap-3">
                                     {/* Final Action: Finalizar Auditoria e Arquivar */}
-                                    {selectedPO.status === 'Financeiro' && selectedPO.status_macro !== 'ARCHIVED' && (
+                                    {selectedPO.status === 'Financeiro' && !isArchived && !isPOBlocked && (
                                         <button
                                             onClick={handleArchivePO}
                                             disabled={
@@ -2567,7 +2706,7 @@ const KanbanPage = () => {
                                     )}
 
                                     {/* Advance Button - enabled only if mandatory fields are filled */}
-                                    {canAdvance(selectedPO) && selectedPO.status_macro !== 'ARCHIVED' && (
+                                    {canAdvance(selectedPO) && !isArchived && !isPOBlocked && (
                                         <button
                                             onClick={handleAdvanceStatus}
                                             disabled={!canAdvanceCurrentArea()}
@@ -2678,6 +2817,7 @@ const KanbanPage = () => {
                             if (e.target === e.currentTarget) {
                                 setShowPartitionModal(false);
                                 setPartitionReason('');
+                                setNewDeliveryDate('');
                                 setQtySplits({});
                             }
                         }}
@@ -2699,8 +2839,21 @@ const KanbanPage = () => {
                                         value={partitionReason}
                                         onChange={(e) => setPartitionReason(e.target.value)}
                                         placeholder="Ex: Pedido muito grande, sugerir divisão em 2 entregas devido a capacidade produtiva..."
-                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:outline-none text-gray-800 font-medium"
                                         rows="3"
+                                    />
+                                </div>
+
+                                <div className="mb-4">
+                                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                        Nova Data de Entrega Prevista (C2) <span className="text-red-500">*</span>
+                                    </label>
+                                    <input
+                                        type="date"
+                                        value={newDeliveryDate}
+                                        onChange={(e) => setNewDeliveryDate(e.target.value)}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:outline-none text-gray-800 font-medium"
+                                        required
                                     />
                                 </div>
 
@@ -2784,6 +2937,7 @@ const KanbanPage = () => {
                                     onClick={() => {
                                         setShowPartitionModal(false);
                                         setPartitionReason('');
+                                        setNewDeliveryDate('');
                                         setQtySplits({});
                                     }}
                                     className="px-4 py-2 bg-gray-300 text-gray-700 text-sm font-semibold rounded-lg hover:bg-gray-400 transition-colors"
@@ -2792,8 +2946,8 @@ const KanbanPage = () => {
                                 </button>
                                 <button
                                     onClick={handleSuggestPartition}
-                                    disabled={!partitionReason || partitionReason.trim().length < 10}
-                                    className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${partitionReason && partitionReason.trim().length >= 10
+                                    disabled={!partitionReason || partitionReason.trim().length < 10 || !newDeliveryDate}
+                                    className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${partitionReason && partitionReason.trim().length >= 10 && newDeliveryDate
                                         ? 'bg-purple-600 text-white hover:bg-purple-700'
                                         : 'bg-gray-300 text-gray-500 cursor-not-allowed'
                                         }`}
@@ -2806,127 +2960,137 @@ const KanbanPage = () => {
                 )}
 
                 {/* Freight Split Approval Modal */}
-                {showFreightModal && (
-                    <div
-                        className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
-                        onClick={(e) => {
-                            if (e.target === e.currentTarget) {
-                                setShowFreightModal(false);
-                                setFreightC1('');
-                                setFreightC2('');
+                {showFreightModal && (() => {
+                    let rawFreight = selectedPO.shipping_cost;
+                    if (rawFreight === 0 || rawFreight === null || rawFreight === undefined) {
+                        if (selectedPO.items && selectedPO.items.length > 0) {
+                            const firstItem = selectedPO.items[0];
+                            if (firstItem.extra_metadata) {
+                                rawFreight = firstItem.extra_metadata.freight ?? firstItem.extra_metadata.Freight;
                             }
-                        }}
-                    >
-                        <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
-                            <h3 className="text-xl font-bold text-gray-900 mb-2">
-                                Aprovar Partição - Rateio de Frete
-                            </h3>
-                            <p className="text-xs text-gray-500 mb-4">
-                                Rateie o valor do frete original do pedido pai entre os pedidos filhos (C1 e C2).
-                            </p>
-                            
-                            <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 mb-4 text-xs">
-                                <div className="flex justify-between font-semibold text-gray-700">
-                                    <span>Frete Original (Pai):</span>
-                                    <span>{formatCurrency(selectedPO.shipping_cost || 0)}</span>
-                                </div>
-                            </div>
-
-                            <div className="space-y-4 mb-6">
-                                <div>
-                                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
-                                        Frete do Pedido Filho 1 (C1) <span className="text-red-500">*</span>
-                                    </label>
-                                    <input
-                                        type="number"
-                                        step="0.0001"
-                                        value={freightC1}
-                                        onChange={(e) => setFreightC1(e.target.value)}
-                                        placeholder="Ex: 50.0000"
-                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-800 font-semibold focus:ring-2 focus:ring-purple-500 focus:outline-none"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
-                                        Frete do Pedido Filho 2 (C2) <span className="text-red-500">*</span>
-                                    </label>
-                                    <input
-                                        type="number"
-                                        step="0.0001"
-                                        value={freightC2}
-                                        onChange={(e) => setFreightC2(e.target.value)}
-                                        placeholder="Ex: 50.0000"
-                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-800 font-semibold focus:ring-2 focus:ring-purple-500 focus:outline-none"
-                                    />
+                        }
+                    }
+                    let parentFreight = parseFloat(rawFreight) || 0;
+                    return (
+                        <div
+                            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+                            onClick={(e) => {
+                                if (e.target === e.currentTarget) {
+                                    setShowFreightModal(false);
+                                    setFreightC1('');
+                                    setFreightC2('');
+                                }
+                            }}
+                        >
+                            <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+                                <h3 className="text-xl font-bold text-gray-900 mb-2">
+                                    Aprovar Partição - Rateio de Frete
+                                </h3>
+                                <p className="text-xs text-gray-500 mb-4">
+                                    Rateie o valor do frete original do pedido pai entre os pedidos filhos (C1 e C2).
+                                </p>
+                                
+                                <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 mb-4 text-xs">
+                                    <div className="flex justify-between font-semibold text-gray-700">
+                                        <span>Frete Original (Pai):</span>
+                                        <span>{formatCurrency(parentFreight)}</span>
+                                    </div>
                                 </div>
 
-                                {(() => {
-                                    const f1 = parseFloat(freightC1) || 0;
-                                    const f2 = parseFloat(freightC2) || 0;
-                                    const sum = f1 + f2;
-                                    const parentFreight = parseFloat(selectedPO.shipping_cost) || 0;
-                                    const diff = Math.abs(sum - parentFreight);
-                                    const isValid = diff <= 0.01;
-                                    
-                                    return (
-                                        <div className={`p-3 rounded-lg border text-xs font-semibold ${isValid ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
-                                            <div className="flex justify-between">
-                                                <span>Soma Alocada:</span>
-                                                <span>{formatCurrency(sum)}</span>
-                                            </div>
-                                            <div className="flex justify-between mt-1 text-[10px]">
-                                                <span>Status:</span>
-                                                <span>{isValid ? '✓ Valor bate exatamente!' : `⚠️ Falta R$ ${(parentFreight - sum).toFixed(4)}`}</span>
-                                            </div>
-                                        </div>
-                                    );
-                                })()}
-                            </div>
+                                <div className="space-y-4 mb-6">
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                            Frete do Pedido Filho 1 (C1) <span className="text-red-500">*</span>
+                                        </label>
+                                        <input
+                                            type="number"
+                                            step="0.0001"
+                                            value={freightC1}
+                                            onChange={(e) => setFreightC1(e.target.value)}
+                                            placeholder="Ex: 50.0000"
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-800 font-semibold focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                            Frete do Pedido Filho 2 (C2) <span className="text-red-500">*</span>
+                                        </label>
+                                        <input
+                                            type="number"
+                                            step="0.0001"
+                                            value={freightC2}
+                                            onChange={(e) => setFreightC2(e.target.value)}
+                                            placeholder="Ex: 50.0000"
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-800 font-semibold focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                                        />
+                                    </div>
 
-                            <div className="flex gap-3 justify-end">
-                                <button
-                                    onClick={() => {
-                                        setShowFreightModal(false);
-                                        setFreightC1('');
-                                        setFreightC2('');
-                                    }}
-                                    className="px-4 py-2 bg-gray-300 text-gray-700 text-sm font-semibold rounded-lg hover:bg-gray-400 transition-colors"
-                                >
-                                    Cancelar
-                                </button>
-                                <button
-                                    onClick={async () => {
+                                    {(() => {
                                         const f1 = parseFloat(freightC1) || 0;
                                         const f2 = parseFloat(freightC2) || 0;
-                                        const parentFreight = parseFloat(selectedPO.shipping_cost) || 0;
-                                        if (Math.abs(f1 + f2 - parentFreight) > 0.01) {
-                                            showError(`A soma do frete dos filhos (${formatCurrency(f1 + f2)}) deve ser exatamente igual ao frete original do pai (${formatCurrency(parentFreight)})`);
-                                            return;
-                                        }
+                                        const sum = f1 + f2;
+                                        const diff = Math.abs(sum - parentFreight);
+                                        const isValid = diff <= 0.01;
                                         
-                                        try {
-                                            const response = await api.post(`/kanban/pos/${selectedPO.id}/approve-partition`, {
-                                                freight_c1: f1,
-                                                freight_c2: f2
-                                            });
-                                            showSuccess(response.data.message);
+                                        return (
+                                            <div className={`p-3 rounded-lg border text-xs font-semibold ${isValid ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
+                                                <div className="flex justify-between">
+                                                    <span>Soma Alocada:</span>
+                                                    <span>{formatCurrency(sum)}</span>
+                                                </div>
+                                                <div className="flex justify-between mt-1 text-[10px]">
+                                                    <span>Status:</span>
+                                                    <span>{isValid ? '✓ Valor bate exatamente!' : `⚠️ Falta R$ ${(parentFreight - sum).toFixed(4)}`}</span>
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
+                                </div>
+
+                                <div className="flex gap-3 justify-end">
+                                    <button
+                                        onClick={() => {
                                             setShowFreightModal(false);
                                             setFreightC1('');
                                             setFreightC2('');
-                                            await fetchBoard();
-                                            handleCloseModal();
-                                        } catch (err) {
-                                            showError(err.response?.data?.detail || 'Falha ao aprovar partição');
-                                        }
-                                    }}
-                                    className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-bold rounded-lg transition-colors"
-                                >
-                                    Aprovar e Ratear Frete
-                                </button>
+                                        }}
+                                        className="px-4 py-2 bg-gray-300 text-gray-700 text-sm font-semibold rounded-lg hover:bg-gray-400 transition-colors"
+                                    >
+                                        Cancelar
+                                    </button>
+                                    <button
+                                        onClick={async () => {
+                                            const f1 = parseFloat(freightC1) || 0;
+                                            const f2 = parseFloat(freightC2) || 0;
+                                            if (Math.abs(f1 + f2 - parentFreight) > 0.01) {
+                                                showError(`A soma do frete dos filhos (${formatCurrency(f1 + f2)}) deve ser exatamente igual ao frete original do pai (${formatCurrency(parentFreight)})`);
+                                                return;
+                                            }
+                                            
+                                            try {
+                                                const response = await api.post(`/kanban/pos/${selectedPO.id}/approve-partition`, {
+                                                    freight_c1: f1,
+                                                    freight_c2: f2
+                                                });
+                                                showSuccess(response.data.message);
+                                                setShowFreightModal(false);
+                                                setFreightC1('');
+                                                setFreightC2('');
+                                                await fetchBoard();
+                                                handleCloseModal();
+                                            } catch (err) {
+                                                showError(err.response?.data?.detail || 'Erro ao aprovar rateio');
+                                            }
+                                        }}
+                                        className="px-4 py-2 bg-purple-600 text-white text-sm font-semibold rounded-lg hover:bg-purple-700 transition-colors"
+                                    >
+                                        Aprovar Rateio e Liberar Filhos
+                                    </button>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                )}
+                    );
+                })()}
 
                 {/* Nested Link Cost Modal */}
                 {showLinkCostModal && (

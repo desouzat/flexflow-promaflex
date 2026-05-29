@@ -92,12 +92,12 @@ const Layout = () => {
                 <nav className="flex-1 px-3 py-4 space-y-1">
                     {navItems.map((item) => {
                         // Hide admin-only items if user is not admin or master
-                        if (item.adminOnly && user?.role !== 'admin' && user?.role !== 'master') {
+                        if (item.adminOnly && (user?.role || '').toLowerCase() !== 'admin' && (user?.role || '').toLowerCase() !== 'master') {
                             return null
                         }
 
                         // Hide master-only items if user is not master
-                        if (item.masterOnly && user?.role !== 'master') {
+                        if (item.masterOnly && (user?.role || '').toLowerCase() !== 'master') {
                             return null
                         }
 

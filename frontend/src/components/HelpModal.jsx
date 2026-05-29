@@ -44,7 +44,7 @@ const HelpModal = ({ isOpen, onClose, status }) => {
                         <span className="text-3xl">{helpConfig.icon}</span>
                         <div>
                             <h2 className="text-2xl font-bold text-gray-900">
-                                Mesa de Conferência - Sistema de Ajuda Contextual - FlexFlow
+                                {helpConfig.title}
                             </h2>
                         </div>
                     </div>

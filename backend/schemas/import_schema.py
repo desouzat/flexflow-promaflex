@@ -562,6 +562,7 @@ class ConfirmStagingPO(BaseModel):
     freight_cost: float = 0.0
     additional_costs: float = 0.0
     po_total_value: Optional[float] = None
+    packaging_type: Optional[str] = None
     items: List[ConfirmStagingItem]
 
 

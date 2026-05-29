@@ -105,7 +105,7 @@ const UsersPage = () => {
     }
 
     // Check if user has permission
-    if (user?.role !== 'master' && user?.role !== 'admin') {
+    if ((user?.role || '').toLowerCase() !== 'master' && (user?.role || '').toLowerCase() !== 'admin') {
         return (
             <div className="h-full flex items-center justify-center bg-gray-50">
                 <div className="text-center">
@@ -284,7 +284,7 @@ const UsersPage = () => {
                                     >
                                         <option value="user">OPERADOR</option>
                                         <option value="admin">LÍDER</option>
-                                        {user?.role === 'master' && <option value="master">MASTER</option>}
+                                        {(user?.role || '').toLowerCase() === 'master' && <option value="master">MASTER</option>}
                                     </select>
                                     <p className="mt-1 text-xs text-gray-500">
                                         OPERADOR: Acesso básico | LÍDER: Gerencia custos | MASTER: Acesso total
