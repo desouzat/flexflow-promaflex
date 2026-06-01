@@ -5,13 +5,14 @@ import MetadataVisualizer from '../components/MetadataVisualizer'
 import { calculatePOMargins } from '../utils/marginCalculator'
 import api from '../utils/api'
 import { showSuccess, showError } from '../utils/toast'
+import toast from 'react-hot-toast'
 import { useNotifications } from '../context/NotificationContext'
 import { useAuth } from '../context/AuthContext'
 import {
     RefreshCw, Filter, Search, Maximize2, Minimize2, X,
     Package, DollarSign, Calendar, User, FileText, Globe,
     Star, RefreshCw as RefreshIcon, Zap, AlertCircle, Upload,
-    CheckCircle, Edit2, Save, XCircle, Truck, Lock, Unlock,
+    CheckCircle, Edit2, Save, XCircle, Truck, Tag, Lock, Unlock,
     ArrowUpRight, ShieldAlert, ChevronLeft, ChevronRight, Split, Paperclip
 } from 'lucide-react'
 
@@ -41,7 +42,6 @@ const KanbanPage = () => {
     const [searchTerm, setSearchTerm] = useState('')
     const [compactView, setCompactView] = useState(false)
     const [selectedPO, setSelectedPO] = useState(null)
-    const [isDetailsOpen, setIsDetailsOpen] = useState(false)
     const [showDetailsModal, setShowDetailsModal] = useState(false)
     const [editingCommission, setEditingCommission] = useState(false)
     const [commissionValue, setCommissionValue] = useState('')
@@ -449,7 +449,6 @@ const KanbanPage = () => {
 
     const handleCardClick = async (po) => {
         setSelectedPO(po)
-        setIsDetailsOpen(false) // Accordion state: Ensure the 'Detalhe do Pedido' accordion defaults to CLOSED so the modal looks clean upon opening.
         setShowDetailsModal(true)
         setHandoffHistory(null)
 
@@ -814,7 +813,38 @@ const KanbanPage = () => {
                     new_delivery_date: newDeliveryDate
                 }
             )
-            showSuccess(`Sugestão enviada. Se aprovado, o C1 manterá a data original e o C2 assumirá a data ${formatDate(newDeliveryDate)}.`)
+            toast.success(
+                (t) => (
+                    <span className="flex items-center justify-between w-full gap-2" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                        <span>
+                            Sugestão enviada. Se aprovado, o C1 manterá a data original e o C2 assumirá a data {formatDate(newDeliveryDate)}.
+                        </span>
+                        <button
+                            onClick={() => toast.dismiss(t.id)}
+                            className="bg-transparent border-0 text-white font-bold cursor-pointer hover:opacity-80 px-1 ml-2"
+                            style={{ background: 'transparent', border: 'none', color: '#fff', fontWeight: 'bold', cursor: 'pointer', opacity: '0.8', padding: '0 4px', marginLeft: '8px', fontSize: '16px' }}
+                        >
+                            ✕
+                        </button>
+                    </span>
+                ),
+                {
+                    duration: Infinity,
+                    position: 'top-right',
+                    style: {
+                        background: '#10b981',
+                        color: '#fff',
+                        fontWeight: '500',
+                        padding: '12px 16px',
+                        borderRadius: '8px',
+                        maxWidth: '450px'
+                    },
+                    iconTheme: {
+                        primary: '#fff',
+                        secondary: '#10b981',
+                    },
+                }
+            )
             setShowPartitionModal(false)
             setPartitionReason('')
             setNewDeliveryDate('')
@@ -974,8 +1004,12 @@ const KanbanPage = () => {
 
         if (selectedPO.status === 'PCP') {
             const packaging = meta.packaging_type || ''
-            const deliveryDate = meta.data_programada || selectedPO.expected_delivery_date || ''
-            return packaging !== '' && deliveryDate !== ''
+            const deliveryDate = meta.data_programada || '' // Explicit data_programada (no fallback)
+            const allItemsLinked = selectedPO.items && selectedPO.items.length > 0 && selectedPO.items.every(item => {
+                const unitCost = parseFloat(item.total_cost) || parseFloat(item.cost_mp) || parseFloat(item.extra_metadata?.total_cost) || parseFloat(item.extra_metadata?.cost_mp) || 0;
+                return unitCost > 0;
+            });
+            return packaging !== '' && deliveryDate !== '' && allItemsLinked
         }
 
         if (selectedPO.status === 'Produção/Embalagem') {
@@ -1017,9 +1051,14 @@ const KanbanPage = () => {
 
         if (selectedPO.status === 'PCP') {
             const packaging = meta.packaging_type || '';
-            const deliveryDate = meta.data_programada || selectedPO.expected_delivery_date || '';
+            const deliveryDate = meta.data_programada || ''; // Explicit data_programada (no fallback)
+            const allItemsLinked = selectedPO.items && selectedPO.items.length > 0 && selectedPO.items.every(item => {
+                const unitCost = parseFloat(item.total_cost) || parseFloat(item.cost_mp) || parseFloat(item.extra_metadata?.total_cost) || parseFloat(item.extra_metadata?.cost_mp) || 0;
+                return unitCost > 0;
+            });
             if (packaging === '') missing.push('Tipo de Embalagem');
             if (deliveryDate === '') missing.push('Data Programada');
+            if (!allItemsLinked) missing.push('Vincular todos os SKUs (custo > 0)');
         }
 
         if (selectedPO.status === 'Produção/Embalagem') {
@@ -1206,9 +1245,15 @@ const KanbanPage = () => {
                                 const salesperson = selectedPO.vendedor || selectedPO.extra_metadata?.salesperson || selectedPO.extra_metadata?.vendedor;
 
                                 return (
-                                    <div className="flex items-center justify-between p-6 border-b border-gray-200 bg-gray-50">
+                                    <div className={`flex items-center justify-between p-6 border-b transition-all ${
+                                        selectedPO.status_macro === 'WAITING_MATERIAL' 
+                                            ? 'bg-purple-900 border-purple-950 text-white' 
+                                            : 'bg-gray-50 border-gray-200 text-gray-900'
+                                    }`}>
                                         <div>
-                                            <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-3 flex-wrap">
+                                            <h2 className={`text-2xl font-bold flex items-center gap-3 flex-wrap ${
+                                                selectedPO.status_macro === 'WAITING_MATERIAL' ? 'text-white' : 'text-gray-900'
+                                            }`}>
                                                 <span>Pedido #{selectedPO.po_number}</span>
                                                 {/* Navigation Arrows */}
                                                 {columnPOs.length > 1 && (
@@ -1218,14 +1263,20 @@ const KanbanPage = () => {
                                                             disabled={!hasPrevPO}
                                                             className={`p-1.5 rounded-lg border transition-all ${
                                                                 hasPrevPO 
-                                                                    ? 'border-gray-300 bg-white text-gray-700 hover:bg-gray-100 cursor-pointer shadow-3xs' 
-                                                                    : 'border-gray-200 bg-gray-50 text-gray-400 cursor-not-allowed opacity-50'
+                                                                    ? (selectedPO.status_macro === 'WAITING_MATERIAL' 
+                                                                        ? 'border-purple-700 bg-purple-800 text-white hover:bg-purple-700 cursor-pointer shadow-3xs' 
+                                                                        : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-100 cursor-pointer shadow-3xs')
+                                                                    : (selectedPO.status_macro === 'WAITING_MATERIAL' 
+                                                                        ? 'border-purple-800 bg-purple-950 text-purple-400 cursor-not-allowed opacity-50' 
+                                                                        : 'border-gray-200 bg-gray-50 text-gray-400 cursor-not-allowed opacity-50')
                                                             }`}
                                                             title="Pedido Anterior"
                                                         >
                                                             <ChevronLeft className="w-4 h-4" />
                                                         </button>
-                                                        <span className="text-xs font-semibold text-gray-500 font-mono">
+                                                        <span className={`text-xs font-semibold font-mono ${
+                                                            selectedPO.status_macro === 'WAITING_MATERIAL' ? 'text-purple-200' : 'text-gray-500'
+                                                        }`}>
                                                             {currentPOIndex + 1} de {columnPOs.length}
                                                         </span>
                                                         <button
@@ -1233,8 +1284,12 @@ const KanbanPage = () => {
                                                             disabled={!hasNextPO}
                                                             className={`p-1.5 rounded-lg border transition-all ${
                                                                 hasNextPO 
-                                                                    ? 'border-gray-300 bg-white text-gray-700 hover:bg-gray-100 cursor-pointer shadow-3xs' 
-                                                                    : 'border-gray-200 bg-gray-50 text-gray-400 cursor-not-allowed opacity-50'
+                                                                    ? (selectedPO.status_macro === 'WAITING_MATERIAL' 
+                                                                        ? 'border-purple-700 bg-purple-800 text-white hover:bg-purple-700 cursor-pointer shadow-3xs' 
+                                                                        : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-100 cursor-pointer shadow-3xs')
+                                                                    : (selectedPO.status_macro === 'WAITING_MATERIAL' 
+                                                                        ? 'border-purple-800 bg-purple-950 text-purple-400 cursor-not-allowed opacity-50' 
+                                                                        : 'border-gray-200 bg-gray-50 text-gray-400 cursor-not-allowed opacity-50')
                                                             }`}
                                                             title="Próximo Pedido"
                                                         >
@@ -1243,7 +1298,9 @@ const KanbanPage = () => {
                                                     </div>
                                                 )}
                                             </h2>
-                                            <p className="text-sm text-gray-650 mt-1 flex flex-wrap gap-x-4">
+                                            <p className={`text-sm mt-1 flex flex-wrap gap-x-4 ${
+                                                selectedPO.status_macro === 'WAITING_MATERIAL' ? 'text-purple-100' : 'text-gray-655'
+                                            }`}>
                                                 <span><strong>Cliente:</strong> {getRobustName(selectedPO.client_name || selectedPO.supplier_name)}</span>
                                                 {salesperson && (
                                                     <span><strong>Vendedor:</strong> {getRobustName(salesperson)}</span>
@@ -1252,9 +1309,13 @@ const KanbanPage = () => {
                                         </div>
                                         <button
                                             onClick={handleCloseModal}
-                                            className="p-2 hover:bg-gray-200 rounded-lg transition-colors cursor-pointer"
+                                            className={`p-2 rounded-lg transition-colors cursor-pointer ${
+                                                selectedPO.status_macro === 'WAITING_MATERIAL' 
+                                                    ? 'hover:bg-purple-800 text-purple-200 hover:text-white' 
+                                                    : 'hover:bg-gray-200 text-gray-600'
+                                            }`}
                                         >
-                                            <X className="w-6 h-6 text-gray-600" />
+                                            <X className="w-6 h-6" />
                                         </button>
                                     </div>
                                 );
@@ -1683,21 +1744,26 @@ const KanbanPage = () => {
                                                                                         >
                                                                                             Aprovar Partição e Ratear Frete
                                                                                         </button>
-                                                                                        <button
-                                                                                            onClick={async () => {
-                                                                                                try {
-                                                                                                    const response = await api.post(`/kanban/pos/${selectedPO.id}/pause-material`);
-                                                                                                    showSuccess(response.data.message);
-                                                                                                    await fetchBoard();
-                                                                                                    handleCloseModal();
-                                                                                                } catch (err) {
-                                                                                                    showError(err.response?.data?.detail || 'Erro ao aguardar insumo');
-                                                                                                }
-                                                                                            }}
-                                                                                            className="inline-flex items-center justify-center px-3.5 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-xs font-bold rounded-lg cursor-pointer transition-colors shadow-2xs"
-                                                                                        >
-                                                                                            Aguardar Insumo (Pausar SLA)
-                                                                                        </button>
+                                                                                        <div className="flex flex-col gap-2 mt-2">
+                                                                                            <button
+                                                                                                onClick={async () => {
+                                                                                                    try {
+                                                                                                        const response = await api.post(`/kanban/pos/${selectedPO.id}/pause-material`);
+                                                                                                        showSuccess(response.data.message);
+                                                                                                        await fetchBoard();
+                                                                                                        handleCloseModal();
+                                                                                                    } catch (err) {
+                                                                                                        showError(err.response?.data?.detail || 'Erro ao aguardar insumo');
+                                                                                                    }
+                                                                                                }}
+                                                                                                className="inline-flex items-center justify-center px-3.5 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-lg cursor-pointer transition-colors shadow-2xs"
+                                                                                            >
+                                                                                                Aguardar Insumo
+                                                                                            </button>
+                                                                                            <span className="text-[10px] text-purple-700 font-bold bg-purple-50 border border-purple-200 rounded px-2.5 py-1 block text-center shadow-3xs">
+                                                                                                O SLA continuará rodando para fins de transparência de gargalos.
+                                                                                            </span>
+                                                                                        </div>
                                                                                     </div>
                                                                                 )}
                                                                             </div>
@@ -1858,6 +1924,7 @@ const KanbanPage = () => {
                                                                                         <option value="Caixa de Papelão">Caixa de Papelão</option>
                                                                                         <option value="Fardo Plástico">Fardo Plástico</option>
                                                                                         <option value="Granel">Granel</option>
+                                                                                        <option value="Filme">Filme</option>
                                                                                     </select>
                                                                                 </div>
 
@@ -2562,8 +2629,7 @@ const KanbanPage = () => {
                                                                 {(item.attachment_path || item.extra_metadata?.attachment_path) && (
                                                                     <a 
                                                                         href={getDownloadUrl(item.attachment_path || item.extra_metadata?.attachment_path)}
-                                                                        target="_blank"
-                                                                        rel="noopener noreferrer"
+                                                                        download
                                                                         className="inline-flex items-center text-blue-600 hover:text-blue-800"
                                                                         title="Visualizar anexo de personalização"
                                                                     >
@@ -2707,19 +2773,47 @@ const KanbanPage = () => {
 
                                     {/* Advance Button - enabled only if mandatory fields are filled */}
                                     {canAdvance(selectedPO) && !isArchived && !isPOBlocked && (
-                                        <button
-                                            onClick={handleAdvanceStatus}
-                                            disabled={!canAdvanceCurrentArea()}
-                                            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition-colors shadow-sm text-sm ${
-                                                canAdvanceCurrentArea()
-                                                    ? 'bg-green-600 text-white hover:bg-green-700 cursor-pointer'
-                                                    : 'bg-gray-300 text-gray-500 cursor-not-allowed border border-gray-310'
-                                            }`}
-                                            title={!canAdvanceCurrentArea() ? `Não é possível avançar. ${getMissingFieldsTooltip()}` : `Avançar para ${getNextStatus(selectedPO.status)}`}
-                                        >
-                                            Avançar para {getNextStatus(selectedPO.status)}
-                                            <Zap className="w-4 h-4" />
-                                        </button>
+                                        selectedPO.status_macro === 'SHIPPING' ? (
+                                            selectedPO.parent_po_id ? (
+                                                <button
+                                                    onClick={handleAdvanceStatus}
+                                                    disabled={!canAdvanceCurrentArea()}
+                                                    className="flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition-colors shadow-sm text-sm bg-amber-600 text-white hover:bg-amber-700 cursor-pointer"
+                                                    title="Fase A (🚛 AJUSTE DE FRETE): Confirmar o frete rateado e enviar o lote da partição diretamente para Produção."
+                                                >
+                                                    Confirmar Frete e Enviar para Produção
+                                                    <Tag className="w-4 h-4" />
+                                                </button>
+                                            ) : (
+                                                <button
+                                                    onClick={handleAdvanceStatus}
+                                                    disabled={!canAdvanceCurrentArea()}
+                                                    className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition-colors shadow-sm text-sm ${
+                                                        canAdvanceCurrentArea()
+                                                            ? 'bg-blue-600 text-white hover:bg-blue-700 cursor-pointer'
+                                                            : 'bg-gray-300 text-gray-500 cursor-not-allowed border border-gray-310'
+                                                    }`}
+                                                    title={!canAdvanceCurrentArea() ? `Não é possível avançar. ${getMissingFieldsTooltip()}` : 'Fase B (📦 DESPACHO FINAL): Pedido concluído na Produção pronto para expedição final e arquivamento.'}
+                                                >
+                                                    Concluir e Arquivar
+                                                    <Truck className="w-4 h-4" />
+                                                </button>
+                                            )
+                                        ) : (
+                                            <button
+                                                onClick={handleAdvanceStatus}
+                                                disabled={!canAdvanceCurrentArea()}
+                                                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition-colors shadow-sm text-sm ${
+                                                    canAdvanceCurrentArea()
+                                                        ? 'bg-green-600 text-white hover:bg-green-700 cursor-pointer'
+                                                        : 'bg-gray-300 text-gray-500 cursor-not-allowed border border-gray-310'
+                                                }`}
+                                                title={!canAdvanceCurrentArea() ? `Não é possível avançar. ${getMissingFieldsTooltip()}` : `Avançar para ${getNextStatus(selectedPO.status)}`}
+                                            >
+                                                Avançar para {getNextStatus(selectedPO.status)}
+                                                <Zap className="w-4 h-4" />
+                                            </button>
+                                        )
                                     )}
 
                                     <button
@@ -3000,7 +3094,11 @@ const KanbanPage = () => {
                                 <div className="space-y-4 mb-6">
                                     <div>
                                         <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
-                                            Frete do Pedido Filho 1 (C1) <span className="text-red-500">*</span>
+                                            {`FRETE DO PEDIDO (C1) DATA PROGRAMADA: ${
+                                                selectedPO.delivery_date || selectedPO.expected_delivery_date 
+                                                ? new Date(selectedPO.delivery_date || selectedPO.expected_delivery_date).toLocaleDateString('pt-BR') 
+                                                : 'Não informada'
+                                            }`} <span className="text-red-500">*</span>
                                         </label>
                                         <input
                                             type="number"
@@ -3013,7 +3111,11 @@ const KanbanPage = () => {
                                     </div>
                                     <div>
                                         <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
-                                            Frete do Pedido Filho 2 (C2) <span className="text-red-500">*</span>
+                                            {`FRETE DO PEDIDO (C2) DATA PROGRAMADA: ${
+                                                selectedPO.extra_metadata?.suggested_delivery_date 
+                                                ? new Date(selectedPO.extra_metadata.suggested_delivery_date + 'T00:00:00').toLocaleDateString('pt-BR') 
+                                                : 'Não informada'
+                                            }`} <span className="text-red-500">*</span>
                                         </label>
                                         <input
                                             type="number"

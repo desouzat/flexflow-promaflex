@@ -792,8 +792,11 @@ async def confirm_staging(
             # 2. Determine macro status
             has_blocked_item = any(
                 item.block_status == "BLOQUEADO"
-                and item.extra_metadata
-                and item.extra_metadata.finance_justification
+                or (
+                    item.extra_metadata is not None
+                    and getattr(item.extra_metadata, "finance_justification", None) is not None
+                    and str(item.extra_metadata.finance_justification).strip() != ""
+                )
                 for item in po.items
             )
             po_status_macro = "FINANCE" if has_blocked_item else "APPROVED"
@@ -853,8 +856,11 @@ async def confirm_staging(
             for item in po.items:
                 is_item_blocked = (
                     item.block_status == "BLOQUEADO"
-                    and item.extra_metadata
-                    and item.extra_metadata.finance_justification
+                    or (
+                        item.extra_metadata is not None
+                        and getattr(item.extra_metadata, "finance_justification", None) is not None
+                        and str(item.extra_metadata.finance_justification).strip() != ""
+                    )
                 )
                 item_status = "ANALISE_CREDITO" if is_item_blocked else "PENDING"
 

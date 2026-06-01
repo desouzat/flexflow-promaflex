@@ -5,7 +5,7 @@ Endpoints for Kanban board operations and status management.
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Any
 from decimal import Decimal
 from datetime import datetime
 
@@ -180,6 +180,8 @@ async def get_kanban_board(
     - Kanban board with columns for each status
     """
     
+    is_privileged = current_user.role.lower() in ["admin", "master"]
+    
     # Query database for POs
     pos = db.query(PurchaseOrder).filter(
         PurchaseOrder.tenant_id == current_user.tenant_id
@@ -203,8 +205,13 @@ async def get_kanban_board(
     # Group POs by status
     columns = []
     for display_name, db_statuses in status_columns:
-        # Filter POs for this column (may include multiple statuses)
-        status_pos = [po for po in pos if po.status_macro in db_statuses]
+        # Filter POs for this column (may include multiple statuses), excluding child POs in WAITING_COMMERCIAL_PARTITION status to avoid duplicate board card rendering
+        status_pos = [
+            po for po in pos
+            if po.status_macro in db_statuses and not (
+                po.status_macro == "WAITING_COMMERCIAL_PARTITION" and po.parent_po_id is not None
+            )
+        ]
         
         # Convert to response models
         po_responses = []
@@ -243,7 +250,7 @@ async def get_kanban_board(
                         quantity=item.quantity,
                         price=Decimal(str(item.price)),
                         status_item=item.status_item,
-                        margin_item=Decimal("0.00"),
+                        margin_item=Decimal("0.00") if is_privileged else "***",
                         total_cost=unit_cost,
                         manual_commission_rate=Decimal(str(item.extra_metadata.get("manual_commission_rate"))) if item.extra_metadata and "manual_commission_rate" in item.extra_metadata else None,
                         extra_metadata=item_extra,
@@ -316,8 +323,8 @@ async def get_kanban_board(
                 items=items,
                 items_count=len(items),
                 total_value=metrics["total_value"],
-                margin_global=metrics["margin_global"],
-                margin_percentage=metrics["margin_percentage"],
+                margin_global=metrics["margin_global"] if is_privileged else "***",
+                margin_percentage=metrics["margin_percentage"] if is_privileged else "***",
                 commission_rate=commission_rate,
                 commission_value=commission_value,
                 shipping_cost=Decimal(str(po.shipping_cost)),
@@ -327,9 +334,10 @@ async def get_kanban_board(
                 priority=getattr(po, 'priority', 'normal'),
                 extra_metadata=po.partition_metadata,
                 logistics_checklist=logistics_checklist,
+                partition_reason=po.partition_reason,
                 created_at=po.created_at,
                 updated_at=po.updated_at,
-                created_by=str(po.created_by) if po.created_by else None
+                created_by=str(po.creator.id) if (po.creator and po.creator.id) else (str(po.created_by) if po.created_by else None)
             )
             po_responses.append(po_response)
         
@@ -386,6 +394,7 @@ async def list_purchase_orders(
         query = query.filter(PurchaseOrder.po_number.ilike(f"%{po_number}%"))
     
     # Apply pagination
+    is_privileged = current_user.role.lower() in ["admin", "master"]
     pos = query.offset(skip).limit(limit).all()
     
     # Convert to response models
@@ -400,7 +409,7 @@ async def list_purchase_orders(
                 quantity=item.quantity,
                 price=Decimal(str(item.price)),
                 status_item=item.status_item,
-                margin_item=Decimal("0.00"),
+                margin_item=Decimal("0.00") if is_privileged else "***",
                 total_cost=Decimal("0.00"),
                 manual_commission_rate=Decimal(str(item.extra_metadata.get("manual_commission_rate"))) if item.extra_metadata and "manual_commission_rate" in item.extra_metadata else None,
                 extra_metadata=item.extra_metadata,
@@ -442,8 +451,8 @@ async def list_purchase_orders(
             items=items,
             items_count=len(items),
             total_value=metrics["total_value"],
-            margin_global=metrics["margin_global"],
-            margin_percentage=metrics["margin_percentage"],
+            margin_global=metrics["margin_global"] if is_privileged else "***",
+            margin_percentage=metrics["margin_percentage"] if is_privileged else "***",
             commission_rate=commission_rate,
             commission_value=commission_value,
             shipping_cost=Decimal(str(po.shipping_cost)),
@@ -451,9 +460,10 @@ async def list_purchase_orders(
             priority=getattr(po, 'priority', 'normal'),
             extra_metadata=po.partition_metadata,
             logistics_checklist=logistics_checklist,
+            partition_reason=po.partition_reason,
             created_at=po.created_at,
             updated_at=po.updated_at,
-            created_by=str(po.created_by) if po.created_by else None
+            created_by=str(po.creator.id) if (po.creator and po.creator.id) else (str(po.created_by) if po.created_by else None)
         )
         po_responses.append(po_response)
     
@@ -497,6 +507,8 @@ async def get_purchase_order(
             detail=f"Purchase Order {po_id} not found"
         )
     
+    is_privileged = current_user.role.lower() in ["admin", "master"]
+    
     # Calculate metrics
     metrics = calculate_po_metrics(po)
     
@@ -531,7 +543,7 @@ async def get_purchase_order(
                 quantity=item.quantity,
                 price=Decimal(str(item.price)),
                 status_item=item.status_item,
-                margin_item=Decimal("0.00"),
+                margin_item=Decimal("0.00") if is_privileged else "***",
                 total_cost=unit_cost,
                 manual_commission_rate=Decimal(str(item.extra_metadata.get("manual_commission_rate"))) if item.extra_metadata and "manual_commission_rate" in item.extra_metadata else None,
                 extra_metadata=item_extra,
@@ -602,8 +614,8 @@ async def get_purchase_order(
         items=items,
         items_count=len(items),
         total_value=metrics["total_value"],
-        margin_global=metrics["margin_global"],
-        margin_percentage=metrics["margin_percentage"],
+        margin_global=metrics["margin_global"] if is_privileged else "***",
+        margin_percentage=metrics["margin_percentage"] if is_privileged else "***",
         commission_rate=commission_rate,
         commission_value=commission_value,
         shipping_cost=Decimal(str(po.shipping_cost)),
@@ -613,9 +625,10 @@ async def get_purchase_order(
         priority=getattr(po, 'priority', 'normal'),
         extra_metadata=po.partition_metadata,
         logistics_checklist=logistics_checklist,
+        partition_reason=po.partition_reason,
         created_at=po.created_at,
         updated_at=po.updated_at,
-        created_by=str(po.created_by) if po.created_by else None
+        created_by=str(po.creator.id) if (po.creator and po.creator.id) else (str(po.created_by) if po.created_by else None)
     )
     print("\n================== BACKEND TRACEABILITY LOG ==================")
     print(f"PO Details Requested: {po_id}")
@@ -892,16 +905,17 @@ async def get_handoff_history(
         db_from = log.from_status
         db_to = log.to_status
         
-        if std_from == "COMERCIAL" and std_to == "FINANCEIRO":
-            mapped_reason = "ENVIO ANÁLISE DE CRÉDITO"
-        elif std_from == "PCP" and std_to == "COMERCIAL":
+        # Enforce strict labeling from the Go-Live Sprint specifications
+        if (db_from == "APPROVED" and db_to == "SUBMITTED") or (std_from == "PCP" and std_to == "COMERCIAL"):
             mapped_reason = "PARTICIONAMENTO"
-        elif std_from == "PRODUÇÃO" and std_to == "PCP":
+        elif (db_from == "MANUFACTURING" and db_to == "APPROVED") or (std_from == "PRODUÇÃO" and std_to == "PCP"):
             mapped_reason = "VERIFICAR POSSIBILIDADES COM TIME DE NEGÓCIOS"
-        elif std_from == "FATURAMENTO" and std_to == "FINANCEIRO":
+        elif (db_from == "SHIPPING" and db_to == "FINANCE") or (std_from == "FATURAMENTO" and std_to == "FINANCEIRO"):
             mapped_reason = "LIBERADO"
         elif (std_from == "MESA CONF" or "MESA" in std_from) and std_to == "COMERCIAL":
             mapped_reason = "CONFERIDO"
+        elif std_from == "COMERCIAL" and std_to == "FINANCEIRO":
+            mapped_reason = "ENVIO ANÁLISE DE CRÉDITO"
 
         if mapped_reason:
             reason = mapped_reason
@@ -914,6 +928,11 @@ async def get_handoff_history(
                     reason = log.extra_data.get("partition_reason")
                 elif log.extra_data.get("audit_comment"):
                     reason = log.extra_data.get("audit_comment")
+
+        # Safeguard: enforce that "CONFERIDO" is strictly and exclusively used for the initial 'Mesa Conf ➔ Comercial' transition
+        if reason and "CONFERIDO" in reason.upper():
+            if not ((std_from == "MESA CONF" or "MESA" in std_from or db_from == "DRAFT") and std_to == "COMERCIAL"):
+                reason = "[Outros]"
 
         # Default to '[Outros]' if no specific mapping exists
         if not reason or reason.strip() in ["", "—", "-", "None", "null"]:
@@ -1286,7 +1305,10 @@ async def update_manual_commission(
         item.extra_metadata["commission_updated_at"] = datetime.utcnow().isoformat()
     
     po.updated_at = datetime.utcnow()
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(po, "partition_metadata")
     db.commit()
+    db.refresh(po)
     
     # Recalculate metrics with new commission
     from backend.services.financial_service import FinancialService
@@ -1498,7 +1520,12 @@ async def advance_po_status(
         )
     
     current_status = po.status_macro
-    next_status = STATUS_FLOW.get(current_status, {}).get("next")
+    # Expedition Dual-Phase Switch (The 'Fabio Monteiro' Rule):
+    # Phase A (🚛 AJUSTE DE FRETE): If the PO came from a partition request, transition back to MANUFACTURING on advance
+    if current_status == "SHIPPING" and po.parent_po_id is not None:
+        next_status = "MANUFACTURING"
+    else:
+        next_status = STATUS_FLOW.get(current_status, {}).get("next")
     
     if not next_status:
         raise HTTPException(
@@ -1526,26 +1553,28 @@ async def advance_po_status(
         pass  # Add production-specific validations if needed
     
     elif current_status == "SHIPPING":
-        # Expedition must have NFE number, carrier, and checklist complete
-        meta = po.partition_metadata or {}
-        nfe = meta.get("numero_nfe") or ""
-        carrier = meta.get("transportadora") or ""
-        if not nfe:
-            validation_errors.append("Número NF-e é obrigatório")
-        if not carrier:
-            validation_errors.append("Transportadora é obrigatória")
-        if "logistics_checklist" in meta:
-            checklist = meta["logistics_checklist"]
-            if not all([
-                checklist.get("endereco_conferido"),
-                checklist.get("peso_validado"),
-                checklist.get("etiquetas_impressas"),
-                checklist.get("foto_carga_path"),
-                checklist.get("foto_canhoto_path")
-            ]):
-                validation_errors.append("Checklist de logística deve estar completo (Endereço, Peso, Etiquetas, Foto da Carga e Nota Fiscal com Canhoto Assinado)")
-        else:
-            validation_errors.append("Checklist de logística não encontrado")
+        # Only validate NFE, carrier, and checklist if standard Phase B (parent_po_id is None)
+        if po.parent_po_id is None:
+            # Expedition must have NFE number, carrier, and checklist complete
+            meta = po.partition_metadata or {}
+            nfe = meta.get("numero_nfe") or ""
+            carrier = meta.get("transportadora") or ""
+            if not nfe:
+                validation_errors.append("Número NF-e é obrigatório")
+            if not carrier:
+                validation_errors.append("Transportadora é obrigatória")
+            if "logistics_checklist" in meta:
+                checklist = meta["logistics_checklist"]
+                if not all([
+                    checklist.get("endereco_conferido"),
+                    checklist.get("peso_validado"),
+                    checklist.get("etiquetas_impressas"),
+                    checklist.get("foto_carga_path"),
+                    checklist.get("foto_canhoto_path")
+                ]):
+                    validation_errors.append("Checklist de logística deve estar completo (Endereço, Peso, Etiquetas, Foto da Carga e Nota Fiscal com Canhoto Assinado)")
+            else:
+                validation_errors.append("Checklist de logística não encontrado")
             
     elif current_status == "WAITING_DISPATCH":
         # Dispatch must have logistics checklist complete
@@ -1678,7 +1707,10 @@ async def return_po_status(
         }
     )
     
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(po, "partition_metadata")
     db.commit()
+    db.refresh(po)
     
     return {
         "success": True,
@@ -1742,7 +1774,10 @@ async def approve_credit(
         is_exception=False
     )
     
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(po, "partition_metadata")
     db.commit()
+    db.refresh(po)
     return {"success": True, "message": "Crédito aprovado com sucesso. Pedido enviado para o PCP."}
 
 @router.post("/pos/{po_id}/maintain-block")
@@ -1791,7 +1826,10 @@ async def maintain_block(
         is_exception=False
     )
     
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(po, "partition_metadata")
     db.commit()
+    db.refresh(po)
     return {"success": True, "message": "Bloqueio mantido. Pedido devolvido para o Comercial."}
 
 class SuggestPartitionBody(BaseModel):
@@ -1858,6 +1896,55 @@ async def suggest_partition(
     po.status_macro = "WAITING_COMMERCIAL_PARTITION"
     po.partition_reason = resolved_reason
     po.updated_at = datetime.utcnow()
+
+    # Store suggested_delivery_date and partition_reason in the parent's partition_metadata
+    if po.partition_metadata is None:
+        po.partition_metadata = {}
+    meta = dict(po.partition_metadata)
+    meta["suggested_delivery_date"] = new_delivery_date_val
+    meta["partition_reason"] = resolved_reason
+    po.partition_metadata = meta
+
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(po, "partition_metadata")
+    
+    # Extract expected delivery date of the parent PO
+    parent_delivery_date = po.expected_delivery_date
+    parent_delivery_date_str = parent_delivery_date.isoformat() if parent_delivery_date else None
+
+    # Extract inherited flags from parent metadata with dynamic fallback to items
+    parent_metadata = po.partition_metadata or {}
+    
+    parent_is_personalized = parent_metadata.get("is_personalized")
+    if parent_is_personalized is None:
+        parent_is_personalized = any(getattr(item, "is_personalized", False) or (item.extra_metadata and item.extra_metadata.get("is_personalized")) for item in po.items)
+        
+    parent_is_export = parent_metadata.get("is_export")
+    if parent_is_export is None:
+        parent_is_export = any(item.extra_metadata and item.extra_metadata.get("is_export") for item in po.items)
+        
+    parent_is_new_client = parent_metadata.get("is_new_client")
+    if parent_is_new_client is None:
+        parent_is_new_client = any(getattr(item, "is_new_client", False) or (item.extra_metadata and item.extra_metadata.get("is_new_client")) for item in po.items)
+        
+    parent_is_replacement = parent_metadata.get("is_replacement")
+    if parent_is_replacement is None:
+        parent_is_replacement = any(item.extra_metadata and item.extra_metadata.get("is_replacement") for item in po.items)
+        
+    parent_customization_notes = parent_metadata.get("customization_notes")
+    if parent_customization_notes is None:
+        notes_list = [getattr(item, "customization_notes", None) or (item.extra_metadata.get("customization_notes") if item.extra_metadata else None) for item in po.items]
+        parent_customization_notes = next((n for n in notes_list if n), None)
+        
+    parent_attachment_path = parent_metadata.get("attachment_path")
+    if parent_attachment_path is None:
+        attachments = [getattr(item, "attachment_path", None) or (item.extra_metadata.get("attachment_path") if item.extra_metadata else None) for item in po.items]
+        parent_attachment_path = next((a for a in attachments if a), None)
+        
+    parent_packaging_type = parent_metadata.get("packaging_type")
+    if parent_packaging_type is None:
+        packagings = [item.extra_metadata.get("packaging_type") if item.extra_metadata else None for item in po.items]
+        parent_packaging_type = next((p for p in packagings if p), None)
     
     import math
     # Create Child 1 and Child 2 immediately
@@ -1871,9 +1958,16 @@ async def suggest_partition(
         partition_reason=resolved_reason,
         partition_metadata={
             "client_name": po.client_name,
-            "expected_delivery_date": new_delivery_date_val,
+            "expected_delivery_date": parent_delivery_date_str,
             "parent_po_number": po.po_number,
-            "partition_type": "CHILD_1"
+            "partition_type": "CHILD_1",
+            "is_personalized": parent_is_personalized,
+            "is_export": parent_is_export,
+            "is_new_client": parent_is_new_client,
+            "is_replacement": parent_is_replacement,
+            "customization_notes": parent_customization_notes,
+            "attachment_path": parent_attachment_path,
+            "packaging_type": parent_packaging_type
         }
     )
     child2 = PurchaseOrder(
@@ -1888,13 +1982,20 @@ async def suggest_partition(
             "client_name": po.client_name,
             "expected_delivery_date": new_delivery_date_val,
             "parent_po_number": po.po_number,
-            "partition_type": "CHILD_2"
+            "partition_type": "CHILD_2",
+            "is_personalized": parent_is_personalized,
+            "is_export": parent_is_export,
+            "is_new_client": parent_is_new_client,
+            "is_replacement": parent_is_replacement,
+            "customization_notes": parent_customization_notes,
+            "attachment_path": parent_attachment_path,
+            "packaging_type": parent_packaging_type
         }
     )
     db.add(child1)
     db.add(child2)
     db.flush() # get child IDs
-
+ 
     # Copy items with split quantities
     for idx, item in enumerate(po.items):
         q1, q2 = 0, 0
@@ -1921,6 +2022,11 @@ async def suggest_partition(
                     
         # Add to child 1 if quantity > 0
         if q1 > 0:
+            c1_item_extra = dict(item.extra_metadata or {})
+            if parent_delivery_date_str:
+                c1_item_extra["delivery_date"] = parent_delivery_date_str
+                c1_item_extra["expected_delivery_date"] = parent_delivery_date_str
+                
             c1_item = OrderItem(
                 po_id=child1.id,
                 tenant_id=po.tenant_id,
@@ -1934,12 +2040,16 @@ async def suggest_partition(
                 is_new_client=item.is_new_client,
                 customization_notes=item.customization_notes,
                 attachment_path=item.attachment_path,
-                extra_metadata=item.extra_metadata
+                extra_metadata=c1_item_extra
             )
             db.add(c1_item)
             
         # Add to child 2 if quantity > 0
         if q2 > 0:
+            c2_item_extra = dict(item.extra_metadata or {})
+            c2_item_extra["delivery_date"] = new_delivery_date_val
+            c2_item_extra["expected_delivery_date"] = new_delivery_date_val
+            
             c2_item = OrderItem(
                 po_id=child2.id,
                 tenant_id=po.tenant_id,
@@ -1953,7 +2063,7 @@ async def suggest_partition(
                 is_new_client=item.is_new_client,
                 customization_notes=item.customization_notes,
                 attachment_path=item.attachment_path,
-                extra_metadata=item.extra_metadata
+                extra_metadata=c2_item_extra
             )
             db.add(c2_item)
             
@@ -2204,9 +2314,9 @@ async def approve_partition(
     po.status_macro = "ARCHIVED_PARTITIONED"
     po.updated_at = datetime.utcnow()
     
-    # Move children to PCP (APPROVED)
+    # Move children to SHIPPING (Expedição) for freight update - Zigue-Zague flow
     for child in children:
-        child.status_macro = "APPROVED"
+        child.status_macro = "SHIPPING"
         child.updated_at = datetime.utcnow()
         
     # Log parent transition
@@ -2226,9 +2336,9 @@ async def approve_partition(
             db=db,
             po=child,
             from_status="WAITING_COMMERCIAL_PARTITION",
-            to_status="APPROVED",
+            to_status="SHIPPING",
             current_user=current_user,
-            justification=f"Partição criada a partir de {po.po_number}. Movido para PCP.",
+            justification=f"Partição criada a partir de {po.po_number}. Movido para Expedição (Ajuste de Frete).",
             extra_data={"action_type": "APPROVE_PARTITION_CHILD", "parent_po_number": po.po_number}
         )
         
@@ -2268,6 +2378,15 @@ async def pause_material(
     po.sla_paused_at = datetime.utcnow()
     po.updated_at = datetime.utcnow()
     
+    # Delete any draft Child POs (C1/C2) and their OrderItems created during suggestion phase
+    children = db.query(PurchaseOrder).filter(
+        PurchaseOrder.parent_po_id == po.id,
+        PurchaseOrder.tenant_id == current_user.tenant_id
+    ).all()
+    for child in children:
+        db.query(OrderItem).filter(OrderItem.po_id == child.id).delete(synchronize_session=False)
+        db.delete(child)
+
     # Log status transition
     log_po_status_transition(
         db=db,
@@ -2280,6 +2399,7 @@ async def pause_material(
     )
     
     db.commit()
+    db.refresh(po)
     
     return {
         "success": True,

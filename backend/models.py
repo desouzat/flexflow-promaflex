@@ -17,6 +17,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from sqlalchemy.sql import func
 from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.ext.hybrid import hybrid_property
 
 @compiles(UUID, "sqlite")
 def compile_uuid_sqlite(type_, compiler, **kw):
@@ -142,6 +143,7 @@ class User(Base):
         UUID(as_uuid=True), 
         nullable=True
     )
+    area: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), 
@@ -180,6 +182,14 @@ class User(Base):
         Index('idx_user_is_active', 'is_active'),
     )
     
+    @hybrid_property
+    def username(self) -> str:
+        return self.name
+
+    @username.setter
+    def username(self, value: str):
+        self.name = value
+
     def __repr__(self):
         return f"<User(id={self.id}, email={self.email}, tenant_id={self.tenant_id})>"
 

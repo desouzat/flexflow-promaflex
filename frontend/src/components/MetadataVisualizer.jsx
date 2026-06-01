@@ -154,8 +154,7 @@ const MetadataVisualizer = ({ metadata, itemId, onUpdate, readOnly = false }) =>
                     <div style={{ marginLeft: `${indent}px` }} className="flex items-center gap-1.5 mt-0.5">
                         <a 
                             href={`${(import.meta.env.VITE_API_URL || 'http://localhost:8000/api').replace(/\/api$/, '')}/api/uploads/download?path=${encodeURIComponent((value || '').replace(/^\//, ''))}`} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
+                            download
                             className="inline-flex items-center justify-center p-2 bg-blue-50 border border-blue-200 hover:bg-blue-100 text-blue-600 hover:text-blue-850 rounded-lg transition-all shadow-xs"
                             title="Baixar anexo"
                         >

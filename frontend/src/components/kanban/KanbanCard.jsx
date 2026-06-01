@@ -10,7 +10,9 @@ import {
     Star,
     RefreshCw,
     Zap,
-    Split
+    Split,
+    Tag,
+    Truck
 } from 'lucide-react'
 import { STRATEGIC_INDICATORS } from '../../config/helpConfig'
 import { calculatePOMargins } from '../../utils/marginCalculator'
@@ -198,7 +200,7 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
         return (
             <div
                 onClick={() => onCardClick?.(safepo)}
-                className={`bg-white rounded-lg shadow-sm border ${safepo.sla_paused_at ? 'ring-2 ring-gray-300 ring-offset-1 border-gray-300 shadow-gray-250' : 'border-gray-200'} border-l-4 ${getSLABorderColor(slaStatus)} p-3 hover:shadow-md transition-shadow cursor-pointer`}
+                className={`${safepo.status_macro === 'WAITING_MATERIAL' ? 'bg-purple-50 border-purple-300 ring-2 ring-purple-300' : 'bg-white border-gray-200'} rounded-lg shadow-sm border ${safepo.sla_paused_at ? 'ring-2 ring-gray-300 ring-offset-1 border-gray-300 shadow-gray-250' : ''} border-l-4 ${getSLABorderColor(slaStatus)} p-3 hover:shadow-md transition-all cursor-pointer`}
             >
                 <div className="flex items-center justify-between mb-2">
                     <h3 className="font-semibold text-gray-900 text-sm">
@@ -222,6 +224,20 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-purple-100 text-purple-800 border border-purple-300 animate-pulse">
                             📦 AGUARDANDO INSUMO
                         </span>
+                    </div>
+                )}
+
+                {safepo.status_macro === 'SHIPPING' && (
+                    <div className="mb-2">
+                        {safepo.parent_po_id ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-amber-50 text-amber-800 border border-amber-200" title="Fase A: Ajuste de Frete">
+                                🚛 AJUSTE FRETE (Fase A)
+                            </span>
+                        ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-blue-50 text-blue-800 border border-blue-200" title="Fase B: Despacho Final">
+                                📦 DESPACHO (Fase B)
+                            </span>
+                        )}
                     </div>
                 )}
 
@@ -264,7 +280,7 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
     return (
         <div
             onClick={() => onCardClick?.(safepo)}
-            className={`bg-white rounded-lg shadow-sm border ${safepo.sla_paused_at ? 'ring-2 ring-gray-300 ring-offset-1 border-gray-300 shadow-gray-250' : 'border-gray-200'} border-l-4 ${getSLABorderColor(slaStatus)} p-4 hover:shadow-md transition-shadow cursor-pointer`}
+            className={`${safepo.status_macro === 'WAITING_MATERIAL' ? 'bg-purple-50 border-purple-300 ring-2 ring-purple-300' : 'bg-white border-gray-200'} rounded-lg shadow-sm border ${safepo.sla_paused_at ? 'ring-2 ring-gray-300 ring-offset-1 border-gray-300 shadow-gray-250' : ''} border-l-4 ${getSLABorderColor(slaStatus)} p-4 hover:shadow-md transition-all cursor-pointer`}
         >
             {/* Gray Badge for Paused SLA */}
             {safepo.sla_paused_at && (
@@ -292,6 +308,25 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
                         Aguardando Decisão de Partição
                     </span>
                 </div>
+            )}
+
+            {/* Dual-Phase Badge for SHIPPING stage */}
+            {safepo.status_macro === 'SHIPPING' && (
+                safepo.parent_po_id ? (
+                    <div className="mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg flex items-center gap-2" title="Fase A: Ajuste de Frete decorrente de partição de lote. Requer confirmação para seguir para Produção.">
+                        <Tag className="w-4 h-4 text-amber-600 animate-pulse" />
+                        <span className="text-xs font-semibold text-amber-700">
+                            🚛 Fase A: AJUSTE DE FRETE
+                        </span>
+                    </div>
+                ) : (
+                    <div className="mb-3 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg flex items-center gap-2" title="Fase B: Despacho Final. Pedido concluído na Produção pronto para expedição e faturamento.">
+                        <Truck className="w-4 h-4 text-blue-600" />
+                        <span className="text-xs font-semibold text-blue-700">
+                            📦 Fase B: DESPACHO FINAL
+                        </span>
+                    </div>
+                )
             )}
 
             {/* Cyan Badge for Replacement (Troca/Reposição) */}

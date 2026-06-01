@@ -3,7 +3,7 @@ FlexFlow Kanban Schemas
 Pydantic schemas for Kanban board operations.
 """
 
-from typing import List, Optional
+from typing import List, Optional, Any
 from decimal import Decimal
 from datetime import datetime, date
 from pydantic import BaseModel, Field, validator
@@ -16,7 +16,7 @@ class POItemResponse(BaseModel):
     quantity: int = Field(..., description="Item quantity")
     price: Decimal = Field(..., description="Unit price")
     status_item: str = Field(..., description="Item status")
-    margin_item: Optional[Decimal] = Field(None, description="Item margin")
+    margin_item: Optional[Any] = Field(None, description="Item margin")
     total_cost: Optional[Decimal] = Field(None, description="Total cost per unit")
     manual_commission_rate: Optional[Decimal] = Field(None, description="Manual commission rate override (MASTER only)")
     extra_metadata: Optional[dict] = Field(None, description="Extra metadata for item")
@@ -35,8 +35,8 @@ class POResponse(BaseModel):
     items: List[POItemResponse] = Field(default_factory=list, description="PO items")
     items_count: int = Field(0, description="Number of items in PO")
     total_value: Optional[Decimal] = Field(None, description="Total PO value")
-    margin_global: Optional[Decimal] = Field(None, description="Global margin")
-    margin_percentage: Optional[Decimal] = Field(None, description="Margin percentage")
+    margin_global: Optional[Any] = Field(None, description="Global margin")
+    margin_percentage: Optional[Any] = Field(None, description="Margin percentage")
     commission_rate: Optional[Decimal] = Field(None, description="Commission rate percentage")
     commission_value: Optional[Decimal] = Field(None, description="Commission value in currency")
     shipping_cost: Optional[Decimal] = Field(None, description="Shipping cost")
@@ -46,6 +46,7 @@ class POResponse(BaseModel):
     priority: Optional[str] = Field("normal", description="Priority level (normal, high)")
     extra_metadata: Optional[dict] = Field(None, description="Extra metadata for PO")
     logistics_checklist: Optional[dict] = Field(None, description="Logistics checklist data")
+    partition_reason: Optional[str] = Field(None, description="Partition justification/reason")
     created_at: datetime = Field(..., description="Creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
     created_by: Optional[str] = Field(None, description="Creator user ID")

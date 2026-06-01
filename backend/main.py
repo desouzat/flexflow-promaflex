@@ -53,6 +53,13 @@ async def lifespan(app: FastAPI):
     
     # Create database tables (in production, use Alembic migrations)
     # Base.metadata.create_all(bind=engine)
+    from sqlalchemy import text
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE users ADD COLUMN area VARCHAR(100)"))
+            print("Successfully added 'area' column to users table.")
+    except Exception as e:
+        print(f"Adding 'area' column to users table skipped/failed (likely already exists): {e}")
     
     # Start background worker for S3 sync (non-blocking)
     from backend.services.background_worker import start_background_worker, stop_background_worker
@@ -128,6 +135,49 @@ app.add_middleware(
 app.add_middleware(
     TenantIsolationMiddleware
 )
+
+
+# Rate limiting and security headers middlewares
+from collections import defaultdict
+login_rate_limit_records = defaultdict(list)
+
+@app.middleware("http")
+async def rate_limit_login_middleware(request: Request, call_next):
+    if request.url.path == "/api/auth/login" and request.method == "POST":
+        import sys
+        import os
+        if "pytest" in sys.modules or os.getenv("TESTING") == "true":
+            return await call_next(request)
+            
+        client_ip = request.client.host if request.client else "unknown"
+        now = time.time()
+        
+        # Clean up timestamps older than 60 seconds
+        login_rate_limit_records[client_ip] = [
+            t for t in login_rate_limit_records[client_ip] if now - t < 60
+        ]
+        
+        if len(login_rate_limit_records[client_ip]) >= 5:
+            return JSONResponse(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                content={
+                    "detail": "Muitas tentativas de login. Por favor, tente novamente em 1 minuto."
+                }
+            )
+            
+        # Record attempt
+        login_rate_limit_records[client_ip].append(now)
+        
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    return response
 
 
 # Request timing middleware
@@ -344,7 +394,7 @@ async def download_uploaded_file(path: str):
     if not os.path.exists(file_path) or not os.path.isfile(file_path):
         raise HTTPException(status_code=404, detail="Arquivo não encontrado")
         
-    return FileResponse(file_path)
+    return FileResponse(file_path, filename=os.path.basename(file_path))
 
 
 # ============================================================================

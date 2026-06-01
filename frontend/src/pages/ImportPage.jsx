@@ -823,7 +823,10 @@ const ImportPage = () => {
         // Check if any PO has integrity errors
         const hasIntegrityErrors = stagingData?.po_list?.some(po => po.has_integrity_error) || false
 
-        return allChecked && noErrors && !hasIntegrityErrors
+        // Check if all POs have selected packaging type
+        const allHavePackaging = stagingData?.po_list?.every(po => po.packaging_type && po.packaging_type.trim() !== '') || false
+
+        return allChecked && noErrors && !hasIntegrityErrors && allHavePackaging
     }
 
     const handleCommitAll = async () => {
@@ -846,6 +849,7 @@ const ImportPage = () => {
                     freight_cost: po.freight_cost || 0,
                     additional_costs: po.additional_costs || 0,
                     po_total_value: po.po_total_value !== undefined && po.po_total_value !== null ? parseFloat(po.po_total_value) : null,
+                    packaging_type: po.packaging_type || null,
                     items: po.items.map(item => {
                         const parsedPrice = parseBRL(item.unit_value !== null && item.unit_value !== undefined ? item.unit_value : item.price_unit)
                         return {
@@ -1017,11 +1021,17 @@ const ImportPage = () => {
     }
 
     const handlePreviousPO = () => {
+        if (currentPO && (!currentPO.packaging_type || currentPO.packaging_type.trim() === '')) {
+            showError('⚠️ Atenção: Este pedido não possui tipo de embalagem selecionado!')
+        }
         setSelectedPOIndex(prev => Math.max(0, prev - 1))
         setCurrentPage(1) // Reset to first page when switching POs
     }
 
     const handleNextPO = () => {
+        if (currentPO && (!currentPO.packaging_type || currentPO.packaging_type.trim() === '')) {
+            showError('⚠️ Atenção: Este pedido não possui tipo de embalagem selecionado!')
+        }
         if (stagingData && stagingData.po_list && Array.isArray(stagingData.po_list)) {
             setSelectedPOIndex(prev => Math.min(stagingData.po_list.length - 1, prev + 1))
             setCurrentPage(1) // Reset to first page when switching POs
@@ -1318,8 +1328,10 @@ const ImportPage = () => {
                                         >
                                             <option value="">Selecione...</option>
                                             <option value="Padrão">Padrão</option>
-                                            <option value="Pallet">Pallet</option>
-                                            <option value="Caixa">Caixa</option>
+                                            <option value="Palete">Palete</option>
+                                            <option value="Caixa de Papelão">Caixa de Papelão</option>
+                                            <option value="Fardo Plástico">Fardo Plástico</option>
+                                            <option value="Granel">Granel</option>
                                             <option value="Filme">Filme</option>
                                         </select>
                                     </div>
