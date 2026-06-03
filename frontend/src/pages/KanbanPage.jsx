@@ -1738,7 +1738,7 @@ const KanbanPage = () => {
                                                                                                     showError(err.response?.data?.detail || 'Erro ao aprovar partição');
                                                                                                 }
                                                                                             }}
-                                                                                            className="inline-flex items-center justify-center px-3.5 py-1.5 bg-purple-600 hover:bg-purple-750 text-white text-xs font-bold rounded-lg cursor-pointer transition-colors shadow-2xs"
+                                                                                            className="inline-flex items-center justify-center px-3.5 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-lg cursor-pointer transition-colors shadow-2xs"
                                                                                         >
                                                                                             Aprovar Partição
                                                                                         </button>
@@ -2089,7 +2089,7 @@ const KanbanPage = () => {
                                                                                         <div className="flex items-center gap-4">
                                                                                             <button
                                                                                                 onClick={() => setShowFreightModal(true)}
-                                                                                                className="inline-flex items-center gap-2 px-3 py-1.5 bg-purple-650 hover:bg-purple-750 text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer animate-pulse"
+                                                                                                className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer animate-pulse"
                                                                                             >
                                                                                                 <Percent className="w-3.5 h-3.5" />
                                                                                                 Ratear Frete
@@ -2805,7 +2805,7 @@ const KanbanPage = () => {
                                             selectedPO.parent_po_id && isPhaseADisabled ? (
                                                 <button
                                                     onClick={() => setShowFreightModal(true)}
-                                                    className="flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition-colors shadow-sm text-sm bg-purple-650 hover:bg-purple-750 text-white cursor-pointer"
+                                                    className="flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition-colors shadow-sm text-sm bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer"
                                                     title="Fase A (🚛 AJUSTE DE FRETE): Ratear frete entre os lotes C1 e C2."
                                                 >
                                                     Ratear Frete

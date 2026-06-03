@@ -911,7 +911,9 @@ async def get_handoff_history(
         db_to = log.to_status
         
         # Enforce strict labeling from the Go-Live Sprint specifications
-        if (db_from == "APPROVED" and db_to == "SUBMITTED") or (std_from == "PCP" and std_to == "COMERCIAL"):
+        if log.justification == "CONFERIDO FRETE" or (log.extra_data and log.extra_data.get("action_type") == "ALLOCATE_FREIGHT_CHILD"):
+            mapped_reason = "CONFERIDO FRETE"
+        elif (db_from == "APPROVED" and db_to == "SUBMITTED") or (std_from == "PCP" and std_to == "COMERCIAL"):
             mapped_reason = "PARTICIONAMENTO"
         elif (db_from == "MANUFACTURING" and db_to == "APPROVED") or (std_from == "PRODUÇÃO" and std_to == "PCP"):
             mapped_reason = "VERIFICAR POSSIBILIDADES COM TIME DE NEGÓCIOS"
@@ -936,7 +938,8 @@ async def get_handoff_history(
             is_forward_transition = True
             
         if is_forward_transition:
-            mapped_reason = "CONFERIDO"
+            if mapped_reason != "CONFERIDO FRETE":
+                mapped_reason = "CONFERIDO"
 
         if mapped_reason:
             reason = mapped_reason
@@ -1177,6 +1180,7 @@ async def move_po_status(
         from sqlalchemy.orm.attributes import flag_modified
         for child in children:
             child.status_macro = "SHIPPING"
+            child.partition_reason = None
             child.updated_at = datetime.utcnow()
             meta = dict(child.partition_metadata or {})
             meta["original_parent_freight"] = parent_freight
@@ -2480,6 +2484,7 @@ async def approve_partition(
     from sqlalchemy.orm.attributes import flag_modified
     for child in children:
         child.status_macro = "SHIPPING"
+        child.partition_reason = None
         child.updated_at = datetime.utcnow()
         meta = dict(child.partition_metadata or {})
         meta["original_parent_freight"] = parent_freight
@@ -2615,7 +2620,7 @@ async def allocate_freight(
                 from_status=from_status,
                 to_status="APPROVED",
                 current_user=current_user,
-                justification=f"Frete rateado/confirmado na Expedição (Lote C1: R$ {body.freight_c1:.2f}, Lote C2: R$ {body.freight_c2:.2f}). Movido para PCP.",
+                justification="CONFERIDO FRETE",
                 extra_data={"action_type": "ALLOCATE_FREIGHT_CHILD", "freight_c1": body.freight_c1, "freight_c2": body.freight_c2}
             )
             
