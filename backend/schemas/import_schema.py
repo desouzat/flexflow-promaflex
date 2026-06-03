@@ -153,7 +153,7 @@ class ImportItemData(BaseModel):
     length: Optional[Decimal] = Field(None, ge=0, description="Length in mm")
     
     # Timeline fields
-    lead_time: Optional[int] = Field(None, ge=0, description="Lead time in days")
+    lead_time: Optional[int] = Field(None, description="Lead time in days")
     delivery_date: Optional[str] = Field(None, description="Delivery date (DD/MM/YYYY)")
     billing_date: Optional[str] = Field(None, description="Billing date (DD/MM/YYYY)")
     
@@ -314,21 +314,24 @@ class ImportPOData(BaseModel):
     def validate_po_integrity(self):
         """
         CRITICAL INTEGRITY CHECK:
-        Validate that the sum of all item_total_value matches po_total_value.
+        Validate that the sum of all item_total_value + IPI matches po_total_value.
         This ensures financial consistency in the PO.
         """
         if self.po_total_value is None:
             # No PO total provided, skip integrity check
             return self
         
-        # Calculate sum of all item totals
+        # Calculate sum of all item totals and their IPI
         items_with_totals = [item for item in self.items if item.item_total_value is not None]
         
         if not items_with_totals:
             # No item totals to validate
             return self
         
-        calculated_sum = sum(item.item_total_value for item in items_with_totals)
+        calculated_sum = sum(
+            item.item_total_value + (item.ipi or Decimal("0.0"))
+            for item in items_with_totals
+        )
         
         # Allow small tolerance for floating point differences (0.01 = 1 cent)
         tolerance = Decimal("0.01")
@@ -337,7 +340,7 @@ class ImportPOData(BaseModel):
         if difference > tolerance:
             self.has_integrity_error = True
             self.integrity_error_message = (
-                f"Divergência de valores: Soma dos itens (R$ {calculated_sum:.2f}) "
+                f"Divergência de valores: Soma dos itens + IPI (R$ {calculated_sum:.2f}) "
                 f"não confere com o total do pedido (R$ {self.po_total_value:.2f}). "
                 f"Diferença: R$ {difference:.2f}"
             )

@@ -4,7 +4,7 @@ Handles commission ladder logic, VP (Present Value) calculations, and financial 
 """
 
 from decimal import Decimal
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Union
 from datetime import datetime
 import math
 
@@ -129,37 +129,50 @@ class FinancialService:
         return commission.quantize(Decimal("0.01"))
     
     @classmethod
+    def parse_payment_terms_to_average_days(cls, terms: Optional[str]) -> float:
+        if not terms:
+            return 0.0
+        
+        # Clean up and normalize
+        term_str = str(terms).lower().strip()
+        
+        # Strip 'ddl' and trailing hyphens/spaces
+        term_str = term_str.replace('ddl', '')
+        term_str = term_str.rstrip('- \t')
+        
+        if any(word in term_str for word in ['à vista', 'a vista', 'imediato', 'cash', '0 dias']):
+            return 0.0
+            
+        # Find all numbers
+        import re
+        numbers = re.findall(r'\d+', term_str)
+        if not numbers:
+            return 0.0
+            
+        days = [float(n) for n in numbers]
+        return sum(days) / len(days)
+
+    @classmethod
     def calculate_vp(
         cls,
         future_value: Decimal,
-        term_days: int,
+        term_days: Union[int, float, str],
         custom_rate: Optional[Decimal] = None
     ) -> Decimal:
         """
-        Calculate Present Value (VP - Valor Presente).
-        
-        Formula: VP = FV / (1 + rate)
-        
-        Args:
-            future_value: Future value (sale price)
-            term_days: Payment term in days
-            custom_rate: Custom discount rate (optional)
-            
-        Returns:
-            Present value
+        Calculate Present Value (VP - Valor Presente) using Celso's Compound Formula.
+        Formula: VP = FV / (1.025 ** (AverageDays / 30))
         """
         if future_value <= 0:
             return Decimal("0.00")
         
-        # Get rate for the term
-        if custom_rate is not None:
-            rate = custom_rate
+        if isinstance(term_days, str):
+            days = cls.parse_payment_terms_to_average_days(term_days)
         else:
-            # Find closest term or interpolate
-            rate = cls._get_vp_rate_for_term(term_days)
-        
-        # Calculate VP
-        vp = future_value / (Decimal("1") + rate)
+            days = float(term_days) if term_days is not None else 0.0
+            
+        factor = Decimal("1.025") ** (Decimal(str(days)) / Decimal("30"))
+        vp = future_value / factor
         return vp.quantize(Decimal("0.01"))
     
     @classmethod
@@ -215,7 +228,7 @@ class FinancialService:
         sale_price: Decimal,
         cost: Decimal,
         shipping_cost: Decimal,
-        term_days: int,
+        term_days: Union[int, float, str],
         client_code: Optional[str] = None,
         manual_commission_rate: Optional[Decimal] = None,
         tax_rate: Decimal = Decimal("22.25")

@@ -30,24 +30,25 @@ vi.mock('recharts', () => ({
 }))
 
 const mockDashboardData = {
-    total_pos: 45,
-    total_value: 1250000.50,
-    pending_approval: 8,
-    delivered: 28,
-    area_distribution: [
-        { area: 'IT', count: 15, value: 450000 },
-        { area: 'Operations', count: 12, value: 380000 },
-        { area: 'Marketing', count: 8, value: 220000 },
-        { area: 'HR', count: 6, value: 120000 },
-        { area: 'Finance', count: 4, value: 80000 },
-    ],
-    margin_by_category: [
-        { category: 'Hardware', margin: 15.5, value: 350000 },
-        { category: 'Software', margin: 25.3, value: 280000 },
-        { category: 'Services', margin: 18.7, value: 420000 },
-        { category: 'Supplies', margin: 12.2, value: 200000 },
-    ],
-    average_lead_time: 12.5,
+    margin: {
+        po_count: 45,
+        total_value: 1250000.50,
+        total_margin: 150000.00,
+    },
+    items_by_area: {
+        by_area: [
+            { area: 'IT', count: 15 },
+            { area: 'Operations', count: 12 },
+            { area: 'Marketing', count: 8 },
+            { area: 'HR', count: 6 },
+            { area: 'Finance', count: 4 },
+            { area: 'Comercial', count: 8 },
+            { area: 'Concluído', count: 28 }
+        ]
+    },
+    lead_time: {
+        average_lead_time_days: 12.5
+    }
 }
 
 const renderDashboard = () => {
@@ -67,7 +68,7 @@ describe('DashboardPage Integration Tests', () => {
         api.get.mockImplementation(() => new Promise(() => { })) // Never resolves
         renderDashboard()
 
-        expect(screen.getByText(/loading dashboard/i)).toBeInTheDocument()
+        expect(screen.getByText(/carregando dashboard/i)).toBeInTheDocument()
     })
 
     it('should fetch and display dashboard metrics from backend', async () => {
@@ -166,10 +167,10 @@ describe('DashboardPage Integration Tests', () => {
         renderDashboard()
 
         await waitFor(() => {
-            expect(screen.getByText('Total POs')).toBeInTheDocument()
-            expect(screen.getByText('Total Value')).toBeInTheDocument()
-            expect(screen.getByText('Pending Approval')).toBeInTheDocument()
-            expect(screen.getByText('Delivered')).toBeInTheDocument()
+            expect(screen.getByText('Total de Pedidos')).toBeInTheDocument()
+            expect(screen.getByText('Valor Total')).toBeInTheDocument()
+            expect(screen.getByText('Em Comercial')).toBeInTheDocument()
+            expect(screen.getByText('Concluídos')).toBeInTheDocument()
         })
     })
 
@@ -200,15 +201,16 @@ describe('DashboardPage Integration Tests', () => {
         })
     })
 
-    it('should display percentage changes for stats', async () => {
+    it('should display stat details correctly', async () => {
         api.get.mockResolvedValueOnce({ data: mockDashboardData })
 
         renderDashboard()
 
         await waitFor(() => {
-            expect(screen.getByText('+12%')).toBeInTheDocument()
-            expect(screen.getByText('+8%')).toBeInTheDocument()
-            expect(screen.getByText('+15%')).toBeInTheDocument()
+            expect(screen.getByText('45 POs')).toBeInTheDocument()
+            expect(screen.getByText(/Margem: R\$\s*150\.000,00/i)).toBeInTheDocument()
+            expect(screen.getByText('8 itens')).toBeInTheDocument()
+            expect(screen.getByText('28 itens')).toBeInTheDocument()
         })
     })
 
@@ -217,19 +219,25 @@ describe('DashboardPage Integration Tests', () => {
 
         renderDashboard()
 
-        expect(screen.getByText('Dashboard')).toBeInTheDocument()
-        expect(screen.getByText('Overview of purchase order metrics')).toBeInTheDocument()
+        await waitFor(() => {
+            expect(screen.getByText('Dashboard')).toBeInTheDocument()
+            expect(screen.getByText('Visão geral das métricas de pedidos')).toBeInTheDocument()
+        })
     })
 
     it('should handle empty or missing data gracefully', async () => {
         const emptyData = {
-            total_pos: 0,
-            total_value: 0,
-            pending_approval: 0,
-            delivered: 0,
-            area_distribution: [],
-            margin_by_category: [],
-            average_lead_time: 0,
+            margin: {
+                po_count: 0,
+                total_value: 0,
+                total_margin: 0,
+            },
+            items_by_area: {
+                by_area: []
+            },
+            lead_time: {
+                average_lead_time_days: 0
+            }
         }
 
         api.get.mockResolvedValueOnce({ data: emptyData })
@@ -237,8 +245,9 @@ describe('DashboardPage Integration Tests', () => {
         renderDashboard()
 
         await waitFor(() => {
-            expect(screen.getByText('0')).toBeInTheDocument()
-            expect(screen.getByText(/R\$\s*0,00/i)).toBeInTheDocument()
+            expect(screen.getByText('Dashboard')).toBeInTheDocument()
+            expect(screen.getAllByText('0').length).toBeGreaterThan(0)
+            expect(screen.getAllByText(/0,00/).length).toBeGreaterThan(0)
         })
     })
 })

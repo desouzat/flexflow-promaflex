@@ -65,6 +65,30 @@ const formatCurrency = (value) => {
     }).format(numValue)
 }
 
+// Robust DD/MM/YYYY date formatter
+const formatDate = (dateString) => {
+    if (!dateString) return 'N/A'
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateString) || /^\d{4}-\d{2}-\d{2}T.*$/.test(dateString)) {
+        const cleanDate = dateString.split('T')[0]
+        const [year, month, day] = cleanDate.split('-')
+        return `${day}/${month}/${year}`
+    }
+    if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateString)) {
+        return dateString
+    }
+    try {
+        const d = new Date(dateString)
+        if (isNaN(d.getTime())) return dateString
+        const day = String(d.getDate()).padStart(2, '0')
+        const month = String(d.getMonth() + 1).padStart(2, '0')
+        const year = d.getFullYear()
+        return `${day}/${month}/${year}`
+    } catch (e) {
+        return dateString
+    }
+}
+
+
 // Robust Brazilian/Standard number parser
 const parseBrazilianNumber = (value) => {
     if (value === null || value === undefined) return 0
@@ -294,12 +318,12 @@ const ImportPage = () => {
             const defaultMapping = {
                 mappings: [
                     // Core required fields
-                    { column_name: 'Pedido', field_type: 'po_number' },
+                    { column_name: 'Nº do Pedido', field_type: 'po_number' },
                     { column_name: 'Cliente', field_type: 'client_name' },
-                    { column_name: 'SKU', field_type: 'sku' },
+                    { column_name: 'Id Produto', field_type: 'sku' },
                     { column_name: 'Qtd', field_type: 'quantity' },
                     // Optional ONET fields (22-field structure)
-                    { column_name: 'Descrição', field_type: 'description' },
+                    { column_name: 'Descr. Produto', field_type: 'description' },
                     { column_name: 'Unidade', field_type: 'unit' },
                     { column_name: 'Largura', field_type: 'width' },
                     { column_name: 'Comprimento', field_type: 'length' },
@@ -307,17 +331,17 @@ const ImportPage = () => {
                     { column_name: 'Data Entrega', field_type: 'delivery_date' },
                     { column_name: 'Data Faturamento', field_type: 'billing_date' },
                     { column_name: '% ICMS', field_type: 'icms_percent' },
-                    { column_name: 'Bloqueio', field_type: 'block_status' },
+                    { column_name: 'Bloqueio Faturamento', field_type: 'block_status' },
                     { column_name: 'Saldo', field_type: 'balance' },
                     { column_name: 'Atraso', field_type: 'delay' },
-                    { column_name: 'Condição Pagamento', field_type: 'payment_terms' },
+                    { column_name: 'Cond.Pgto', field_type: 'payment_terms' },
                     { column_name: 'Frete', field_type: 'freight' },
                     { column_name: 'Vendedor', field_type: 'salesperson' },
                     { column_name: 'IPI', field_type: 'ipi' },
                     // NEW: Financial value fields
-                    { column_name: 'Vl.Unit', field_type: 'unit_value' },
+                    { column_name: 'VlUnit', field_type: 'unit_value' },
                     { column_name: 'Total Item', field_type: 'item_total_value' },
-                    { column_name: 'Valor Total do Pedido', field_type: 'po_total_value' }
+                    { column_name: 'Vl.Pedido', field_type: 'po_total_value' }
                 ]
             }
             formData.append('mapping_json', JSON.stringify(defaultMapping))
@@ -377,7 +401,7 @@ const ImportPage = () => {
                             customization_notes: '',
                             attachment_path: null,
                             needs_mapping: false,
-                            is_checked: true,  // Default to checked (confirmed) so valid items can be imported in batch immediately
+                            is_checked: false,  // Default to unchecked so the user is forced to check each SKU manually
                             extra_metadata: {
                                 finance_justification: null
                             }
@@ -442,7 +466,7 @@ const ImportPage = () => {
                                 customization_notes: '',
                                 attachment_path: null,
                                 needs_mapping: false,
-                                is_checked: true,  // Default to checked (confirmed) so valid items can be imported immediately
+                                is_checked: false,  // Default to unchecked so the user is forced to check each SKU manually
                                 extra_metadata: {
                                     finance_justification: null
                                 }
@@ -1114,13 +1138,6 @@ const ImportPage = () => {
                                 <p className="text-sm text-gray-600 mb-4">
                                     ou clique para selecionar (campos ONET)
                                 </p>
-                                <input
-                                    ref={fileInputRef}
-                                    type="file"
-                                    accept=".xlsx,.xls"
-                                    onChange={handleFileSelect}
-                                    className="hidden"
-                                />
                                 {selectedFile ? (
                                     <div className="inline-flex items-center gap-2 px-4 py-2 bg-primary-50 text-primary-700 rounded-lg">
                                         <FileSpreadsheet className="w-5 h-5" />
@@ -1138,11 +1155,14 @@ const ImportPage = () => {
                                             <X className="w-4 h-4" />
                                         </button>
                                     </div>
-                                ) : (
-                                    <button className="btn-primary" onClick={(e) => e.stopPropagation()}>
-                                        Selecionar Arquivo
-                                    </button>
-                                )}
+                                ) : null}
+                                <input
+                                    ref={fileInputRef}
+                                    type="file"
+                                    accept=".xlsx,.xls"
+                                    onChange={handleFileSelect}
+                                    className="hidden"
+                                />
                             </div>
 
                             {selectedFile && (
@@ -1586,7 +1606,7 @@ const ImportPage = () => {
                                                             )}
                                                             {item.balance !== null && (
                                                                 <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                                                                    <label className="text-xs font-medium text-gray-700">Saldo</label>
+                                                                    <label className="text-xs font-medium text-gray-700">Saldo Devedor</label>
                                                                     <p className="text-sm font-bold text-blue-700">
                                                                         R$ {parseFloat(item.balance).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                                     </p>
@@ -1594,9 +1614,9 @@ const ImportPage = () => {
                                                             )}
                                                             {item.delay !== null && (
                                                                 <div className={`p-3 rounded-lg ${item.delay > 0 ? 'bg-orange-100 border-2 border-orange-400' : 'bg-green-100 border border-green-300'}`}>
-                                                                    <label className="text-xs font-medium text-gray-700">Atraso</label>
+                                                                    <label className="text-xs font-medium text-gray-700">Dias Atraso</label>
                                                                     <p className={`text-sm font-bold ${item.delay > 0 ? 'text-orange-700' : 'text-green-700'}`}>
-                                                                        {item.delay > 0 ? `${item.delay} dias` : 'Em dia'}
+                                                                        {item.delay} dias
                                                                     </p>
                                                                 </div>
                                                             )}
@@ -1719,49 +1739,45 @@ const ImportPage = () => {
                                                     </div>
                                                 )}
 
-                                                {/* Parâmetros Financeiros Editáveis para Recálculo Real-Time */}
-                                                <div className="mb-4 p-3 bg-slate-100 border border-slate-200 rounded-lg grid grid-cols-1 md:grid-cols-3 gap-3 animate-fade-in">
+                                                {/* Detalhes do Item: Dt.Entrega, Vl.Frete, % ICMS, Dt.Faturamento, Vendedor e Vl. IPI */}
+                                                <div className="mb-4 p-3.5 bg-gray-50 border border-gray-200 rounded-lg grid grid-cols-2 md:grid-cols-6 gap-4 shadow-3xs animate-fade-in">
                                                     <div>
-                                                        <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-                                                            ⏱️ Cond. Pagamento
-                                                        </label>
-                                                        <input
-                                                            type="text"
-                                                            value={item.payment_terms || ''}
-                                                            onChange={(e) => handleItemFieldChange(item.id, 'payment_terms', e.target.value, e)}
-                                                            className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-transparent font-medium bg-white"
-                                                            placeholder="Ex: 30 dias"
-                                                        />
+                                                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-0.5">Dt. Entrega</label>
+                                                        <p className="text-xs font-semibold text-gray-850 font-sans">{formatDate(item.delivery_date)}</p>
                                                     </div>
                                                     <div>
-                                                        <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-                                                            🚚 Frete do Item (R$)
-                                                        </label>
-                                                        <input
-                                                            type="number"
-                                                            step="0.01"
-                                                            min="0"
-                                                            value={item.freight !== undefined && item.freight !== null ? item.freight : 0}
-                                                            onChange={(e) => handleItemFieldChange(item.id, 'freight', e.target.value, e)}
-                                                            onFocus={(e) => e.target.select()}
-                                                            className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-transparent font-mono bg-white"
-                                                            placeholder="0.00"
-                                                        />
+                                                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-0.5">Vl. Frete</label>
+                                                        <p className="text-xs font-bold text-green-700 font-mono">
+                                                            {item.freight !== null && item.freight !== undefined 
+                                                                ? formatCurrency(item.freight) 
+                                                                : 'R$ 0,00'}
+                                                        </p>
                                                     </div>
                                                     <div>
-                                                        <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-                                                            🏭 Custo Unitário (R$)
-                                                        </label>
-                                                        <input
-                                                            type="number"
-                                                            step="0.01"
-                                                            min="0"
-                                                            value={item.total_cost !== undefined && item.total_cost !== null ? item.total_cost : (item.cost_mp !== undefined && item.cost_mp !== null ? item.cost_mp : 0)}
-                                                            onChange={(e) => handleItemFieldChange(item.id, 'total_cost', e.target.value, e)}
-                                                            onFocus={(e) => e.target.select()}
-                                                            className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-transparent font-mono bg-white"
-                                                            placeholder="0.00"
-                                                        />
+                                                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-0.5">% ICMS</label>
+                                                        <p className="text-xs font-semibold text-gray-800 font-sans">
+                                                            {item.icms_percent !== null && item.icms_percent !== undefined 
+                                                                ? `${parseFloat(item.icms_percent).toFixed(2)}%` 
+                                                                : '0.00%'}
+                                                        </p>
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-0.5">Dt. Faturamento</label>
+                                                        <p className="text-xs font-semibold text-gray-850 font-sans">{formatDate(item.billing_date)}</p>
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-0.5">Vendedor</label>
+                                                        <p className="text-xs font-semibold text-gray-850 truncate" title={item.salesperson || 'N/A'}>
+                                                            {item.salesperson || 'N/A'}
+                                                        </p>
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-0.5">Vl. IPI</label>
+                                                        <p className="text-xs font-bold text-green-700 font-mono">
+                                                            {item.ipi !== null && item.ipi !== undefined 
+                                                                ? formatCurrency(item.ipi) 
+                                                                : 'R$ 0,00'}
+                                                        </p>
                                                     </div>
                                                 </div>
 

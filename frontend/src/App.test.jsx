@@ -6,6 +6,6 @@ describe('App', () => {
     it('renders without crashing', () => {
         render(<App />)
         // Should render the login page initially (not authenticated)
-        expect(screen.getByText(/loading/i)).toBeInTheDocument()
+        expect(screen.getByText('FlexFlow')).toBeInTheDocument()
     })
 })

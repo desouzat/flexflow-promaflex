@@ -252,6 +252,7 @@ async def get_kanban_board(
                         status_item=item.status_item,
                         margin_item=Decimal("0.00") if is_privileged else "***",
                         total_cost=unit_cost,
+                        item_total_value=Decimal(str(item.item_total_value)) if item.item_total_value is not None else None,
                         manual_commission_rate=Decimal(str(item.extra_metadata.get("manual_commission_rate"))) if item.extra_metadata and "manual_commission_rate" in item.extra_metadata else None,
                         extra_metadata=item_extra,
                         created_at=item.created_at,
@@ -317,12 +318,12 @@ async def get_kanban_board(
                 id=str(po.id),
                 po_number=po.po_number,
                 client_name=getattr(po, 'client_name', None) or "Cliente Desconhecido",
-                supplier_name=getattr(po, 'client_name', None) or "Fornecedor Desconhecido",
+                supplier_name=getattr(po, 'client_name', None) or "Cliente Desconhecido",
                 status_macro=po.status_macro,  # Raw database status macro (e.g. 'APPROVED' for PCP)
                 status=display_name,  # Alias for frontend compatibility
                 items=items,
                 items_count=len(items),
-                total_value=metrics["total_value"],
+                total_value=Decimal(str(po.po_total_value)) if po.po_total_value is not None else metrics["total_value"],
                 margin_global=metrics["margin_global"] if is_privileged else "***",
                 margin_percentage=metrics["margin_percentage"] if is_privileged else "***",
                 commission_rate=commission_rate,
@@ -331,8 +332,8 @@ async def get_kanban_board(
                 expected_delivery_date=data_limite_val if data_limite_val else orig_delivery,
                 delivery_date=orig_delivery,
                 data_limite=data_limite_val,
-                priority=getattr(po, 'priority', 'normal'),
                 extra_metadata=po.partition_metadata,
+                partition_metadata=po.partition_metadata,
                 logistics_checklist=logistics_checklist,
                 partition_reason=po.partition_reason,
                 created_at=po.created_at,
@@ -411,6 +412,7 @@ async def list_purchase_orders(
                 status_item=item.status_item,
                 margin_item=Decimal("0.00") if is_privileged else "***",
                 total_cost=Decimal("0.00"),
+                item_total_value=Decimal(str(item.item_total_value)) if item.item_total_value is not None else None,
                 manual_commission_rate=Decimal(str(item.extra_metadata.get("manual_commission_rate"))) if item.extra_metadata and "manual_commission_rate" in item.extra_metadata else None,
                 extra_metadata=item.extra_metadata,
                 created_at=item.created_at,
@@ -445,22 +447,23 @@ async def list_purchase_orders(
             id=str(po.id),
             po_number=po.po_number,
             client_name=getattr(po, 'client_name', None) or "Cliente Desconhecido",
-            supplier_name=getattr(po, 'client_name', None) or "Fornecedor Desconhecido",
+            supplier_name=getattr(po, 'client_name', None) or "Cliente Desconhecido",
             status_macro=STATUS_DISPLAY_MAP.get(po.status_macro, po.status_macro),
             status=STATUS_DISPLAY_MAP.get(po.status_macro, po.status_macro),
             items=items,
             items_count=len(items),
-            total_value=metrics["total_value"],
+            total_value=Decimal(str(po.po_total_value)) if po.po_total_value is not None else metrics["total_value"],
             margin_global=metrics["margin_global"] if is_privileged else "***",
             margin_percentage=metrics["margin_percentage"] if is_privileged else "***",
             commission_rate=commission_rate,
             commission_value=commission_value,
             shipping_cost=Decimal(str(po.shipping_cost)),
             expected_delivery_date=getattr(po, 'expected_delivery_date', None),
-            priority=getattr(po, 'priority', 'normal'),
             extra_metadata=po.partition_metadata,
+            partition_metadata=po.partition_metadata,
             logistics_checklist=logistics_checklist,
             partition_reason=po.partition_reason,
+            parent_po_id=str(po.parent_po_id) if po.parent_po_id else None,
             created_at=po.created_at,
             updated_at=po.updated_at,
             created_by=str(po.creator.id) if (po.creator and po.creator.id) else (str(po.created_by) if po.created_by else None)
@@ -545,6 +548,7 @@ async def get_purchase_order(
                 status_item=item.status_item,
                 margin_item=Decimal("0.00") if is_privileged else "***",
                 total_cost=unit_cost,
+                item_total_value=Decimal(str(item.item_total_value)) if item.item_total_value is not None else None,
                 manual_commission_rate=Decimal(str(item.extra_metadata.get("manual_commission_rate"))) if item.extra_metadata and "manual_commission_rate" in item.extra_metadata else None,
                 extra_metadata=item_extra,
                 created_at=item.created_at,
@@ -608,12 +612,12 @@ async def get_purchase_order(
         id=str(po.id),
         po_number=po.po_number,
         client_name=getattr(po, 'client_name', None) or "Cliente Desconhecido",
-        supplier_name=getattr(po, 'client_name', None) or "Fornecedor Desconhecido",
+        supplier_name=getattr(po, 'client_name', None) or "Cliente Desconhecido",
         status_macro=po.status_macro,  # Raw database status macro (e.g. 'APPROVED' for PCP)
         status=STATUS_DISPLAY_MAP.get(po.status_macro, po.status_macro),
         items=items,
         items_count=len(items),
-        total_value=metrics["total_value"],
+        total_value=Decimal(str(po.po_total_value)) if po.po_total_value is not None else metrics["total_value"],
         margin_global=metrics["margin_global"] if is_privileged else "***",
         margin_percentage=metrics["margin_percentage"] if is_privileged else "***",
         commission_rate=commission_rate,
@@ -622,10 +626,11 @@ async def get_purchase_order(
         expected_delivery_date=data_limite_val if data_limite_val else orig_delivery,
         delivery_date=orig_delivery,
         data_limite=data_limite_val,
-        priority=getattr(po, 'priority', 'normal'),
         extra_metadata=po.partition_metadata,
+        partition_metadata=po.partition_metadata,
         logistics_checklist=logistics_checklist,
         partition_reason=po.partition_reason,
+        parent_po_id=str(po.parent_po_id) if po.parent_po_id else None,
         created_at=po.created_at,
         updated_at=po.updated_at,
         created_by=str(po.creator.id) if (po.creator and po.creator.id) else (str(po.created_by) if po.created_by else None)
@@ -862,7 +867,7 @@ async def get_handoff_history(
     
     # Initial status transition (po creation)
     initial_area = STATUS_DISPLAY_MAP.get(initial_status, initial_status)
-    initial_reason = "CONFERIDO" if initial_area == "Comercial" else "[Outros]"
+    initial_reason = "CONFERIDO"
     transitions.append({
         "date": po_created_naive.strftime("%d/%m/%Y %H:%M:%S") if po_created_naive else "",
         "user": creator_name,
@@ -916,6 +921,22 @@ async def get_handoff_history(
             mapped_reason = "CONFERIDO"
         elif std_from == "COMERCIAL" and std_to == "FINANCEIRO":
             mapped_reason = "ENVIO ANÁLISE DE CRÉDITO"
+        
+        # Force "CONFERIDO" for all forward transitions and eliminate "[Outros]" for standard movements
+        is_forward_transition = False
+        if std_from == "COMERCIAL" and std_to == "PCP":
+            is_forward_transition = True
+        elif std_from == "PCP" and std_to == "PRODUÇÃO":
+            is_forward_transition = True
+        elif std_from == "PRODUÇÃO" and std_to == "FATURAMENTO":
+            is_forward_transition = True
+        elif std_from == "FATURAMENTO" and std_to in ["FINANCEIRO", "ARQUIVADO", "PCP"]:
+            is_forward_transition = True
+        elif std_from == "FINANCEIRO" and std_to == "ARQUIVADO":
+            is_forward_transition = True
+            
+        if is_forward_transition:
+            mapped_reason = "CONFERIDO"
 
         if mapped_reason:
             reason = mapped_reason
@@ -929,14 +950,12 @@ async def get_handoff_history(
                 elif log.extra_data.get("audit_comment"):
                     reason = log.extra_data.get("audit_comment")
 
-        # Safeguard: enforce that "CONFERIDO" is strictly and exclusively used for the initial 'Mesa Conf ➔ Comercial' transition
-        if reason and "CONFERIDO" in reason.upper():
-            if not ((std_from == "MESA CONF" or "MESA" in std_from or db_from == "DRAFT") and std_to == "COMERCIAL"):
-                reason = "[Outros]"
-
         # Default to '[Outros]' if no specific mapping exists
         if not reason or reason.strip() in ["", "—", "-", "None", "null"]:
-            reason = "[Outros]"
+            if is_forward_transition or (std_from in ["COMERCIAL", "PCP", "PRODUÇÃO", "FATURAMENTO", "FINANCEIRO"] and std_to in ["COMERCIAL", "PCP", "PRODUÇÃO", "FATURAMENTO", "FINANCEIRO", "ARQUIVADO"]):
+                reason = "CONFERIDO"
+            else:
+                reason = "[Outros]"
             
         transitions.append({
             "date": to_naive(log.created_at).strftime("%d/%m/%Y %H:%M:%S") if log.created_at else "",
@@ -1087,7 +1106,7 @@ async def move_po_status(
         "WAITING_DISPATCH": ["COMPLETED", "APPROVED"],
         "COMPLETED": ["WAITING_DISPATCH"],  # Allow return for corrections
         "CANCELLED": [],
-        "WAITING_COMMERCIAL_PARTITION": ["SUBMITTED"]
+        "WAITING_COMMERCIAL_PARTITION": ["SUBMITTED", "SHIPPING"]
     }
     
     is_exception = False
@@ -1118,6 +1137,91 @@ async def move_po_status(
                 ],
                 is_exception=False
             )
+            
+    # Special transition: if parent PO is WAITING_COMMERCIAL_PARTITION and moving to SHIPPING
+    if from_status == "WAITING_COMMERCIAL_PARTITION" and to_status_db == "SHIPPING":
+        # Archive parent PO and move children to SHIPPING
+        children = db.query(PurchaseOrder).filter(
+            PurchaseOrder.parent_po_id == po.id,
+            PurchaseOrder.tenant_id == current_user.tenant_id
+        ).order_by(PurchaseOrder.created_at).all()
+        
+        if len(children) < 2:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Este pedido não possui filhos criados para aprovar a partição"
+            )
+            
+        parent_freight = float(po.shipping_cost or 0)
+        if parent_freight == 0 and po.items:
+            first_item = po.items[0]
+            if first_item.extra_metadata:
+                meta_freight = first_item.extra_metadata.get("freight") or first_item.extra_metadata.get("Freight")
+                if meta_freight:
+                    try:
+                        parent_freight = float(meta_freight)
+                    except ValueError:
+                        pass
+            if parent_freight > 0:
+                po.shipping_cost = parent_freight
+                
+        # Split freight 50/50 initially
+        children[0].shipping_cost = round(parent_freight / 2.0, 4)
+        children[1].shipping_cost = round(parent_freight - (parent_freight / 2.0), 4)
+        
+        # Move parent PO to ARCHIVED_PARTITIONED
+        po.status_macro = "ARCHIVED_PARTITIONED"
+        po.updated_at = datetime.utcnow()
+        
+        # Move children to SHIPPING
+        from sqlalchemy.orm.attributes import flag_modified
+        for child in children:
+            child.status_macro = "SHIPPING"
+            child.updated_at = datetime.utcnow()
+            meta = dict(child.partition_metadata or {})
+            meta["original_parent_freight"] = parent_freight
+            meta["current_phase"] = "FASE_A"
+            # Delete keys to kill the Awaiting Decision stamp
+            if "suggested_delivery_date" in meta:
+                del meta["suggested_delivery_date"]
+            if "partition_reason" in meta:
+                del meta["partition_reason"]
+            child.partition_metadata = meta
+            flag_modified(child, "partition_metadata")
+            
+        # Log parent transition
+        log_po_status_transition(
+            db=db,
+            po=po,
+            from_status=from_status,
+            to_status="ARCHIVED_PARTITIONED",
+            current_user=current_user,
+            justification="Partição aprovada pelo comercial. Pedido pai arquivado. Lotes filhos enviados para Expedição.",
+            extra_data={"action_type": "APPROVE_PARTITION_PARENT"}
+        )
+        
+        # Log children transitions
+        for child in children:
+            log_po_status_transition(
+                db=db,
+                po=child,
+                from_status="WAITING_COMMERCIAL_PARTITION",
+                to_status="SHIPPING",
+                current_user=current_user,
+                justification=f"Partição criada a partir de {po.po_number}. Movido para Expedição.",
+                extra_data={"action_type": "APPROVE_PARTITION_CHILD", "parent_po_number": po.po_number}
+            )
+            
+        db.commit()
+        return MoveStatusResponse(
+            success=True,
+            message=f"Partição do pedido {po.po_number} aprovada. Filhos enviados para Expedição.",
+            po_id=str(po.id),
+            from_status="Comercial",
+            to_status="Faturamento/Expedição",
+            validation_errors=None,
+            is_exception=False
+        )
     
     # Update status
     po.status_macro = to_status_db
@@ -1273,13 +1377,12 @@ async def update_manual_commission(
         )
     
     # Update commission rate in PO metadata
-    if not po.partition_metadata:
-        po.partition_metadata = {}
-    
-    po.partition_metadata["manual_commission_rate"] = float(request.manual_commission_rate)
-    po.partition_metadata["commission_justification"] = request.justification
-    po.partition_metadata["commission_updated_by"] = str(current_user.id)
-    po.partition_metadata["commission_updated_at"] = datetime.utcnow().isoformat()
+    meta = dict(po.partition_metadata) if po.partition_metadata else {}
+    meta["manual_commission_rate"] = float(request.manual_commission_rate)
+    meta["commission_justification"] = request.justification
+    meta["commission_updated_by"] = str(current_user.id)
+    meta["commission_updated_at"] = datetime.utcnow().isoformat()
+    po.partition_metadata = meta
     
     # If updating specific item
     if request.item_id:
@@ -1295,14 +1398,14 @@ async def update_manual_commission(
                 detail=f"Item {request.item_id} não encontrado"
             )
         
-        # Update item's manual commission rate
-        if not item.extra_metadata:
-            item.extra_metadata = {}
-        
-        item.extra_metadata["manual_commission_rate"] = float(request.manual_commission_rate)
-        item.extra_metadata["commission_justification"] = request.justification
-        item.extra_metadata["commission_updated_by"] = str(current_user.id)
-        item.extra_metadata["commission_updated_at"] = datetime.utcnow().isoformat()
+        # Update item's manual commission rate with explicit dictionary reassignment for mutability tracking
+        item_meta = dict(item.extra_metadata) if item.extra_metadata else {}
+        item_meta["manual_commission_rate"] = float(request.manual_commission_rate)
+        item_meta["commission_justification"] = request.justification
+        item_meta["commission_updated_by"] = str(current_user.id)
+        item_meta["commission_updated_at"] = datetime.utcnow().isoformat()
+        item.extra_metadata = item_meta
+        flag_modified(item, "extra_metadata")
     
     po.updated_at = datetime.utcnow()
     from sqlalchemy.orm.attributes import flag_modified
@@ -1394,7 +1497,7 @@ async def update_logistics_checklist(
     }
     
     meta["logistics_checklist"] = logistics_checklist
-    po.partition_metadata = meta
+    po.partition_metadata = dict(meta)
     po.updated_at = datetime.utcnow()
     
     # Check if all requirements are met
@@ -1521,9 +1624,11 @@ async def advance_po_status(
     
     current_status = po.status_macro
     # Expedition Dual-Phase Switch (The 'Fabio Monteiro' Rule):
-    # Phase A (🚛 AJUSTE DE FRETE): If the PO came from a partition request, transition back to MANUFACTURING on advance
-    if current_status == "SHIPPING" and po.parent_po_id is not None:
-        next_status = "MANUFACTURING"
+    # Phase A (🚛 AJUSTE DE FRETE): If the PO came from a partition request, transition back to PCP (APPROVED) on advance
+    # ONLY if freight has not been allocated yet
+    meta = po.partition_metadata or {}
+    if current_status == "SHIPPING" and po.parent_po_id is not None and not meta.get("freight_allocated"):
+        next_status = "APPROVED"
     else:
         next_status = STATUS_FLOW.get(current_status, {}).get("next")
     
@@ -1553,10 +1658,10 @@ async def advance_po_status(
         pass  # Add production-specific validations if needed
     
     elif current_status == "SHIPPING":
-        # Only validate NFE, carrier, and checklist if standard Phase B (parent_po_id is None)
-        if po.parent_po_id is None:
+        # Only validate NFE, carrier, and checklist if standard Phase B (parent_po_id is None or freight has been allocated)
+        meta = po.partition_metadata or {}
+        if po.parent_po_id is None or meta.get("freight_allocated"):
             # Expedition must have NFE number, carrier, and checklist complete
-            meta = po.partition_metadata or {}
             nfe = meta.get("numero_nfe") or ""
             carrier = meta.get("transportadora") or ""
             if not nfe:
@@ -1728,6 +1833,9 @@ from typing import Dict, List
 class CreditApprovalBody(BaseModel):
     audit_comment: str
 
+class CommercialRejectBody(BaseModel):
+    justification: str
+
 @router.post("/pos/{po_id}/approve-credit")
 async def approve_credit(
     po_id: str,
@@ -1755,6 +1863,7 @@ async def approve_credit(
     meta = dict(po.partition_metadata)
     meta["audit_comment"] = body.audit_comment
     meta["block_status"] = "LIBERADO"
+    meta["credit_reproved"] = False
     po.partition_metadata = meta
     
     for item in po.items:
@@ -1807,6 +1916,7 @@ async def maintain_block(
     meta = dict(po.partition_metadata)
     meta["audit_comment"] = body.audit_comment
     meta["block_status"] = "BLOQUEADO"
+    meta["credit_reproved"] = True
     po.partition_metadata = meta
     
     for item in po.items:
@@ -1831,6 +1941,64 @@ async def maintain_block(
     db.commit()
     db.refresh(po)
     return {"success": True, "message": "Bloqueio mantido. Pedido devolvido para o Comercial."}
+
+@router.post("/pos/{po_id}/commercial-reject")
+async def commercial_reject(
+    po_id: str,
+    body: CommercialRejectBody,
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if not body.justification or len(body.justification.strip()) < 10:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Justificativa de rejeição deve ter pelo menos 10 caracteres"
+        )
+        
+    po = db.query(PurchaseOrder).filter(
+        PurchaseOrder.id == po_id,
+        PurchaseOrder.tenant_id == current_user.tenant_id
+    ).first()
+    
+    if not po:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Pedido {po_id} não encontrado"
+        )
+        
+    from_status = po.status_macro
+    po.status_macro = "ARCHIVED"
+    po.updated_at = datetime.utcnow()
+    
+    if po.partition_metadata is None:
+        po.partition_metadata = {}
+    meta = dict(po.partition_metadata)
+    meta["rejection_flag"] = "REJEITADO COMERCIAL"
+    meta["commercial_rejection_reason"] = body.justification
+    po.partition_metadata = meta
+    
+    # Log status transition
+    log_po_status_transition(
+        db=db,
+        po=po,
+        from_status=from_status,
+        to_status="ARCHIVED",
+        current_user=current_user,
+        justification=f"REJEITADO COMERCIAL: {body.justification}",
+        extra_data={"action_type": "COMMERCIAL_REJECT", "rejection_flag": "REJEITADO COMERCIAL"}
+    )
+    
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(po, "partition_metadata")
+    db.commit()
+    db.refresh(po)
+    
+    return {
+        "success": True,
+        "message": "Pedido rejeitado e arquivado pelo Comercial com sucesso",
+        "po_id": po_id,
+        "status": po.status_macro
+    }
 
 class SuggestPartitionBody(BaseModel):
     po_id: Optional[str] = None
@@ -2299,12 +2467,6 @@ async def approve_partition(
 
     split_sum = body.freight_c1 + body.freight_c2
     
-    if abs(split_sum - parent_freight) > 0.01:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"A soma do frete dos filhos (R$ {split_sum:.4f}) deve ser igual ao frete do pai (R$ {parent_freight:.4f})"
-        )
-        
     # Apply high-precision freight splits
     children[0].shipping_cost = round(body.freight_c1, 4)
     children[1].shipping_cost = round(body.freight_c2, 4)
@@ -2315,9 +2477,20 @@ async def approve_partition(
     po.updated_at = datetime.utcnow()
     
     # Move children to SHIPPING (Expedição) for freight update - Zigue-Zague flow
+    from sqlalchemy.orm.attributes import flag_modified
     for child in children:
         child.status_macro = "SHIPPING"
         child.updated_at = datetime.utcnow()
+        meta = dict(child.partition_metadata or {})
+        meta["original_parent_freight"] = parent_freight
+        meta["current_phase"] = "FASE_A"
+        # Delete keys to kill the Awaiting Decision stamp
+        if "suggested_delivery_date" in meta:
+            del meta["suggested_delivery_date"]
+        if "partition_reason" in meta:
+            del meta["partition_reason"]
+        child.partition_metadata = meta
+        flag_modified(child, "partition_metadata")
         
     # Log parent transition
     log_po_status_transition(
@@ -2350,6 +2523,106 @@ async def approve_partition(
         "parent_po_id": po_id,
         "child1": {"id": str(children[0].id), "po_number": children[0].po_number, "freight": float(children[0].shipping_cost)},
         "child2": {"id": str(children[1].id), "po_number": children[1].po_number, "freight": float(children[1].shipping_cost)}
+    }
+
+class AllocateFreightBody(BaseModel):
+    freight_c1: float
+    freight_c2: float
+
+@router.post("/pos/{po_id}/allocate-freight")
+async def allocate_freight(
+    po_id: str,
+    body: AllocateFreightBody,
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Expedição allocates/confirms the freight split and advances the child PO.
+    """
+    po = db.query(PurchaseOrder).filter(
+        PurchaseOrder.id == po_id,
+        PurchaseOrder.tenant_id == current_user.tenant_id
+    ).first()
+    
+    if not po:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Pedido {po_id} não encontrado"
+        )
+        
+    if not po.parent_po_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Este pedido não é um lote particionado"
+        )
+        
+    # Get all sibling children of the parent PO
+    children = db.query(PurchaseOrder).filter(
+        PurchaseOrder.parent_po_id == po.parent_po_id,
+        PurchaseOrder.tenant_id == current_user.tenant_id
+    ).order_by(PurchaseOrder.created_at).all()
+    
+    if len(children) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Não foram encontrados os lotes filhos da partição"
+        )
+        
+    # Verify that the sum matches the parent's original freight (if parent has freight)
+    parent = db.query(PurchaseOrder).filter(PurchaseOrder.id == po.parent_po_id).first()
+    parent_freight = float(parent.shipping_cost or 0) if parent else 0.0
+    if parent_freight == 0 and parent and parent.items:
+        first_item = parent.items[0]
+        if first_item.extra_metadata:
+            meta_freight = first_item.extra_metadata.get("freight") or first_item.extra_metadata.get("Freight")
+            if meta_freight:
+                try:
+                    parent_freight = float(meta_freight)
+                except ValueError:
+                    pass
+                    
+    split_sum = body.freight_c1 + body.freight_c2
+    
+    # Apply freight splits to the children
+    children[0].shipping_cost = round(body.freight_c1, 4)
+    children[1].shipping_cost = round(body.freight_c2, 4)
+    
+    # Reassign to trigger JSONB mutation update on parent metadata if necessary
+    if parent:
+        parent.partition_metadata = dict(parent.partition_metadata or {})
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(parent, "partition_metadata")
+    
+    # Advance both children from SHIPPING to APPROVED (PCP stage)
+    for child in children:
+        if child.status_macro == "SHIPPING":
+            from_status = child.status_macro
+            child.status_macro = "APPROVED"
+            child.updated_at = datetime.utcnow()
+            
+            # Set freight allocated flag on child
+            meta = dict(child.partition_metadata or {})
+            meta["freight_allocated"] = True
+            meta["current_phase"] = "FASE_B"
+            child.partition_metadata = meta
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(child, "partition_metadata")
+            
+            # Log transition
+            log_po_status_transition(
+                db=db,
+                po=child,
+                from_status=from_status,
+                to_status="APPROVED",
+                current_user=current_user,
+                justification=f"Frete rateado/confirmado na Expedição (Lote C1: R$ {body.freight_c1:.2f}, Lote C2: R$ {body.freight_c2:.2f}). Movido para PCP.",
+                extra_data={"action_type": "ALLOCATE_FREIGHT_CHILD", "freight_c1": body.freight_c1, "freight_c2": body.freight_c2}
+            )
+            
+    db.commit()
+    return {
+        "success": True,
+        "message": "Frete rateado e confirmado com sucesso. Lotes enviados para PCP."
     }
 
 
@@ -2394,7 +2667,7 @@ async def pause_material(
         from_status=from_status,
         to_status="WAITING_MATERIAL",
         current_user=current_user,
-        justification="Aguardar Insumo: SLA de produção congelado.",
+        justification="Aguardar Insumo.",
         extra_data={"action_type": "PAUSE_MATERIAL"}
     )
     
@@ -2466,7 +2739,7 @@ async def resume_material(
         duration_str += f"{mins}m "
     duration_str += f"{secs}s"
     
-    justification = f"SLA retomado. O pedido ficou pausado por {duration_str.strip()}"
+    justification = f"SLA em curso. Insumo recebido após {duration_str.strip()}."
     
     # Log status transition
     log_po_status_transition(

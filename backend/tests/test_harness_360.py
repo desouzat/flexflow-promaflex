@@ -729,8 +729,8 @@ class TestConfirmStagingEndpoint:
             .first()
         )
         assert new_po is not None
-        # Assert macro status is ANALISE_CREDITO because of the blocked item with justification
-        assert new_po.status_macro == "ANALISE_CREDITO"
+        # Assert macro status is FINANCE because of the blocked item with justification
+        assert new_po.status_macro == "FINANCE"
         # Assert client_name dynamic property is correctly populated via partition_metadata
         assert new_po.client_name == "Nova Promaflex SA"
         # Assert shipping cost matches freight + additional costs

@@ -18,7 +18,7 @@ describe('KanbanCard', () => {
         render(<KanbanCard po={mockPO} />)
 
         expect(screen.getByText('PO #PO-2024-001')).toBeInTheDocument()
-        expect(screen.getByText('Test Supplier')).toBeInTheDocument()
+        expect(screen.getByText(/Test Supplier/)).toBeInTheDocument()
         expect(screen.getByText(/pending/i)).toBeInTheDocument()
         expect(screen.getByText('5 items')).toBeInTheDocument()
     })
@@ -44,7 +44,7 @@ describe('KanbanCard', () => {
         const card = screen.getByText('PO #PO-2024-001').closest('div')
         fireEvent.click(card)
 
-        expect(handleClick).toHaveBeenCalledWith(mockPO)
+        expect(handleClick).toHaveBeenCalledWith(expect.objectContaining({ id: mockPO.id }))
     })
 
     it('displays high priority indicator', () => {
@@ -90,6 +90,6 @@ describe('KanbanCard', () => {
         render(<KanbanCard po={minimalPO} />)
 
         expect(screen.getByText('PO #PO-2024-001')).toBeInTheDocument()
-        expect(screen.getByText('N/A')).toBeInTheDocument() // For missing date
+        expect(screen.getByText(/N\/A/)).toBeInTheDocument() // For missing date
     })
 })

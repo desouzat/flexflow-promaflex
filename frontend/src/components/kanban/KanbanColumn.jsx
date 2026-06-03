@@ -28,12 +28,12 @@ const KanbanColumn = ({ title, status, pos, onCardClick, onMoveCard, color = 'gr
     }
 
     return (
-        <div className="flex flex-col h-full min-w-[320px] max-w-[320px]">
+        <div className="flex flex-col h-full min-w-[325px] max-w-[340px]">
             {/* Column Header */}
             <div className={`flex items-center justify-between px-4 py-3 rounded-t-lg ${headerColorClasses[color]}`}>
-                <div className="flex items-center gap-2">
-                    <h2 className="font-semibold text-sm">{title}</h2>
-                    <span className="px-2 py-0.5 bg-white bg-opacity-50 rounded-full text-xs font-medium">
+                <div className="flex items-center gap-2 overflow-hidden">
+                    <h2 className="font-semibold text-sm tracking-tight whitespace-nowrap">{title}</h2>
+                    <span className="px-2 py-0.5 bg-white bg-opacity-50 rounded-full text-xs font-medium flex-shrink-0">
                         {pos.length}
                     </span>
                 </div>

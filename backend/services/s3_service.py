@@ -208,26 +208,26 @@ class S3Service:
     
     def get_default_mapping(self) -> ImportMapping:
         """
-        Get default column mapping for ONET files (19-field structure).
+        Get default column mapping for ONET files (22-field structure).
         
-        This mapping covers the complete ONET format with all 19 fields:
-        Pedido, Cliente, SKU, Descrição, Qtd, Unidade, Largura, Comprimento,
-        Lead Time, Data Entrega, Data Faturamento, % ICMS, Bloqueio, Saldo,
-        Atraso, Condição Pagamento, Frete, Vendedor, IPI
+        This mapping covers the complete ONET format with all 22 fields:
+        Nº do Pedido, Cliente, Id Produto, Descr. Produto, Qtd, Unidade, Largura, Comprimento,
+        Lead Time, Data Entrega, Data Faturamento, % ICMS, Bloqueio Faturamento, Saldo,
+        Atraso, Cond.Pgto, Frete, Vendedor, IPI, VlUnit, Total Item, Vl.Pedido
         
         Returns:
-            ImportMapping with default field mappings for 19-field ONET structure
+            ImportMapping with default field mappings for 22-field ONET structure
         """
         return ImportMapping(
             mappings=[
                 # Core identification fields (required)
-                ColumnMapping(column_name="Pedido", field_type=ImportFieldType.PO_NUMBER),
+                ColumnMapping(column_name="Nº do Pedido", field_type=ImportFieldType.PO_NUMBER),
                 ColumnMapping(column_name="Cliente", field_type=ImportFieldType.CLIENT_NAME),
-                ColumnMapping(column_name="SKU", field_type=ImportFieldType.SKU),
+                ColumnMapping(column_name="Id Produto", field_type=ImportFieldType.SKU),
                 ColumnMapping(column_name="Qtd", field_type=ImportFieldType.QUANTITY),
                 
                 # Optional ONET fields
-                ColumnMapping(column_name="Descrição", field_type=ImportFieldType.DESCRIPTION),
+                ColumnMapping(column_name="Descr. Produto", field_type=ImportFieldType.DESCRIPTION),
                 ColumnMapping(column_name="Unidade", field_type=ImportFieldType.UNIT),
                 ColumnMapping(column_name="Largura", field_type=ImportFieldType.WIDTH),
                 ColumnMapping(column_name="Comprimento", field_type=ImportFieldType.LENGTH),
@@ -235,13 +235,18 @@ class S3Service:
                 ColumnMapping(column_name="Data Entrega", field_type=ImportFieldType.DELIVERY_DATE),
                 ColumnMapping(column_name="Data Faturamento", field_type=ImportFieldType.BILLING_DATE),
                 ColumnMapping(column_name="% ICMS", field_type=ImportFieldType.ICMS_PERCENT),
-                ColumnMapping(column_name="Bloqueio", field_type=ImportFieldType.BLOCK_STATUS),
+                ColumnMapping(column_name="Bloqueio Faturamento", field_type=ImportFieldType.BLOCK_STATUS),
                 ColumnMapping(column_name="Saldo", field_type=ImportFieldType.BALANCE),
                 ColumnMapping(column_name="Atraso", field_type=ImportFieldType.DELAY),
-                ColumnMapping(column_name="Condição Pagamento", field_type=ImportFieldType.PAYMENT_TERMS),
+                ColumnMapping(column_name="Cond.Pgto", field_type=ImportFieldType.PAYMENT_TERMS),
                 ColumnMapping(column_name="Frete", field_type=ImportFieldType.FREIGHT),
                 ColumnMapping(column_name="Vendedor", field_type=ImportFieldType.SALESPERSON),
                 ColumnMapping(column_name="IPI", field_type=ImportFieldType.IPI),
+                
+                # Financial Value fields (22-field structure)
+                ColumnMapping(column_name="VlUnit", field_type=ImportFieldType.UNIT_VALUE),
+                ColumnMapping(column_name="Total Item", field_type=ImportFieldType.ITEM_TOTAL_VALUE),
+                ColumnMapping(column_name="Vl.Pedido", field_type=ImportFieldType.PO_TOTAL_VALUE),
             ]
         )
     

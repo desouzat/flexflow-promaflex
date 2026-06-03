@@ -300,7 +300,7 @@ class TestS3Integration:
             
             mapping = service.get_default_mapping()
             
-            assert len(mapping.mappings) >= 9
+            assert len(mapping.mappings) == 22
             
             # Verify all required fields are mapped
             field_types = [m.field_type for m in mapping.mappings]
@@ -309,6 +309,9 @@ class TestS3Integration:
             assert 'sku' in field_types
             assert 'quantity' in field_types
             assert 'block_status' in field_types
+            assert 'unit_value' in field_types
+            assert 'item_total_value' in field_types
+            assert 'po_total_value' in field_types
 
 
 def test_mock_s3_workflow():

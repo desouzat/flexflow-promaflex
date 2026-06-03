@@ -712,5 +712,158 @@ def test_routing_logic(auth_headers):
     assert blocked_po["status_macro"] in ("FINANCE", "Financeiro")
 
 
+def test_partition_approval_and_freight_allocation(auth_headers):
+    """Test the complete partition flow: suggest partition, approve to SHIPPING (FASE_A), and allocate freight (FASE_B/APPROVED)"""
+    from backend.database import SessionLocal
+    from backend.models import PurchaseOrder, OrderItem
+    db = SessionLocal()
+    try:
+        to_delete = db.query(PurchaseOrder).filter(PurchaseOrder.po_number.like("po-part-999%")).all()
+        for po in to_delete:
+            db.query(OrderItem).filter(OrderItem.po_id == po.id).delete()
+            db.delete(po)
+        db.commit()
+    finally:
+        db.close()
+
+    # 1. Create a clean PO that goes to APPROVED (PCP) status
+    payload = {
+        "pos": [
+            {
+                "po_number": "po-part-999",
+                "client_name": "Partition Client Ltd",
+                "freight_cost": 250.0,
+                "additional_costs": 0.0,
+                "po_total_value": 2000.0,
+                "packaging_type": "Palete",
+                "items": [
+                    {
+                        "sku": "SKU-PART-1",
+                        "quantity": 10,
+                        "price_unit": 100.0,
+                        "unit_value": 100.0,
+                        "item_total_value": 1000.0,
+                        "block_status": "LIBERADO",
+                        "extra_metadata": {
+                            "is_personalized": False,
+                            "is_new_client": False
+                        }
+                    },
+                    {
+                        "sku": "SKU-PART-2",
+                        "quantity": 10,
+                        "price_unit": 100.0,
+                        "unit_value": 100.0,
+                        "item_total_value": 1000.0,
+                        "block_status": "LIBERADO",
+                        "extra_metadata": {
+                            "is_personalized": False,
+                            "is_new_client": False
+                        }
+                    }
+                ]
+            }
+        ]
+    }
+    
+    response = client.post(
+        "/api/import/confirm-staging",
+        headers={"Authorization": f"Bearer {auth_headers}"} if isinstance(auth_headers, str) else auth_headers,
+        json=payload
+    )
+    assert response.status_code == 200
+    
+    # Get the imported PO id
+    response_pos = client.get(
+        "/api/kanban/pos",
+        headers={"Authorization": f"Bearer {auth_headers}"} if isinstance(auth_headers, str) else auth_headers
+    )
+    assert response_pos.status_code == 200
+    pos_list = response_pos.json()
+    parent_po = next((po for po in pos_list if po["po_number"] == "po-part-999"), None)
+    assert parent_po is not None
+    assert parent_po["status_macro"] in ("APPROVED", "PCP")
+    
+    # 2. Suggest a partition (PCP action)
+    suggest_payload = {
+        "po_id": parent_po["id"],
+        "reason": "Test partition suggestion justification of 10+ characters",
+        "new_delivery_date": "2026-06-15T00:00:00Z",
+        "qty_splits": {
+            "SKU-PART-1": [5, 5],
+            "SKU-PART-2": [5, 5]
+        }
+    }
+    response_suggest = client.post(
+        "/api/kanban/suggest-partition",
+        headers={"Authorization": f"Bearer {auth_headers}"} if isinstance(auth_headers, str) else auth_headers,
+        json=suggest_payload
+    )
+    assert response_suggest.status_code == 200
+    
+    # 3. Approve partition via move-status or approve-partition. Let's use move-status to move to SHIPPING (Expedição)
+    response_move = client.post(
+        "/api/kanban/move-status",
+        headers={"Authorization": f"Bearer {auth_headers}"} if isinstance(auth_headers, str) else auth_headers,
+        json={
+            "po_id": parent_po["id"],
+            "to_status": "SHIPPING"
+        }
+    )
+    assert response_move.status_code == 200
+    
+    # 4. Fetch the children POs
+    response_pos = client.get(
+        "/api/kanban/pos",
+        headers={"Authorization": f"Bearer {auth_headers}"} if isinstance(auth_headers, str) else auth_headers
+    )
+    pos_list = response_pos.json()
+    
+    # Sibling children have parent_po_id equal to the parent PO
+    children = [po for po in pos_list if po.get("parent_po_id") == parent_po["id"]]
+    assert len(children) == 2
+    
+    # Check that children have correct status_macro = SHIPPING, original_parent_freight and current_phase = FASE_A
+    for child in children:
+        assert child["status_macro"] in ("SHIPPING", "Faturamento/Expedição")
+        meta = child.get("partition_metadata") or {}
+        assert meta.get("original_parent_freight") == 250.0
+        assert meta.get("current_phase") == "FASE_A"
+        # Check that decision keys are deleted
+        assert "suggested_delivery_date" not in meta
+        assert "partition_reason" not in meta
+        
+    # Check parent status is ARCHIVED_PARTITIONED
+    response_parent = client.get(
+        f"/api/kanban/pos/{parent_po['id']}",
+        headers={"Authorization": f"Bearer {auth_headers}"} if isinstance(auth_headers, str) else auth_headers
+    )
+    assert response_parent.json()["status_macro"] in ("ARCHIVED_PARTITIONED", "Arquivado")
+    
+    # 5. Allocate freight for partition children
+    response_allocate = client.post(
+        f"/api/kanban/pos/{children[0]['id']}/allocate-freight",
+        headers={"Authorization": f"Bearer {auth_headers}"} if isinstance(auth_headers, str) else auth_headers,
+        json={
+            "freight_c1": 125.0,
+            "freight_c2": 125.0
+        }
+    )
+    assert response_allocate.status_code == 200
+    
+    # Check that children are now APPROVED (PCP stage) and current_phase is FASE_B
+    for child in children:
+        response_child = client.get(
+            f"/api/kanban/pos/{child['id']}",
+            headers={"Authorization": f"Bearer {auth_headers}"} if isinstance(auth_headers, str) else auth_headers
+        )
+        child_data = response_child.json()
+        assert child_data["status_macro"] in ("APPROVED", "PCP")
+        meta = child_data.get("partition_metadata") or {}
+        assert meta.get("current_phase") == "FASE_B"
+        assert meta.get("freight_allocated") is True
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])
+

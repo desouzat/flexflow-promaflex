@@ -27,7 +27,14 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
         if (!val || val === 'null' || val === 'None' || String(val).trim() === '') {
             return 'Desconhecido';
         }
-        return val;
+        let strVal = String(val);
+        if (strVal.includes('Fornecedor')) {
+            strVal = strVal.replace(/Fornecedor/g, 'Cliente');
+        }
+        if (strVal.includes('fornecedor')) {
+            strVal = strVal.replace(/fornecedor/g, 'cliente');
+        }
+        return strVal;
     };
 
     const safepo = {
@@ -113,11 +120,24 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
 
     const formatDate = (dateString) => {
         if (!dateString) return 'N/A'
-        if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
-            const [year, month, day] = dateString.split('-')
+        if (/^\d{4}-\d{2}-\d{2}$/.test(dateString) || /^\d{4}-\d{2}-\d{2}T.*$/.test(dateString)) {
+            const cleanDate = dateString.split('T')[0]
+            const [year, month, day] = cleanDate.split('-')
             return `${day}/${month}/${year}`
         }
-        return new Date(dateString).toLocaleDateString('pt-BR')
+        if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateString)) {
+            return dateString
+        }
+        try {
+            const d = new Date(dateString)
+            if (isNaN(d.getTime())) return dateString
+            const day = String(d.getDate()).padStart(2, '0')
+            const month = String(d.getMonth() + 1).padStart(2, '0')
+            const year = d.getFullYear()
+            return `${day}/${month}/${year}`
+        } catch (e) {
+            return dateString
+        }
     }
 
     // Get strategic indicators from metadata
@@ -191,10 +211,16 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
         return Math.max(0, Math.min(100, percent))
     }, [safepo.created_at, safepo.expected_delivery_date, safepo.data_limite, isReplacement])
 
-    // Check if this PO is waiting for partition decision
-    const isWaitingPartition = safepo.extra_metadata?.waiting_partition ||
-        safepo.status_macro === 'WAITING_COMMERCIAL_PARTITION' ||
-        safepo.partition_reason
+    // Check if this PO is waiting for partition decision - excluded if waiting material, shipping, or archived
+    const isWaitingPartition = safepo.status_macro !== 'WAITING_MATERIAL' &&
+        safepo.status_macro !== 'SHIPPING' &&
+        !['ARCHIVED', 'ARCHIVED_PARTITIONED', 'COMPLETED'].includes(safepo.status_macro) &&
+        safepo.status !== 'Faturamento/Expedição' &&
+        safepo.status !== 'Concluídos' && (
+            safepo.extra_metadata?.waiting_partition ||
+            safepo.status_macro === 'WAITING_COMMERCIAL_PARTITION' ||
+            safepo.partition_reason
+        )
 
     if (compactView) {
         return (
@@ -227,15 +253,23 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
                     </div>
                 )}
 
+                {safepo.extra_metadata?.credit_reproved === true && (safepo.status_macro === 'SUBMITTED' || safepo.status === 'Comercial') && (
+                    <div className="mb-2">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-red-100 text-red-800 border border-red-300 animate-pulse">
+                            🚫 CRÉDITO REPROVADO
+                        </span>
+                    </div>
+                )}
+
                 {safepo.status_macro === 'SHIPPING' && (
                     <div className="mb-2">
-                        {safepo.parent_po_id ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-amber-50 text-amber-800 border border-amber-200" title="Fase A: Ajuste de Frete">
-                                🚛 AJUSTE FRETE (Fase A)
+                        {(safepo.partition_metadata?.current_phase === 'FASE_A' || safepo.extra_metadata?.current_phase === 'FASE_A') ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-amber-50 text-amber-800 border border-amber-200 animate-pulse" title="FASE A: FRETE">
+                                🚛 FASE A: FRETE
                             </span>
                         ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-blue-50 text-blue-800 border border-blue-200" title="Fase B: Despacho Final">
-                                📦 DESPACHO (Fase B)
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-blue-50 text-blue-800 border border-blue-200" title="FASE B: DESPACHO">
+                                📦 FASE B: DESPACHO
                             </span>
                         )}
                     </div>
@@ -253,12 +287,12 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
                     Cliente: {safepo.client_name}
                 </p>
                 <div className="flex items-center justify-between text-xs">
-                    <span className="font-medium text-gray-900">
-                        {formatCurrency(safepo.total_value)}
+                    <span className="font-semibold text-gray-900">
+                        Vl.Pedido: {formatCurrency(safepo.total_value)}
                     </span>
-                    <span className="text-gray-500 font-medium flex items-center gap-1">
+                    <span className="text-gray-500 font-medium flex items-center gap-1" title="Prazo interno de segurança (2 dias de margem sobre o ONET)">
                         <Calendar className="w-3.5 h-3.5 text-gray-400" />
-                        {formatDate(safepo.expected_delivery_date)}
+                        Dt.Entrega Estimada: {formatDate(safepo.expected_delivery_date)}
                     </span>
                 </div>
 
@@ -310,20 +344,29 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
                 </div>
             )}
 
+            {/* Red Stamp for Credit Reproved */}
+            {safepo.extra_metadata?.credit_reproved === true && (safepo.status_macro === 'SUBMITTED' || safepo.status === 'Comercial') && (
+                <div className="mb-3 px-3 py-2 bg-red-100 border border-red-300 rounded-lg flex items-center gap-2 animate-pulse" title="🚫 CRÉDITO REPROVADO">
+                    <span className="text-xs font-extrabold text-red-700 flex items-center gap-1.5">
+                        <span>🚫</span> CRÉDITO REPROVADO
+                    </span>
+                </div>
+            )}
+
             {/* Dual-Phase Badge for SHIPPING stage */}
             {safepo.status_macro === 'SHIPPING' && (
-                safepo.parent_po_id ? (
-                    <div className="mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg flex items-center gap-2" title="Fase A: Ajuste de Frete decorrente de partição de lote. Requer confirmação para seguir para Produção.">
+                (safepo.partition_metadata?.current_phase === 'FASE_A' || safepo.extra_metadata?.current_phase === 'FASE_A') ? (
+                    <div className="mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg flex items-center gap-2" title="FASE A: FRETE">
                         <Tag className="w-4 h-4 text-amber-600 animate-pulse" />
-                        <span className="text-xs font-semibold text-amber-700">
-                            🚛 Fase A: AJUSTE DE FRETE
+                        <span className="text-xs font-bold text-yellow-850">
+                            🚛 FASE A: FRETE
                         </span>
                     </div>
                 ) : (
-                    <div className="mb-3 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg flex items-center gap-2" title="Fase B: Despacho Final. Pedido concluído na Produção pronto para expedição e faturamento.">
+                    <div className="mb-3 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg flex items-center gap-2" title="FASE B: DESPACHO">
                         <Truck className="w-4 h-4 text-blue-600" />
-                        <span className="text-xs font-semibold text-blue-700">
-                            📦 Fase B: DESPACHO FINAL
+                        <span className="text-xs font-bold text-blue-850">
+                            📦 FASE B: DESPACHO
                         </span>
                     </div>
                 )
@@ -378,15 +421,15 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
             <div className="space-y-2">
                 <div className="flex items-center gap-2 text-sm">
                     <DollarSign className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                    <span className="font-medium text-gray-900">
-                        {formatCurrency(safepo.total_value)}
+                    <span className="font-semibold text-gray-900">
+                        Vl.Pedido: {formatCurrency(safepo.total_value)}
                     </span>
                 </div>
 
-                <div className="flex items-center gap-2 text-sm text-gray-600">
+                <div className="flex items-center gap-2 text-sm text-gray-600" title="Prazo interno de segurança (2 dias de margem sobre o ONET)">
                     <Calendar className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                    <span className="text-xs">
-                        {formatDate(safepo.expected_delivery_date)}
+                    <span className="text-xs font-medium text-gray-700">
+                        Dt.Entrega Estimada: {formatDate(safepo.expected_delivery_date)}
                     </span>
                 </div>
 

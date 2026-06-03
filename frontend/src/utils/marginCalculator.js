@@ -78,9 +78,8 @@ export function calculateDynamicMargin({
     const parsedCommissionRate = parseFloat(commissionRate) || 0;
     const parsedTaxRate = parseFloat(taxRate) || 22.25;
 
-    // 1. VP (Present Value) = Gross / (1 + (0.025 * (Days / 30)))
-    // Internal precision: at least 4 decimal places
-    const vpFactor = 1 + (0.025 * (paymentDays / 30));
+    // 1. VP (Present Value) = Gross / (1.025 ** (paymentDays / 30))
+    const vpFactor = Math.pow(1.025, paymentDays / 30);
     const vp = parseFloat((parsedGross / vpFactor).toFixed(4));
 
     // 2. Taxes = VP * taxRate%
@@ -182,7 +181,7 @@ export function calculatePOMargins(po) {
         const itemGross = priceUnit * qty;
         const days = parsePaymentTermsToDays(item.payment_terms || po.payment_terms || po.extra_metadata?.payment_terms);
         
-        const vpFactor = 1 + (0.025 * (days / 30));
+        const vpFactor = Math.pow(1.025, days / 30);
         const itemVP = itemGross / vpFactor;
         const itemTaxes = itemVP * 0.2225;
 

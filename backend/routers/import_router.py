@@ -846,7 +846,8 @@ async def confirm_staging(
                     "is_export": is_export,
                     "is_replacement": is_replacement,
                     "customization_notes": customization_notes,
-                    "attachment_path": attachment_path
+                    "attachment_path": attachment_path,
+                    "additional_costs": po.additional_costs
                 }
             )
             db.add(new_po)
@@ -875,6 +876,7 @@ async def confirm_staging(
                     "attachment_filename": item.extra_metadata.attachment_filename if item.extra_metadata else None,
                     "apply_sla_reduction": item.extra_metadata.apply_sla_reduction if item.extra_metadata else False,
                     "finance_justification": item.extra_metadata.finance_justification if item.extra_metadata else None,
+                    "additional_costs": po.additional_costs,
                     
                     "block_status": item.block_status,
                     "balance": item.balance,

@@ -22,7 +22,7 @@ def test_status_flow_mapping():
         "SUBMITTED": "APPROVED",
         "APPROVED": "MANUFACTURING",
         "MANUFACTURING": "SHIPPING",
-        "SHIPPING": "FINANCE",
+        "SHIPPING": "ARCHIVED",
         "FINANCE": "COMPLETED",
         "COMPLETED": None,
         "WAITING_COMMERCIAL_PARTITION": "APPROVED"
@@ -126,8 +126,7 @@ def test_valid_transitions():
         "APPROVED",
         "MANUFACTURING",
         "SHIPPING",
-        "FINANCE",
-        "COMPLETED"
+        "ARCHIVED"
     ]
     
     for i in range(len(lifecycle_path) - 1):

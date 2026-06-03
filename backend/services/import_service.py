@@ -25,34 +25,46 @@ from backend.schemas.import_schema import (
     ImportResponse
 )
 from backend.utils.number_utils import clean_brazilian_number
+
+def clean_integer_string(val: Any) -> Optional[str]:
+    if val is None or pd.isna(val):
+        return None
+    s = str(val).strip()
+    if not s:
+        return None
+    if ',' in s:
+        s = s.replace('.', '').replace(',', '.')
+    elif s.count('.') > 1:
+        s = s.replace('.', '')
+    return s
 from backend.schemas.import_schema import ImportFieldType
 
-UNIT_VALUE_ALIASES = ["Vl.Unit", "Vl Unit", "Preço Unitário", "Preco Unitario", "Unit Price", "Unit Value"]
-ITEM_TOTAL_VALUE_ALIASES = ["Total Item", "Total do Item", "Item Total", "Valor do Item", "Valor Total Item", "Item Total Value"]
-PO_TOTAL_VALUE_ALIASES = ["Valor Total do Pedido", "Total do Pedido", "Valor Total Pedido", "Total Pedido", "PO Total", "PO Total Value"]
+UNIT_VALUE_ALIASES = ["VlUnit", "Vl.Unit", "Vl Unit", "Preço Unitário", "Preco Unitario", "Unit Price", "Unit Value"]
+ITEM_TOTAL_VALUE_ALIASES = ["Total Item", "Total do Item", "Item Total", "Valor do Item", "Valor Total Item", "Item Total Value", "Custo Total"]
+PO_TOTAL_VALUE_ALIASES = ["Vl.Pedido", "Valor Total do Pedido", "Total do Pedido", "Valor Total Pedido", "Total Pedido", "PO Total", "PO Total Value"]
 
 FIELD_ALIASES = {
-    ImportFieldType.PO_NUMBER: ["Pedido", "Nº Pedido", "Num Pedido", "PO Number", "PO_Number"],
+    ImportFieldType.PO_NUMBER: ["Nº do Pedido", "Pedido", "Nº Pedido", "Num Pedido", "PO Number", "PO_Number"],
     ImportFieldType.CLIENT_NAME: ["Cliente", "Nome Cliente", "Client Name", "Client"],
-    ImportFieldType.SKU: ["SKU", "Código", "Cod", "Product SKU", "Item SKU"],
+    ImportFieldType.SKU: ["Id Produto", "SKU", "Código", "Cod", "Product SKU", "Item SKU"],
     ImportFieldType.QUANTITY: ["Qtd", "Quantidade", "Qty", "Quantity"],
-    ImportFieldType.DESCRIPTION: ["Descrição", "Descricao", "Description", "Desc"],
+    ImportFieldType.DESCRIPTION: ["Descr. Produto", "Descrição", "Descricao", "Description", "Desc"],
     ImportFieldType.UNIT: ["Unidade", "Un", "Unit"],
     ImportFieldType.WIDTH: ["Largura", "Width"],
     ImportFieldType.LENGTH: ["Comprimento", "Length"],
     ImportFieldType.LEAD_TIME: ["Lead Time", "LeadTime", "Prazo"],
-    ImportFieldType.DELIVERY_DATE: ["Data Entrega", "Delivery Date", "Dt Entrega"],
-    ImportFieldType.BILLING_DATE: ["Data Faturamento", "Billing Date", "Dt Faturamento"],
+    ImportFieldType.DELIVERY_DATE: ["Data Entrega", "Delivery Date", "Dt Entrega", "Dt.Entrega"],
+    ImportFieldType.BILLING_DATE: ["Data Faturamento", "Billing Date", "Dt Faturamento", "Dt.Faturamento"],
     ImportFieldType.ICMS_PERCENT: ["% ICMS", "ICMS", "ICMS%"],
-    ImportFieldType.IPI: ["IPI"],
-    ImportFieldType.FREIGHT: ["Frete", "Freight"],
-    ImportFieldType.PAYMENT_TERMS: ["Condição Pagamento", "Condicao Pagamento", "Payment Terms", "Pagamento"],
+    ImportFieldType.IPI: ["IPI", "Vl. IPI"],
+    ImportFieldType.FREIGHT: ["Frete", "Freight", "Vl.Frete"],
+    ImportFieldType.PAYMENT_TERMS: ["Cond.Pgto", "Condição Pagamento", "Condicao Pagamento", "Payment Terms", "Pagamento"],
     ImportFieldType.UNIT_VALUE: UNIT_VALUE_ALIASES,
     ImportFieldType.ITEM_TOTAL_VALUE: ITEM_TOTAL_VALUE_ALIASES,
     ImportFieldType.PO_TOTAL_VALUE: PO_TOTAL_VALUE_ALIASES,
-    ImportFieldType.BLOCK_STATUS: ["Bloqueio", "Status Bloqueio", "Block Status", "Block"],
-    ImportFieldType.BALANCE: ["Saldo", "Balance"],
-    ImportFieldType.DELAY: ["Atraso", "Delay"],
+    ImportFieldType.BLOCK_STATUS: ["Bloqueio Faturamento", "Bloqueio", "Status Bloqueio", "Block Status", "Block"],
+    ImportFieldType.BALANCE: ["Saldo", "Balance", "Saldo Devedor"],
+    ImportFieldType.DELAY: ["Atraso", "Delay", "Dias Médio Atraso"],
     ImportFieldType.SALESPERSON: ["Vendedor", "Salesperson", "Sales Person"]
 }
 
@@ -85,23 +97,35 @@ class ImportService:
         If a mapped column does not exist in the dataframe, search the dataframe's
         headers for any aliases matching the field type, and update the mapping.
         
-        Note: Restricted to financial fields to avoid overriding explicit user/test mappings
-        for identifier fields.
+        Flexible Header Matching: Ensures mapping logic is case-insensitive and trimmed.
+        Validation Bypass: If a column is missing but has a valid alias present in the file,
+        the mapping is updated so validation passes.
         """
-        allowed_fields = {
-            ImportFieldType.UNIT_VALUE,
-            ImportFieldType.ITEM_TOTAL_VALUE,
-            ImportFieldType.PO_TOTAL_VALUE
-        }
         df_columns = list(df.columns)
+        df_columns_stripped_lower = [str(col).strip().lower() for col in df_columns]
+        
         for m in mapping.mappings:
-            if m.field_type in allowed_fields and m.column_name not in df_columns:
-                aliases = FIELD_ALIASES.get(m.field_type, [])
-                for col in df_columns:
-                    col_str = str(col).strip()
-                    if col_str in aliases or col_str.lower() in [a.lower() for a in aliases]:
-                        m.column_name = col
-                        break
+            col_name_str = str(m.column_name).strip()
+            
+            # 1. Exact match (case-sensitive, trimmed)
+            if col_name_str in df_columns:
+                m.column_name = col_name_str
+                continue
+                
+            # 2. Case-insensitive and trimmed match
+            if col_name_str.lower() in df_columns_stripped_lower:
+                idx = df_columns_stripped_lower.index(col_name_str.lower())
+                m.column_name = df_columns[idx]
+                continue
+                
+            # 3. Check aliases for this field type
+            aliases = FIELD_ALIASES.get(m.field_type, [])
+            for col in df_columns:
+                col_str = str(col).strip()
+                # Compare case-insensitively and trimmed
+                if col_str.lower() in [a.strip().lower() for a in aliases]:
+                    m.column_name = col
+                    break
     
     def read_file(self, file_content: bytes, file_name: str) -> pd.DataFrame:
         """
@@ -134,7 +158,7 @@ class ImportService:
                     raise ValueError("Could not decode CSV file with any supported encoding")
             
             elif file_name.lower().endswith(('.xlsx', '.xls')):
-                df = pd.read_excel(io.BytesIO(file_content))
+                df = pd.read_excel(io.BytesIO(file_content), engine='openpyxl')
             
             else:
                 raise ValueError(f"Unsupported file type: {file_name}")
@@ -288,7 +312,9 @@ class ImportService:
             )
         
         try:
-            int_value = int(float(value))  # Handle "10.0" strings
+            cleaned = clean_brazilian_number(value)
+            val_to_parse = cleaned if cleaned is not None else value
+            int_value = int(float(val_to_parse))  # Handle "10.0" strings
             
             if int_value <= 0:
                 return None, ImportRowError(
@@ -479,7 +505,9 @@ class ImportService:
             lead_col = field_to_column[ImportFieldType.LEAD_TIME]
             if not pd.isna(row[lead_col]):
                 try:
-                    data['lead_time'] = int(float(row[lead_col]))
+                    cleaned = clean_integer_string(row[lead_col])
+                    val = cleaned if cleaned is not None else row[lead_col]
+                    data['lead_time'] = int(float(val))
                 except (ValueError, TypeError):
                     pass
         
@@ -500,7 +528,12 @@ class ImportService:
             icms_col = field_to_column[ImportFieldType.ICMS_PERCENT]
             if not pd.isna(row[icms_col]):
                 try:
-                    data['icms_percent'] = Decimal(str(row[icms_col]))
+                    val_str = str(row[icms_col]).replace('%', '').strip()
+                    cleaned = clean_brazilian_number(val_str)
+                    if cleaned is not None:
+                        data['icms_percent'] = Decimal(cleaned)
+                    else:
+                        data['icms_percent'] = Decimal(val_str)
                 except (InvalidOperation, ValueError):
                     pass
         
@@ -508,7 +541,13 @@ class ImportService:
         if ImportFieldType.BLOCK_STATUS in field_to_column:
             block_col = field_to_column[ImportFieldType.BLOCK_STATUS]
             if not pd.isna(row[block_col]):
-                data['block_status'] = str(row[block_col]).strip()
+                val = str(row[block_col]).strip()
+                if val.upper() == 'N':
+                    data['block_status'] = 'LIBERADO'
+                elif val.upper() == 'S':
+                    data['block_status'] = 'BLOQUEADO'
+                else:
+                    data['block_status'] = val
         
         # Balance
         if ImportFieldType.BALANCE in field_to_column:
@@ -524,7 +563,9 @@ class ImportService:
             delay_col = field_to_column[ImportFieldType.DELAY]
             if not pd.isna(row[delay_col]):
                 try:
-                    data['delay'] = int(float(row[delay_col]))
+                    cleaned = clean_integer_string(row[delay_col])
+                    val = cleaned if cleaned is not None else row[delay_col]
+                    data['delay'] = int(float(val))
                 except (ValueError, TypeError):
                     pass
         
@@ -532,7 +573,12 @@ class ImportService:
         if ImportFieldType.PAYMENT_TERMS in field_to_column:
             payment_col = field_to_column[ImportFieldType.PAYMENT_TERMS]
             if not pd.isna(row[payment_col]):
-                data['payment_terms'] = str(row[payment_col]).strip()
+                val = str(row[payment_col]).strip()
+                if val.upper().endswith(' DDL'):
+                    val = val[:-4].strip()
+                elif val.upper().endswith('DDL'):
+                    val = val[:-3].strip()
+                data['payment_terms'] = val
         
         # Freight
         if ImportFieldType.FREIGHT in field_to_column:
@@ -554,7 +600,11 @@ class ImportService:
             ipi_col = field_to_column[ImportFieldType.IPI]
             if not pd.isna(row[ipi_col]):
                 try:
-                    data['ipi'] = Decimal(str(row[ipi_col]))
+                    cleaned = clean_brazilian_number(row[ipi_col])
+                    if cleaned is not None:
+                        data['ipi'] = Decimal(cleaned)
+                    else:
+                        data['ipi'] = Decimal(str(row[ipi_col]))
                 except (InvalidOperation, ValueError):
                     pass
         

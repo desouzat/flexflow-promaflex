@@ -13,7 +13,7 @@ import {
     Package, DollarSign, Calendar, User, FileText, Globe,
     Star, RefreshCw as RefreshIcon, Zap, AlertCircle, Upload,
     CheckCircle, Edit2, Save, XCircle, Truck, Tag, Lock, Unlock,
-    ArrowUpRight, ShieldAlert, ChevronLeft, ChevronRight, Split, Paperclip
+    ArrowUpRight, ShieldAlert, ChevronLeft, ChevronRight, Split, Paperclip, Percent
 } from 'lucide-react'
 
 const KanbanPage = () => {
@@ -43,6 +43,7 @@ const KanbanPage = () => {
     const [compactView, setCompactView] = useState(false)
     const [selectedPO, setSelectedPO] = useState(null)
     const [showDetailsModal, setShowDetailsModal] = useState(false)
+    const isPhaseADisabled = selectedPO?.partition_metadata?.current_phase === 'FASE_A' || selectedPO?.extra_metadata?.current_phase === 'FASE_A';
     const [editingCommission, setEditingCommission] = useState(false)
     const [commissionValue, setCommissionValue] = useState('')
     const [commissionJustification, setCommissionJustification] = useState('')
@@ -1328,7 +1329,7 @@ const KanbanPage = () => {
                                     <div className="bg-gray-50 p-4 rounded-lg">
                                         <div className="flex items-center gap-2 text-gray-600 mb-1">
                                             <DollarSign className="w-4 h-4" />
-                                            <span className="text-xs font-medium">Valor Total</span>
+                                            <span className="text-xs font-medium">Vl.Pedido</span>
                                         </div>
                                         <p className="text-lg font-bold text-gray-900">
                                             {formatCurrency(selectedPO.total_value)}
@@ -1337,7 +1338,7 @@ const KanbanPage = () => {
                                     <div className="bg-gray-50 p-4 rounded-lg">
                                         <div className="flex items-center gap-2 text-gray-600 mb-1">
                                             <Calendar className="w-4 h-4" />
-                                            <span className="text-xs font-medium">Entrega</span>
+                                            <span className="text-xs font-medium">Dt.Entrega</span>
                                         </div>
                                         <p className="text-lg font-bold text-gray-900">
                                             {formatDate(selectedPO.expected_delivery_date)}
@@ -1596,16 +1597,13 @@ const KanbanPage = () => {
                                                                                 <span className="text-xs text-gray-500 font-semibold uppercase block">Cliente</span>
                                                                                 <span className="font-bold text-gray-800">{getRobustName(selectedPO.client_name || selectedPO.supplier_name)}</span>
                                                                             </div>
-                                                                            <div>
-                                                                                <span className="text-xs text-gray-500 font-semibold uppercase block">Fornecedor</span>
-                                                                                <span className="font-semibold text-gray-800">{getRobustName(selectedPO.supplier_name || selectedPO.vendor_name || selectedPO.client_name)}</span>
-                                                                            </div>
+
                                                                             <div>
                                                                                 <span className="text-xs text-gray-500 font-semibold uppercase block">Condição de Pagamento</span>
                                                                                 <span className="font-medium text-gray-700">{selectedPO.payment_terms || selectedPO.extra_metadata?.payment_terms || 'À vista'}</span>
                                                                             </div>
                                                                             <div>
-                                                                                <span className="text-xs text-gray-500 font-semibold uppercase block">Data de Entrega (Excel)</span>
+                                                                                <span className="text-xs text-gray-500 font-semibold uppercase block">Data Entrega (ONET)</span>
                                                                                 <span className="font-medium text-gray-700">{formatDate(selectedPO.delivery_date)}</span>
                                                                             </div>
                                                                             <div>
@@ -1727,22 +1725,22 @@ const KanbanPage = () => {
                                                                                 {selectedPO.status_macro === 'WAITING_COMMERCIAL_PARTITION' && (
                                                                                     <div className="flex flex-wrap gap-2.5">
                                                                                         <button
-                                                                                            onClick={() => {
-                                                                                                let originalFreight = parseFloat(selectedPO.shipping_cost) || 0;
-                                                                                                if (originalFreight === 0 && selectedPO.items && selectedPO.items.length > 0) {
-                                                                                                    const firstItem = selectedPO.items[0];
-                                                                                                    if (firstItem.extra_metadata) {
-                                                                                                        const metaFreight = firstItem.extra_metadata.freight || firstItem.extra_metadata.Freight;
-                                                                                                        originalFreight = parseFloat(metaFreight) || 0;
-                                                                                                    }
+                                                                                            onClick={async () => {
+                                                                                                try {
+                                                                                                    const response = await api.post('/kanban/move-status', {
+                                                                                                        po_id: selectedPO.id,
+                                                                                                        to_status: 'SHIPPING'
+                                                                                                    });
+                                                                                                    showSuccess('Partição aprovada com sucesso!');
+                                                                                                    await fetchBoard();
+                                                                                                    handleCloseModal();
+                                                                                                } catch (err) {
+                                                                                                    showError(err.response?.data?.detail || 'Erro ao aprovar partição');
                                                                                                 }
-                                                                                                setFreightC1((originalFreight / 2).toFixed(4));
-                                                                                                setFreightC2((originalFreight - originalFreight / 2).toFixed(4));
-                                                                                                setShowFreightModal(true);
                                                                                             }}
-                                                                                            className="inline-flex items-center justify-center px-3.5 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-lg cursor-pointer transition-colors shadow-2xs"
+                                                                                            className="inline-flex items-center justify-center px-3.5 py-1.5 bg-purple-600 hover:bg-purple-750 text-white text-xs font-bold rounded-lg cursor-pointer transition-colors shadow-2xs"
                                                                                         >
-                                                                                            Aprovar Partição e Ratear Frete
+                                                                                            Aprovar Partição
                                                                                         </button>
                                                                                         <div className="flex flex-col gap-2 mt-2">
                                                                                             <button
@@ -1797,7 +1795,7 @@ const KanbanPage = () => {
                                                                                         }}
                                                                                         className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg cursor-pointer transition-colors shadow-2xs flex-shrink-0"
                                                                                     >
-                                                                                        📦 Insumo Recebido - Retomar SLA
+                                                                                        📦 Insumo Recebido - Registrar Entrada
                                                                                     </button>
                                                                                 </div>
                                                                             </div>
@@ -2079,18 +2077,40 @@ const KanbanPage = () => {
                                                                             </div>
                                                                         ) : (
                                                                             <div className="space-y-4">
+                                                                                {/* Lote Particionado Banner (Ajuste de Frete) */}
+                                                                                {(selectedPO.partition_metadata?.current_phase === 'FASE_A' || selectedPO.extra_metadata?.current_phase === 'FASE_A') && (
+                                                                                    <div className="p-4 bg-purple-50 border border-purple-100 rounded-lg space-y-3 shadow-2xs mb-4">
+                                                                                        <h5 className="text-xs font-bold uppercase text-purple-800 tracking-wide flex items-center gap-1.5 font-sans">
+                                                                                            <span>📦</span> Lote Particionado (Ajuste de Frete)
+                                                                                        </h5>
+                                                                                        <p className="text-xs text-purple-950 font-medium font-sans">
+                                                                                            Este pedido é parte de um lote particionado. Antes do despacho, o frete deve ser rateado entre os lotes C1 e C2.
+                                                                                        </p>
+                                                                                        <div className="flex items-center gap-4">
+                                                                                            <button
+                                                                                                onClick={() => setShowFreightModal(true)}
+                                                                                                className="inline-flex items-center gap-2 px-3 py-1.5 bg-purple-650 hover:bg-purple-750 text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer animate-pulse"
+                                                                                            >
+                                                                                                <Percent className="w-3.5 h-3.5" />
+                                                                                                Ratear Frete
+                                                                                            </button>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                )}
+
                                                                                 {/* Checklist de Saída */}
                                                                                 <div className="p-4 bg-cyan-50 border border-cyan-100 rounded-lg">
                                                                                     <h5 className="text-xs font-bold uppercase text-cyan-800 mb-3 tracking-wide flex items-center gap-1.5">
                                                                                         <Truck className="w-4 h-4" /> Checklist Operacional de Saída (Obrigatório)
                                                                                     </h5>
                                                                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                                                                        <label className="flex items-center gap-3 cursor-pointer bg-white p-2.5 border border-cyan-200 rounded-lg shadow-2xs hover:border-cyan-300 transition-all select-none">
+                                                                                        <label className={`flex items-center gap-3 bg-white p-2.5 border border-cyan-200 rounded-lg shadow-2xs transition-all select-none ${isPhaseADisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:border-cyan-300'}`}>
                                                                                             <input
                                                                                                 type="checkbox"
                                                                                                 checked={logisticsChecklist.endereco_conferido || false}
                                                                                                 onChange={(e) => handleChecklistChange('endereco_conferido', e.target.checked)}
-                                                                                                className="w-5 h-5 text-cyan-600 rounded focus:ring-cyan-500 cursor-pointer"
+                                                                                                className={`w-5 h-5 rounded focus:ring-cyan-500 ${isPhaseADisabled ? 'cursor-not-allowed text-cyan-400' : 'text-cyan-600 cursor-pointer'}`}
+                                                                                                disabled={isPhaseADisabled}
                                                                                             />
                                                                                             <span className="text-xs text-gray-700 font-semibold">Endereço Conferido</span>
                                                                                             {logisticsChecklist.endereco_conferido && (
@@ -2098,12 +2118,13 @@ const KanbanPage = () => {
                                                                                             )}
                                                                                         </label>
 
-                                                                                        <label className="flex items-center gap-3 cursor-pointer bg-white p-2.5 border border-cyan-200 rounded-lg shadow-2xs hover:border-cyan-300 transition-all select-none">
+                                                                                        <label className={`flex items-center gap-3 bg-white p-2.5 border border-cyan-200 rounded-lg shadow-2xs transition-all select-none ${isPhaseADisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:border-cyan-300'}`}>
                                                                                             <input
                                                                                                 type="checkbox"
                                                                                                 checked={logisticsChecklist.peso_validado || false}
                                                                                                 onChange={(e) => handleChecklistChange('peso_validado', e.target.checked)}
-                                                                                                className="w-5 h-5 text-cyan-600 rounded focus:ring-cyan-500 cursor-pointer"
+                                                                                                className={`w-5 h-5 rounded focus:ring-cyan-500 ${isPhaseADisabled ? 'cursor-not-allowed text-cyan-400' : 'text-cyan-600 cursor-pointer'}`}
+                                                                                                disabled={isPhaseADisabled}
                                                                                             />
                                                                                             <span className="text-xs text-gray-700 font-semibold">Peso Validado</span>
                                                                                             {logisticsChecklist.peso_validado && (
@@ -2111,12 +2132,13 @@ const KanbanPage = () => {
                                                                                             )}
                                                                                         </label>
 
-                                                                                        <label className="flex items-center gap-3 cursor-pointer bg-white p-2.5 border border-cyan-200 rounded-lg shadow-2xs hover:border-cyan-300 transition-all select-none">
+                                                                                        <label className={`flex items-center gap-3 bg-white p-2.5 border border-cyan-200 rounded-lg shadow-2xs transition-all select-none ${isPhaseADisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:border-cyan-300'}`}>
                                                                                             <input
                                                                                                 type="checkbox"
                                                                                                 checked={logisticsChecklist.etiquetas_impressas || false}
                                                                                                 onChange={(e) => handleChecklistChange('etiquetas_impressas', e.target.checked)}
-                                                                                                className="w-5 h-5 text-cyan-600 rounded focus:ring-cyan-500 cursor-pointer"
+                                                                                                className={`w-5 h-5 rounded focus:ring-cyan-500 ${isPhaseADisabled ? 'cursor-not-allowed text-cyan-400' : 'text-cyan-600 cursor-pointer'}`}
+                                                                                                disabled={isPhaseADisabled}
                                                                                             />
                                                                                             <span className="text-xs text-gray-700 font-semibold">Etiquetas Impressas</span>
                                                                                             {logisticsChecklist.etiquetas_impressas && (
@@ -2138,7 +2160,8 @@ const KanbanPage = () => {
                                                                                             onChange={(e) => handleChangeLocalField('numero_nfe', e.target.value)}
                                                                                             onBlur={() => handleBlurLocalField('numero_nfe')}
                                                                                             placeholder="Ex: 004123"
-                                                                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800 font-medium"
+                                                                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800 font-medium disabled:opacity-60 disabled:cursor-not-allowed"
+                                                                                            disabled={isPhaseADisabled}
                                                                                         />
                                                                                     </div>
 
@@ -2152,7 +2175,8 @@ const KanbanPage = () => {
                                                                                             onChange={(e) => handleChangeLocalField('transportadora', e.target.value)}
                                                                                             onBlur={() => handleBlurLocalField('transportadora')}
                                                                                             placeholder="Ex: Braspress"
-                                                                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800 font-medium"
+                                                                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800 font-medium disabled:opacity-60 disabled:cursor-not-allowed"
+                                                                                            disabled={isPhaseADisabled}
                                                                                         />
                                                                                     </div>
                                                                                 </div>
@@ -2182,22 +2206,24 @@ const KanbanPage = () => {
                                                                                                     >
                                                                                                         Abrir Foto da Carga
                                                                                                     </a>
-                                                                                                    <div className="pt-1">
-                                                                                                        <input
-                                                                                                            type="file"
-                                                                                                            accept="image/*"
-                                                                                                            onChange={(e) => handleEvidenceUpload('foto_carga_path', e.target.files[0])}
-                                                                                                            className="hidden"
-                                                                                                            id="foto-carga-reupload"
-                                                                                                            disabled={uploadingEvidence}
-                                                                                                        />
-                                                                                                        <label
-                                                                                                            htmlFor="foto-carga-reupload"
-                                                                                                            className="inline-flex items-center gap-1 text-[10px] text-gray-500 bg-gray-100 hover:bg-gray-200 border border-gray-305 rounded px-2 py-0.5 cursor-pointer transition-colors"
-                                                                                                        >
-                                                                                                            Substituir Arquivo
-                                                                                                        </label>
-                                                                                                    </div>
+                                                                                                    {!isPhaseADisabled && (
+                                                                                                        <div className="pt-1">
+                                                                                                            <input
+                                                                                                                type="file"
+                                                                                                                accept="image/*"
+                                                                                                                onChange={(e) => handleEvidenceUpload('foto_carga_path', e.target.files[0])}
+                                                                                                                className="hidden"
+                                                                                                                id="foto-carga-reupload"
+                                                                                                                disabled={uploadingEvidence}
+                                                                                                            />
+                                                                                                            <label
+                                                                                                                htmlFor="foto-carga-reupload"
+                                                                                                                className="inline-flex items-center gap-1 text-[10px] text-gray-500 bg-gray-100 hover:bg-gray-200 border border-gray-305 rounded px-2 py-0.5 cursor-pointer transition-colors"
+                                                                                                            >
+                                                                                                                Substituir Arquivo
+                                                                                                            </label>
+                                                                                                        </div>
+                                                                                                    )}
                                                                                                 </div>
                                                                                             ) : (
                                                                                                 <div>
@@ -2207,11 +2233,11 @@ const KanbanPage = () => {
                                                                                                         onChange={(e) => handleEvidenceUpload('foto_carga_path', e.target.files[0])}
                                                                                                         className="hidden"
                                                                                                         id="foto-carga-upload"
-                                                                                                        disabled={uploadingEvidence}
+                                                                                                        disabled={uploadingEvidence || isPhaseADisabled}
                                                                                                     />
                                                                                                     <label
-                                                                                                        htmlFor="foto-carga-upload"
-                                                                                                        className="flex items-center justify-center gap-2 px-4 py-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 cursor-pointer transition-colors text-xs font-semibold shadow-xs"
+                                                                                                        htmlFor={isPhaseADisabled ? undefined : "foto-carga-upload"}
+                                                                                                        className={`flex items-center justify-center gap-2 px-4 py-2 bg-cyan-600 text-white rounded-lg transition-colors text-xs font-semibold shadow-xs ${isPhaseADisabled ? 'cursor-not-allowed opacity-50 bg-cyan-400' : 'hover:bg-cyan-700 cursor-pointer'}`}
                                                                                                     >
                                                                                                         <Upload className="w-4 h-4" />
                                                                                                         {uploadingEvidence ? 'Enviando...' : 'Enviar Foto da Carga'}
@@ -2239,22 +2265,24 @@ const KanbanPage = () => {
                                                                                                     >
                                                                                                         Abrir Nota Fiscal com Canhoto Assinado
                                                                                                     </a>
-                                                                                                    <div className="pt-1">
-                                                                                                        <input
-                                                                                                            type="file"
-                                                                                                            accept="image/*"
-                                                                                                            onChange={(e) => handleEvidenceUpload('foto_canhoto_path', e.target.files[0])}
-                                                                                                            className="hidden"
-                                                                                                            id="foto-canhoto-reupload"
-                                                                                                            disabled={uploadingEvidence}
-                                                                                                        />
-                                                                                                        <label
-                                                                                                            htmlFor="foto-canhoto-reupload"
-                                                                                                            className="inline-flex items-center gap-1 text-[10px] text-gray-500 bg-gray-100 hover:bg-gray-200 border border-gray-305 rounded px-2 py-0.5 cursor-pointer transition-colors"
-                                                                                                        >
-                                                                                                            Substituir Arquivo
-                                                                                                        </label>
-                                                                                                    </div>
+                                                                                                    {!isPhaseADisabled && (
+                                                                                                        <div className="pt-1">
+                                                                                                            <input
+                                                                                                                type="file"
+                                                                                                                accept="image/*"
+                                                                                                                onChange={(e) => handleEvidenceUpload('foto_canhoto_path', e.target.files[0])}
+                                                                                                                className="hidden"
+                                                                                                                id="foto-canhoto-reupload"
+                                                                                                                disabled={uploadingEvidence}
+                                                                                                            />
+                                                                                                            <label
+                                                                                                                htmlFor="foto-canhoto-reupload"
+                                                                                                                className="inline-flex items-center gap-1 text-[10px] text-gray-500 bg-gray-100 hover:bg-gray-200 border border-gray-305 rounded px-2 py-0.5 cursor-pointer transition-colors"
+                                                                                                            >
+                                                                                                                Substituir Arquivo
+                                                                                                            </label>
+                                                                                                        </div>
+                                                                                                    )}
                                                                                                 </div>
                                                                                             ) : (
                                                                                                 <div>
@@ -2264,11 +2292,11 @@ const KanbanPage = () => {
                                                                                                         onChange={(e) => handleEvidenceUpload('foto_canhoto_path', e.target.files[0])}
                                                                                                         className="hidden"
                                                                                                         id="foto-canhoto-upload"
-                                                                                                        disabled={uploadingEvidence}
+                                                                                                        disabled={uploadingEvidence || isPhaseADisabled}
                                                                                                     />
                                                                                                     <label
-                                                                                                        htmlFor="foto-canhoto-upload"
-                                                                                                        className="flex items-center justify-center gap-2 px-4 py-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 cursor-pointer transition-colors text-xs font-semibold shadow-xs"
+                                                                                                        htmlFor={isPhaseADisabled ? undefined : "foto-canhoto-upload"}
+                                                                                                        className={`flex items-center justify-center gap-2 px-4 py-2 bg-cyan-600 text-white rounded-lg transition-colors text-xs font-semibold shadow-xs ${isPhaseADisabled ? 'cursor-not-allowed opacity-50 bg-cyan-400' : 'hover:bg-cyan-700 cursor-pointer'}`}
                                                                                                     >
                                                                                                         <Upload className="w-4 h-4" />
                                                                                                         {uploadingEvidence ? 'Enviando...' : 'Enviar Nota Fiscal com Canhoto Assinado'}
@@ -2774,15 +2802,14 @@ const KanbanPage = () => {
                                     {/* Advance Button - enabled only if mandatory fields are filled */}
                                     {canAdvance(selectedPO) && !isArchived && !isPOBlocked && (
                                         selectedPO.status_macro === 'SHIPPING' ? (
-                                            selectedPO.parent_po_id ? (
+                                            selectedPO.parent_po_id && isPhaseADisabled ? (
                                                 <button
-                                                    onClick={handleAdvanceStatus}
-                                                    disabled={!canAdvanceCurrentArea()}
-                                                    className="flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition-colors shadow-sm text-sm bg-amber-600 text-white hover:bg-amber-700 cursor-pointer"
-                                                    title="Fase A (🚛 AJUSTE DE FRETE): Confirmar o frete rateado e enviar o lote da partição diretamente para Produção."
+                                                    onClick={() => setShowFreightModal(true)}
+                                                    className="flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition-colors shadow-sm text-sm bg-purple-650 hover:bg-purple-750 text-white cursor-pointer"
+                                                    title="Fase A (🚛 AJUSTE DE FRETE): Ratear frete entre os lotes C1 e C2."
                                                 >
-                                                    Confirmar Frete e Enviar para Produção
-                                                    <Tag className="w-4 h-4" />
+                                                    Ratear Frete
+                                                    <Percent className="w-4 h-4" />
                                                 </button>
                                             ) : (
                                                 <button
@@ -2802,13 +2829,13 @@ const KanbanPage = () => {
                                         ) : (
                                             <button
                                                 onClick={handleAdvanceStatus}
-                                                disabled={!canAdvanceCurrentArea()}
+                                                disabled={selectedPO.status_macro === 'WAITING_MATERIAL' || !canAdvanceCurrentArea()}
                                                 className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition-colors shadow-sm text-sm ${
-                                                    canAdvanceCurrentArea()
+                                                    (selectedPO.status_macro !== 'WAITING_MATERIAL' && canAdvanceCurrentArea())
                                                         ? 'bg-green-600 text-white hover:bg-green-700 cursor-pointer'
                                                         : 'bg-gray-300 text-gray-500 cursor-not-allowed border border-gray-310'
                                                 }`}
-                                                title={!canAdvanceCurrentArea() ? `Não é possível avançar. ${getMissingFieldsTooltip()}` : `Avançar para ${getNextStatus(selectedPO.status)}`}
+                                                title={selectedPO.status_macro === 'WAITING_MATERIAL' ? 'Avançar desativado: aguardando insumo.' : (!canAdvanceCurrentArea() ? `Não é possível avançar. ${getMissingFieldsTooltip()}` : `Avançar para ${getNextStatus(selectedPO.status)}`)}
                                             >
                                                 Avançar para {getNextStatus(selectedPO.status)}
                                                 <Zap className="w-4 h-4" />
@@ -3055,14 +3082,20 @@ const KanbanPage = () => {
 
                 {/* Freight Split Approval Modal */}
                 {showFreightModal && (() => {
-                    let rawFreight = selectedPO.shipping_cost;
-                    if (rawFreight === 0 || rawFreight === null || rawFreight === undefined) {
+                    let rawFreight = selectedPO.partition_metadata?.original_parent_freight;
+                    if (rawFreight === undefined || rawFreight === null) {
+                        rawFreight = selectedPO.extra_metadata?.original_parent_freight;
+                    }
+                    if (rawFreight === undefined || rawFreight === null) {
                         if (selectedPO.items && selectedPO.items.length > 0) {
                             const firstItem = selectedPO.items[0];
                             if (firstItem.extra_metadata) {
                                 rawFreight = firstItem.extra_metadata.freight ?? firstItem.extra_metadata.Freight;
                             }
                         }
+                    }
+                    if (rawFreight === undefined || rawFreight === null || parseFloat(rawFreight) === 0) {
+                        rawFreight = (parseFloat(selectedPO.shipping_cost) || 0) * 2;
                     }
                     let parentFreight = parseFloat(rawFreight) || 0;
                     return (
@@ -3131,18 +3164,12 @@ const KanbanPage = () => {
                                         const f1 = parseFloat(freightC1) || 0;
                                         const f2 = parseFloat(freightC2) || 0;
                                         const sum = f1 + f2;
-                                        const diff = Math.abs(sum - parentFreight);
-                                        const isValid = diff <= 0.01;
                                         
                                         return (
-                                            <div className={`p-3 rounded-lg border text-xs font-semibold ${isValid ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
+                                            <div className="p-3 rounded-lg border text-xs font-semibold bg-green-50 border-green-200 text-green-700">
                                                 <div className="flex justify-between">
                                                     <span>Soma Alocada:</span>
                                                     <span>{formatCurrency(sum)}</span>
-                                                </div>
-                                                <div className="flex justify-between mt-1 text-[10px]">
-                                                    <span>Status:</span>
-                                                    <span>{isValid ? '✓ Valor bate exatamente!' : `⚠️ Falta R$ ${(parentFreight - sum).toFixed(4)}`}</span>
                                                 </div>
                                             </div>
                                         );
@@ -3164,13 +3191,8 @@ const KanbanPage = () => {
                                         onClick={async () => {
                                             const f1 = parseFloat(freightC1) || 0;
                                             const f2 = parseFloat(freightC2) || 0;
-                                            if (Math.abs(f1 + f2 - parentFreight) > 0.01) {
-                                                showError(`A soma do frete dos filhos (${formatCurrency(f1 + f2)}) deve ser exatamente igual ao frete original do pai (${formatCurrency(parentFreight)})`);
-                                                return;
-                                            }
-                                            
                                             try {
-                                                const response = await api.post(`/kanban/pos/${selectedPO.id}/approve-partition`, {
+                                                const response = await api.post(`/kanban/pos/${selectedPO.id}/allocate-freight`, {
                                                     freight_c1: f1,
                                                     freight_c2: f2
                                                 });

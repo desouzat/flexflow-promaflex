@@ -7,7 +7,6 @@ const KEY_TRANSLATIONS = {
     is_parted: 'Particionado',
     waiting_partition: 'Aguardando Partição',
     packaging_type: 'Tipo de Embalagem',
-    data_programada: 'Data Programada',
     production_impediment: 'Impedimento de Produção',
     status_producao: 'Status de Produção',
     qtd_real_produzida: 'Qtd Real Produzida',
@@ -17,49 +16,95 @@ const KEY_TRANSLATIONS = {
     transportadora: 'Transportadora',
     manual_commission_rate: 'Comissão Manual (%)',
     audit_comment: 'Comentário de Auditoria',
-    client_name: 'Nome do Cliente',
-    expected_delivery_date: 'Data de Entrega Prevista',
     endereco_conferido: 'Endereço Conferido',
-    peso_validado: 'Peso Validado',
-    etiquetas_impressas: 'Etiquetas Impressas',
-    foto_carga_path: 'Foto da Carga (Anexo)',
-    foto_canhoto_path: 'Canhoto / NF (Anexo)',
-    freight_strategy: 'Estratégia de Frete',
-    freight_ship_now: 'Enviar Frete Agora',
-    freight_ship_later: 'Enviar Frete Depois',
+    client_name: 'Cliente',
+    'Client Name': 'Cliente',
     justification: 'Justificativa',
     reason: 'Motivo',
     priority_note: 'Nota Prioritária',
-    ipi: 'IPI (%)',
+    ipi: 'IPI $:',
+    'IPI ($)': 'IPI $:',
+    'ipi ($)': 'IPI $:',
+    'Ipi ($)': 'IPI $:',
+    'IPI': 'IPI $:',
     unit: 'Unidade',
     width: 'Largura',
     length: 'Comprimento',
-    balance: 'Saldo',
-    freight: 'Frete',
-    Freight: 'Frete',
+    balance: 'Saldo Devedor:',
+    'Saldo Devedor': 'Saldo Devedor:',
+    'saldo devedor': 'Saldo Devedor:',
+    freight: 'Frete:',
+    Freight: 'Frete:',
     salesperson: 'Vendedor',
     Salesperson: 'Vendedor',
     billing_date: 'Data Faturamento',
     'Billing Date': 'Data Faturamento',
+    'billing date': 'Data Faturamento',
     block_status: 'Bloqueio',
     'Block Status': 'Bloqueio',
     icms_percent: '% ICMS',
     'Icms Percent': '% ICMS',
-    delivery_date: 'Data Entrega',
-    'Delivery Date': 'Data Entrega',
+    delivery_date: 'Data Entrega ONET:',
+    'Delivery Date': 'Data Entrega ONET:',
+    'delivery date': 'Data Entrega ONET:',
+    expected_delivery_date: 'Data Estimada:',
+    'Expected Delivery Date': 'Data Estimada:',
+    data_programada: 'Data Estimada:',
+    'Data Programada': 'Data Estimada:',
     payment_terms: 'Condição Pagamento',
     'Payment Terms': 'Condição Pagamento',
     customization_notes: 'Descritivo Customização',
     'Customization Notes': 'Descritivo Customização',
     finance_justification: 'Parecer de Crédito',
     'Finance Justification': 'Parecer de Crédito',
-    total_cost: 'Custo Total',
-    'Total Cost': 'Custo Total',
+    total_cost: 'Custo de Produção:',
+    'Total Cost': 'Custo de Produção:',
+    item_total_value: 'Total Item:',
+    'Item Total Value': 'Total Item:',
     delay: 'Atraso (Dias)',
     Delay: 'Atraso (Dias)',
-    shipping_cost: 'Custo de Envio',
-    attachment_path: 'Foto do Item (Anexo)'
+    shipping_cost: 'Frete:',
+    'Shipping Cost': 'Frete:',
+    attachment_path: 'Anexo (Personalização):',
+    'Foto do Item (Anexo)': 'Anexo (Personalização):',
+    'attachment': 'Anexo (Personalização):',
+    'Attachment': 'Anexo (Personalização):',
+    'Anexo': 'Anexo (Personalização):',
+    'anexo': 'Anexo (Personalização):',
+    additional_costs: 'Custos Adicionais:',
+    'Additional Costs': 'Custos Adicionais:'
 }
+
+const formatCurrency = (val) => {
+    const num = parseFloat(val);
+    if (isNaN(num)) return val;
+    return new Intl.NumberFormat('pt-BR', {
+        style: 'currency',
+        currency: 'BRL',
+    }).format(num);
+};
+
+const formatDate = (dateString) => {
+    if (!dateString) return 'N/A';
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateString) || /^\d{4}-\d{2}-\d{2}T.*$/.test(dateString)) {
+        const cleanDate = dateString.split('T')[0];
+        const [year, month, day] = cleanDate.split('-');
+        return `${day}/${month}/${year}`;
+    }
+    if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateString)) {
+        return dateString;
+    }
+    try {
+        const d = new Date(dateString);
+        if (isNaN(d.getTime())) return dateString;
+        const day = String(d.getDate()).padStart(2, '0');
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const year = d.getFullYear();
+        return `${day}/${month}/${year}`;
+    } catch (e) {
+        return dateString;
+    }
+};
 
 const humanizeKey = (key) => {
     return KEY_TRANSLATIONS[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
@@ -110,6 +155,7 @@ const MetadataVisualizer = ({ metadata, itemId, onUpdate, readOnly = false }) =>
 
     const renderValue = (value, key, depth = 0) => {
         const indent = depth * 20
+        const keyLower = String(key).toLowerCase()
 
         // Null or undefined
         if (value === null || value === undefined) {
@@ -118,6 +164,27 @@ const MetadataVisualizer = ({ metadata, itemId, onUpdate, readOnly = false }) =>
                     N/A
                 </div>
             )
+        }
+
+        // BRL Currency formatting for specific keys
+        const isCurrencyKey = ['ipi', 'balance', 'freight', 'shipping_cost', 'total_cost', 'saldo devedor', 'additional_costs', 'item_total_value', 'item total'].some(k => keyLower.includes(k));
+        if (isCurrencyKey) {
+            const numVal = parseFloat(value);
+            return (
+                <div style={{ marginLeft: `${indent}px` }} className="text-green-600 font-medium">
+                    {isNaN(numVal) ? value : formatCurrency(numVal)}
+                </div>
+            );
+        }
+
+        // Date formatting for specific keys (dd/mm/yyyy)
+        const isDateKey = ['date', 'data'].some(k => keyLower.includes(k));
+        if (isDateKey) {
+            return (
+                <div style={{ marginLeft: `${indent}px` }} className="text-gray-700 font-medium">
+                    {formatDate(value)}
+                </div>
+            );
         }
 
         // Boolean
@@ -165,8 +232,8 @@ const MetadataVisualizer = ({ metadata, itemId, onUpdate, readOnly = false }) =>
             }
 
             return (
-                <div style={{ marginLeft: `${indent}px` }} className="text-gray-700">
-                    "{value}"
+                <div style={{ marginLeft: `${indent}px` }} className="text-gray-700 font-medium">
+                    {value}
                 </div>
             )
         }
@@ -228,8 +295,8 @@ const MetadataVisualizer = ({ metadata, itemId, onUpdate, readOnly = false }) =>
         return <div style={{ marginLeft: `${indent}px` }} className="text-gray-500">{String(value)}</div>
     }
 
-    // Se não há metadata
-    if (!metadata || Object.keys(metadata).length === 0) {
+    // Se não há metadata ou não é um objeto válido
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata) || Object.keys(metadata).length === 0) {
         return (
             <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
                 <p className="text-gray-500 text-sm italic">Nenhuma metadata disponível</p>
@@ -295,7 +362,7 @@ const MetadataVisualizer = ({ metadata, itemId, onUpdate, readOnly = false }) =>
                         </div>
                     </div>
                 ) : (
-                    <div className="space-y-2">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3">
                         {Object.keys(metadata)
                             .filter((key) => {
                                 const k = key.toLowerCase();
@@ -325,14 +392,12 @@ const MetadataVisualizer = ({ metadata, itemId, onUpdate, readOnly = false }) =>
                                 ].includes(k);
                             })
                             .map((key) => (
-                                <div key={key} className="border-b border-gray-100 pb-2 last:border-0">
-                                    <div className="flex items-start gap-2">
-                                        <span className="text-gray-700 font-semibold text-sm min-w-[140px]">
-                                            {humanizeKey(key)}:
-                                        </span>
-                                        <div className="flex-1">
-                                            {renderValue(metadata[key], key)}
-                                        </div>
+                                <div key={key} className="border-b border-gray-100 pb-2 last:border-0 md:last:border-b flex items-start gap-2 justify-between">
+                                    <span className="text-gray-700 font-semibold text-sm min-w-[140px]">
+                                        {humanizeKey(key).endsWith(':') ? humanizeKey(key) : `${humanizeKey(key)}:`}
+                                    </span>
+                                    <div className="flex-1 text-right md:text-left">
+                                        {renderValue(metadata[key], key)}
                                     </div>
                                 </div>
                             ))}

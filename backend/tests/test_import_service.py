@@ -519,7 +519,7 @@ PO-001,Acme Corp,SKU-001,abc,100.00,30.00,20.00,5.00,3.00"""
 
 def test_import_po_with_mapping_error_fails(import_service):
     """Test that import fails with incorrect mapping"""
-    csv_content = b"""PO Number,Client,SKU,Qty,Price,Cost MP,Cost MO,Cost Energy,Cost Gas
+    csv_content = b"""Missing PO,Client,SKU,Qty,Price,Cost MP,Cost MO,Cost Energy,Cost Gas
 PO-001,Acme Corp,SKU-001,10,100.00,30.00,20.00,5.00,3.00"""
     
     # Mapping references non-existent column
