@@ -236,7 +236,7 @@ const FinanceApprovalModal = ({
                             testId="finance-total-value"
                         />
                         {item.payment_terms && (
-                            <DetailRow label="Condição Pgto" value={item.payment_terms} testId="finance-payment" />
+                            <DetailRow label="Condição Pgto" value={String(item.payment_terms || '').replace(/\s*-\s*$/, '')} testId="finance-payment" />
                         )}
                     </div>
 

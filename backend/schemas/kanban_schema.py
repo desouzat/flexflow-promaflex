@@ -151,3 +151,4 @@ class UpdateLogisticsChecklistResponse(BaseModel):
     po_id: str = Field(..., description="Purchase Order ID")
     checklist_complete: bool = Field(..., description="Whether all checklist items are complete")
     can_dispatch: bool = Field(..., description="Whether dispatch can be completed")
+    po: POResponse = Field(..., description="The updated Purchase Order object")

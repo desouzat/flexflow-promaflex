@@ -85,6 +85,128 @@ STATUS_FLOW = {
 }
 
 
+def _map_single_po(po: PurchaseOrder, db: Session, is_privileged: bool) -> POResponse:
+    """Helper to serialize a single PurchaseOrder database model into a POResponse Pydantic schema."""
+    from datetime import timedelta
+    from backend.services.financial_service import FinancialService
+    
+    metrics = calculate_po_metrics(po)
+    
+    items = []
+    for item in po.items:
+        material = db.query(MaterialCost).filter(
+            MaterialCost.tenant_id == po.tenant_id,
+            MaterialCost.sku == item.sku
+        ).first()
+        
+        unit_cost = Decimal("0.00")
+        cost_meta = {}
+        if material:
+            unit_cost = Decimal(str(material.custo_mp_kg)) * Decimal(str(material.rendimento))
+            cost_meta = {
+                "total_cost": float(unit_cost),
+                "cost_mp": float(unit_cost),
+                "cost_updated_by": material.updated_by_user.name if material.updated_by_user else "Sistema",
+                "cost_updated_at": material.updated_at.isoformat() if material.updated_at else None
+            }
+        
+        item_extra = dict(item.extra_metadata or {})
+        if cost_meta:
+            item_extra.update(cost_meta)
+            
+        items.append(
+            POItemResponse(
+                id=str(item.id),
+                sku=item.sku,
+                quantity=item.quantity,
+                price=Decimal(str(item.price)),
+                status_item=item.status_item,
+                margin_item=Decimal("0.00") if is_privileged else "***",
+                total_cost=unit_cost,
+                item_total_value=Decimal(str(item.item_total_value)) if item.item_total_value is not None else None,
+                manual_commission_rate=Decimal(str(item.extra_metadata.get("manual_commission_rate"))) if item.extra_metadata and "manual_commission_rate" in item.extra_metadata else None,
+                extra_metadata=item_extra,
+                created_at=item.created_at,
+                updated_at=item.updated_at
+            )
+        )
+    
+    commission_rate = None
+    if po.partition_metadata and "manual_commission_rate" in po.partition_metadata:
+        commission_rate = Decimal(str(po.partition_metadata["manual_commission_rate"]))
+    else:
+        commission_rate, _, _ = FinancialService.get_commission_rate(
+            metrics["margin_percentage"],
+            client_code=None,
+            manual_override=None
+        )
+    
+    commission_value = FinancialService.calculate_commission_value(
+        metrics["total_value"],
+        commission_rate
+    )
+    
+    logistics_checklist = None
+    if po.partition_metadata and "logistics_checklist" in po.partition_metadata:
+        logistics_checklist = po.partition_metadata["logistics_checklist"]
+    
+    orig_delivery = None
+    data_limite_val = None
+    if po.partition_metadata and "expected_delivery_date" in po.partition_metadata:
+        try:
+            val = po.partition_metadata["expected_delivery_date"]
+            if isinstance(val, str):
+                orig_delivery = datetime.fromisoformat(val)
+            elif isinstance(val, datetime):
+                orig_delivery = val
+        except Exception:
+            pass
+    if not orig_delivery:
+        for item in po.items:
+            if item.extra_metadata and "delivery_date" in item.extra_metadata:
+                try:
+                    val = item.extra_metadata["delivery_date"]
+                    if isinstance(val, str):
+                        if "/" in val:
+                            d, m, y = val.split("/")
+                            orig_delivery = datetime(int(y), int(m), int(d))
+                        else:
+                            orig_delivery = datetime.fromisoformat(val)
+                    break
+                except Exception:
+                    pass
+    if orig_delivery:
+        data_limite_val = orig_delivery - timedelta(days=2)
+
+    return POResponse(
+        id=str(po.id),
+        po_number=po.po_number,
+        client_name=getattr(po, 'client_name', None) or "Cliente Desconhecido",
+        supplier_name=getattr(po, 'client_name', None) or "Cliente Desconhecido",
+        status_macro=po.status_macro,
+        status=STATUS_DISPLAY_MAP.get(po.status_macro, po.status_macro),
+        items=items,
+        items_count=len(items),
+        total_value=Decimal(str(po.po_total_value)) if po.po_total_value is not None else metrics["total_value"],
+        margin_global=metrics["margin_global"] if is_privileged else "***",
+        margin_percentage=metrics["margin_percentage"] if is_privileged else "***",
+        commission_rate=commission_rate,
+        commission_value=commission_value,
+        shipping_cost=Decimal(str(po.shipping_cost)),
+        expected_delivery_date=data_limite_val if data_limite_val else orig_delivery,
+        delivery_date=orig_delivery,
+        data_limite=data_limite_val,
+        extra_metadata=po.partition_metadata,
+        partition_metadata=po.partition_metadata,
+        logistics_checklist=logistics_checklist,
+        partition_reason=po.partition_reason,
+        parent_po_id=str(po.parent_po_id) if po.parent_po_id else None,
+        created_at=po.created_at,
+        updated_at=po.updated_at,
+        created_by=str(po.creator.id) if (po.creator and po.creator.id) else (str(po.created_by) if po.created_by else None)
+    )
+
+
 def log_po_status_transition(
     db: Session,
     po: PurchaseOrder,
@@ -511,130 +633,7 @@ async def get_purchase_order(
         )
     
     is_privileged = current_user.role.lower() in ["admin", "master"]
-    
-    # Calculate metrics
-    metrics = calculate_po_metrics(po)
-    
-    # Convert items resolving material costs
-    items = []
-    for item in po.items:
-        # Query MaterialCost to find cost industrial
-        material = db.query(MaterialCost).filter(
-            MaterialCost.tenant_id == po.tenant_id,
-            MaterialCost.sku == item.sku
-        ).first()
-        
-        unit_cost = Decimal("0.00")
-        cost_meta = {}
-        if material:
-            unit_cost = Decimal(str(material.custo_mp_kg)) * Decimal(str(material.rendimento))
-            cost_meta = {
-                "total_cost": float(unit_cost),
-                "cost_mp": float(unit_cost),
-                "cost_updated_by": material.updated_by_user.name if material.updated_by_user else "Sistema",
-                "cost_updated_at": material.updated_at.isoformat() if material.updated_at else None
-            }
-        
-        item_extra = dict(item.extra_metadata or {})
-        if cost_meta:
-            item_extra.update(cost_meta)
-            
-        items.append(
-            POItemResponse(
-                id=str(item.id),
-                sku=item.sku,
-                quantity=item.quantity,
-                price=Decimal(str(item.price)),
-                status_item=item.status_item,
-                margin_item=Decimal("0.00") if is_privileged else "***",
-                total_cost=unit_cost,
-                item_total_value=Decimal(str(item.item_total_value)) if item.item_total_value is not None else None,
-                manual_commission_rate=Decimal(str(item.extra_metadata.get("manual_commission_rate"))) if item.extra_metadata and "manual_commission_rate" in item.extra_metadata else None,
-                extra_metadata=item_extra,
-                created_at=item.created_at,
-                updated_at=item.updated_at
-            )
-        )
-    
-    # Get commission rate
-    commission_rate = None
-    commission_value = Decimal("0.00")
-    if po.partition_metadata and "manual_commission_rate" in po.partition_metadata:
-        commission_rate = Decimal(str(po.partition_metadata["manual_commission_rate"]))
-    else:
-        from backend.services.financial_service import FinancialService
-        commission_rate, _, _ = FinancialService.get_commission_rate(
-            metrics["margin_percentage"],
-            client_code=None,
-            manual_override=None
-        )
-    
-    commission_value = FinancialService.calculate_commission_value(
-        metrics["total_value"],
-        commission_rate
-    )
-    
-    logistics_checklist = None
-    if po.partition_metadata and "logistics_checklist" in po.partition_metadata:
-        logistics_checklist = po.partition_metadata["logistics_checklist"]
-    
-    # Calculate original delivery date and data_limite
-    from datetime import timedelta
-    orig_delivery = None
-    data_limite_val = None
-    if po.partition_metadata and "expected_delivery_date" in po.partition_metadata:
-        try:
-            val = po.partition_metadata["expected_delivery_date"]
-            if isinstance(val, str):
-                orig_delivery = datetime.fromisoformat(val)
-            elif isinstance(val, datetime):
-                orig_delivery = val
-        except Exception:
-            pass
-    if not orig_delivery:
-        for item in po.items:
-            if item.extra_metadata and "delivery_date" in item.extra_metadata:
-                try:
-                    val = item.extra_metadata["delivery_date"]
-                    if isinstance(val, str):
-                        if "/" in val:
-                            d, m, y = val.split("/")
-                            orig_delivery = datetime(int(y), int(m), int(d))
-                        else:
-                            orig_delivery = datetime.fromisoformat(val)
-                    break
-                except Exception:
-                    pass
-    if orig_delivery:
-        data_limite_val = orig_delivery - timedelta(days=2)
-
-    response_data = POResponse(
-        id=str(po.id),
-        po_number=po.po_number,
-        client_name=getattr(po, 'client_name', None) or "Cliente Desconhecido",
-        supplier_name=getattr(po, 'client_name', None) or "Cliente Desconhecido",
-        status_macro=po.status_macro,  # Raw database status macro (e.g. 'APPROVED' for PCP)
-        status=STATUS_DISPLAY_MAP.get(po.status_macro, po.status_macro),
-        items=items,
-        items_count=len(items),
-        total_value=Decimal(str(po.po_total_value)) if po.po_total_value is not None else metrics["total_value"],
-        margin_global=metrics["margin_global"] if is_privileged else "***",
-        margin_percentage=metrics["margin_percentage"] if is_privileged else "***",
-        commission_rate=commission_rate,
-        commission_value=commission_value,
-        shipping_cost=Decimal(str(po.shipping_cost)),
-        expected_delivery_date=data_limite_val if data_limite_val else orig_delivery,
-        delivery_date=orig_delivery,
-        data_limite=data_limite_val,
-        extra_metadata=po.partition_metadata,
-        partition_metadata=po.partition_metadata,
-        logistics_checklist=logistics_checklist,
-        partition_reason=po.partition_reason,
-        parent_po_id=str(po.parent_po_id) if po.parent_po_id else None,
-        created_at=po.created_at,
-        updated_at=po.updated_at,
-        created_by=str(po.creator.id) if (po.creator and po.creator.id) else (str(po.created_by) if po.created_by else None)
-    )
+    response_data = _map_single_po(po, db, is_privileged)
     print("\n================== BACKEND TRACEABILITY LOG ==================")
     print(f"PO Details Requested: {po_id}")
     print(f"Client Name: {response_data.client_name}")
@@ -1487,9 +1486,6 @@ async def update_logistics_checklist(
             detail="Não é permitido alterar o checklist logístico de um pedido arquivado."
         )
     
-    # Update logistics checklist in metadata
-    meta = {**po.partition_metadata} if po.partition_metadata else {}
-    
     logistics_checklist = {
         "endereco_conferido": request.endereco_conferido,
         "peso_validado": request.peso_validado,
@@ -1500,8 +1496,10 @@ async def update_logistics_checklist(
         "updated_at": datetime.utcnow().isoformat()
     }
     
+    # Reassign the metadata dictionary to trigger SQLAlchemy's observer
+    meta = dict(po.partition_metadata or {})
     meta["logistics_checklist"] = logistics_checklist
-    po.partition_metadata = dict(meta)
+    po.partition_metadata = meta
     po.updated_at = datetime.utcnow()
     
     # Check if all requirements are met
@@ -1523,6 +1521,9 @@ async def update_logistics_checklist(
     db.commit()
     db.refresh(po)
     
+    is_privileged = current_user.role.lower() in ["admin", "master"]
+    mapped_po = _map_single_po(po, db, is_privileged)
+    
     message = "Checklist de logística atualizado com sucesso"
     if can_dispatch:
         message += " - Pronto para despacho!"
@@ -1536,7 +1537,8 @@ async def update_logistics_checklist(
         message=message,
         po_id=po_id,
         checklist_complete=checklist_complete,
-        can_dispatch=can_dispatch
+        can_dispatch=can_dispatch,
+        po=mapped_po
     )
 
 

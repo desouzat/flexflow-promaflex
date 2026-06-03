@@ -365,32 +365,17 @@ const KanbanPage = () => {
         return () => clearInterval(interval);
     }, [selectedPO?.sla_paused_at]);
 
-    // Add escape key handler for modals
+    // Escape key handler disabled to prevent accidental exits (sprint stabilization)
     useEffect(() => {
         const handleEscape = (e) => {
             if (e.key === 'Escape') {
-                if (showDetailsModal) {
-                    handleCloseModal();
-                } else if (showReturnModal) {
-                    setShowReturnModal(false);
-                    setReturnLabel('');
-                    setReturnReasonText('');
-                    setReturnReason('');
-                } else if (showPartitionModal) {
-                    setShowPartitionModal(false);
-                    setPartitionReason('');
-                    setQtySplits({});
-                } else if (showFreightModal) {
-                    setShowFreightModal(false);
-                    setFreightC1('');
-                    setFreightC2('');
-                }
+                console.log('ESC key pressed - modal exit disabled for guardrail');
             }
         };
 
         document.addEventListener('keydown', handleEscape);
         return () => document.removeEventListener('keydown', handleEscape);
-    }, [showDetailsModal, showReturnModal, showPartitionModal, showFreightModal]);
+    }, []);
 
     useEffect(() => {
         if (selectedPO) {
@@ -635,17 +620,12 @@ const KanbanPage = () => {
                 ...updatedChecklist
             })
 
-            setSelectedPO(prev => {
-                if (!prev) return prev;
-                return {
-                    ...prev,
-                    partition_metadata: {
-                        ...(prev.partition_metadata || {}),
-                        logistics_checklist: updatedChecklist
-                    }
-                };
-            });
-            fetchBoard();
+            if (response.data.po) {
+                setSelectedPO(response.data.po)
+                if (response.data.po.partition_metadata?.logistics_checklist) {
+                    setLogisticsChecklist(response.data.po.partition_metadata.logistics_checklist)
+                }
+            }
 
             if (response.data.can_dispatch) {
                 showSuccess('✅ Checklist completo! Pronto para despacho.')
@@ -682,17 +662,12 @@ const KanbanPage = () => {
                 ...updatedChecklist
             })
 
-            setSelectedPO(prev => {
-                if (!prev) return prev;
-                return {
-                    ...prev,
-                    partition_metadata: {
-                        ...(prev.partition_metadata || {}),
-                        logistics_checklist: updatedChecklist
-                    }
-                };
-            });
-            fetchBoard();
+            if (response.data.po) {
+                setSelectedPO(response.data.po)
+                if (response.data.po.partition_metadata?.logistics_checklist) {
+                    setLogisticsChecklist(response.data.po.partition_metadata.logistics_checklist)
+                }
+            }
 
             showSuccess(`${field === 'foto_carga_path' ? 'Foto da Carga' : 'Nota Fiscal com Canhoto Assinado'} enviada com sucesso`)
 
@@ -1217,9 +1192,7 @@ const KanbanPage = () => {
                     <div
                         className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4"
                         onClick={(e) => {
-                            if (e.target === e.currentTarget) {
-                                handleCloseModal();
-                            }
+                            // Backdrop click disabled to prevent accidental exits (sprint stabilization)
                         }}
                     >
                         <div className="bg-white rounded-lg shadow-xl max-w-5xl w-full max-h-[90vh] overflow-hidden flex flex-col">
@@ -1600,14 +1573,14 @@ const KanbanPage = () => {
 
                                                                             <div>
                                                                                 <span className="text-xs text-gray-500 font-semibold uppercase block">Condição de Pagamento</span>
-                                                                                <span className="font-medium text-gray-700">{selectedPO.payment_terms || selectedPO.extra_metadata?.payment_terms || 'À vista'}</span>
+                                                                                <span className="font-medium text-gray-700">{String(selectedPO.payment_terms || selectedPO.extra_metadata?.payment_terms || 'À vista').replace(/\s*-\s*$/, '')}</span>
                                                                             </div>
                                                                             <div>
                                                                                 <span className="text-xs text-gray-500 font-semibold uppercase block">Data Entrega (ONET)</span>
                                                                                 <span className="font-medium text-gray-700">{formatDate(selectedPO.delivery_date)}</span>
                                                                             </div>
                                                                             <div>
-                                                                                <span className="text-xs text-gray-500 font-semibold uppercase block">Data Limite de Entrega</span>
+                                                                                <span className="text-xs text-gray-500 font-semibold uppercase block">Data Estimada de Entrega</span>
                                                                                 <span className="font-medium text-gray-700">{formatDate(selectedPO.data_limite || selectedPO.expected_delivery_date)}</span>
                                                                             </div>
                                                                         </div>
@@ -2860,12 +2833,7 @@ const KanbanPage = () => {
                     <div
                         className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
                         onClick={(e) => {
-                            if (e.target === e.currentTarget) {
-                                setShowReturnModal(false);
-                                setReturnLabel('');
-                                setReturnReasonText('');
-                                setReturnReason('');
-                            }
+                            // Backdrop click disabled to prevent accidental exits (sprint stabilization)
                         }}
                     >
                         <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
@@ -2935,12 +2903,7 @@ const KanbanPage = () => {
                     <div
                         className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
                         onClick={(e) => {
-                            if (e.target === e.currentTarget) {
-                                setShowPartitionModal(false);
-                                setPartitionReason('');
-                                setNewDeliveryDate('');
-                                setQtySplits({});
-                            }
+                            // Backdrop click disabled to prevent accidental exits (sprint stabilization)
                         }}
                     >
                         <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col mx-4">
@@ -3102,11 +3065,7 @@ const KanbanPage = () => {
                         <div
                             className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
                             onClick={(e) => {
-                                if (e.target === e.currentTarget) {
-                                    setShowFreightModal(false);
-                                    setFreightC1('');
-                                    setFreightC2('');
-                                }
+                                // Backdrop click disabled to prevent accidental exits (sprint stabilization)
                             }}
                         >
                             <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
@@ -3221,10 +3180,7 @@ const KanbanPage = () => {
                     <div
                         className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[60] p-4"
                         onClick={(e) => {
-                            if (e.target === e.currentTarget) {
-                                setShowLinkCostModal(false);
-                                setLinkingItem(null);
-                            }
+                            // Backdrop click disabled to prevent accidental exits (sprint stabilization)
                         }}
                     >
                         <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full mx-4 overflow-hidden border border-gray-150 animate-scale-up">

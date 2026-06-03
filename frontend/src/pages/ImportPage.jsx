@@ -1624,7 +1624,7 @@ const ImportPage = () => {
                                                                 <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg">
                                                                     <label className="text-xs font-medium text-gray-700">Condição Pagamento</label>
                                                                     <p className="text-sm font-bold text-purple-700">
-                                                                        {item.payment_terms}
+                                                                        {String(item.payment_terms || '').replace(/\s*-\s*$/, '')}
                                                                     </p>
                                                                 </div>
                                                             )}
