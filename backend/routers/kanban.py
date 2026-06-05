@@ -3,7 +3,7 @@ FlexFlow Kanban Router
 Endpoints for Kanban board operations and status management.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, File, UploadFile
 from sqlalchemy.orm import Session
 from typing import List, Optional, Any
 from decimal import Decimal
@@ -2773,3 +2773,117 @@ async def resume_material(
         "status": po.status_macro,
         "justification": justification
     }
+
+
+@router.post("/pos/{po_id}/upload-cargo-photo", response_model=POResponse)
+async def upload_cargo_photo(
+    po_id: str,
+    file: UploadFile = File(..., description="Cargo photo (JPG, PNG)"),
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # Query PO
+    po = db.query(PurchaseOrder).filter(
+        PurchaseOrder.id == po_id,
+        PurchaseOrder.tenant_id == current_user.tenant_id
+    ).first()
+    
+    if not po:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Pedido {po_id} não encontrado"
+        )
+    
+    # Save file using FileService
+    from backend.services.file_service import FileService
+    file_service = FileService()
+    file_path, _ = await file_service.save_file(file, str(current_user.tenant_id))
+    
+    # Force a print log
+    print(f"DEBUG: Saving file to {file_path}")
+    
+    # Use a hard-assignment for the metadata
+    new_metadata = dict(po.partition_metadata or {})
+    new_metadata['foto_carga_path'] = file_path
+    
+    # Also update nested logistics checklist for compatibility
+    logistics = dict(new_metadata.get("logistics_checklist") or {
+        "endereco_conferido": False,
+        "peso_validado": False,
+        "etiquetas_impressas": False,
+        "foto_carga_path": None,
+        "foto_canhoto_path": None
+    })
+    logistics['foto_carga_path'] = file_path
+    logistics['updated_by'] = str(current_user.id)
+    logistics['updated_at'] = datetime.utcnow().isoformat()
+    new_metadata['logistics_checklist'] = logistics
+    
+    po.partition_metadata = new_metadata
+    po.updated_at = datetime.utcnow()
+    
+    db.add(po)
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(po, "partition_metadata")
+    db.commit()
+    db.refresh(po)
+    
+    is_privileged = current_user.role.lower() in ["admin", "master"]
+    return _map_single_po(po, db, is_privileged)
+
+
+@router.post("/pos/{po_id}/upload-receipt-photo", response_model=POResponse)
+async def upload_receipt_photo(
+    po_id: str,
+    file: UploadFile = File(..., description="Receipt/canhoto photo (JPG, PNG)"),
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # Query PO
+    po = db.query(PurchaseOrder).filter(
+        PurchaseOrder.id == po_id,
+        PurchaseOrder.tenant_id == current_user.tenant_id
+    ).first()
+    
+    if not po:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Pedido {po_id} não encontrado"
+        )
+    
+    # Save file using FileService
+    from backend.services.file_service import FileService
+    file_service = FileService()
+    file_path, _ = await file_service.save_file(file, str(current_user.tenant_id))
+    
+    # Force a print log
+    print(f"DEBUG: Saving file to {file_path}")
+    
+    # Use a hard-assignment for the metadata
+    new_metadata = dict(po.partition_metadata or {})
+    new_metadata['foto_canhoto_path'] = file_path
+    
+    # Also update nested logistics checklist for compatibility
+    logistics = dict(new_metadata.get("logistics_checklist") or {
+        "endereco_conferido": False,
+        "peso_validado": False,
+        "etiquetas_impressas": False,
+        "foto_carga_path": None,
+        "foto_canhoto_path": None
+    })
+    logistics['foto_canhoto_path'] = file_path
+    logistics['updated_by'] = str(current_user.id)
+    logistics['updated_at'] = datetime.utcnow().isoformat()
+    new_metadata['logistics_checklist'] = logistics
+    
+    po.partition_metadata = new_metadata
+    po.updated_at = datetime.utcnow()
+    
+    db.add(po)
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(po, "partition_metadata")
+    db.commit()
+    db.refresh(po)
+    
+    is_privileged = current_user.role.lower() in ["admin", "master"]
+    return _map_single_po(po, db, is_privileged)

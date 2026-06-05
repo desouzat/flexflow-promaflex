@@ -864,6 +864,87 @@ def test_partition_approval_and_freight_allocation(auth_headers):
         assert meta.get("freight_allocated") is True
 
 
+def test_expedition_attachments_upload(auth_headers):
+    # 1. Create a PO
+    payload = {
+        "pos": [
+            {
+                "po_number": "po-upload-test-888",
+                "client_name": "Upload Client",
+                "freight_cost": 100.0,
+                "additional_costs": 0.0,
+                "po_total_value": 1000.0,
+                "packaging_type": "Palete",
+                "items": [
+                    {
+                        "sku": "SKU-UPLOAD-1",
+                        "quantity": 10,
+                        "price_unit": 100.0,
+                        "unit_value": 100.0,
+                        "item_total_value": 1000.0,
+                        "block_status": "LIBERADO",
+                        "extra_metadata": {
+                            "is_personalized": False,
+                            "is_new_client": False
+                        }
+                    }
+                ]
+            }
+        ]
+    }
+    
+    response = client.post(
+        "/api/import/confirm-staging",
+        headers={"Authorization": f"Bearer {auth_headers}"} if isinstance(auth_headers, str) else auth_headers,
+        json=payload
+    )
+    assert response.status_code == 200
+    
+    # Get the imported PO id
+    response_pos = client.get(
+        "/api/kanban/pos",
+        headers={"Authorization": f"Bearer {auth_headers}"} if isinstance(auth_headers, str) else auth_headers
+    )
+    assert response_pos.status_code == 200
+    pos_list = response_pos.json()
+    test_po = next((po for po in pos_list if po["po_number"] == "po-upload-test-888"), None)
+    assert test_po is not None
+    
+    # 2. Upload cargo photo
+    import io
+    file_data = io.BytesIO(b"fake image data representing cargo photo")
+    response_upload_cargo = client.post(
+        f"/api/kanban/pos/{test_po['id']}/upload-cargo-photo",
+        headers={"Authorization": f"Bearer {auth_headers}"} if isinstance(auth_headers, str) else auth_headers,
+        files={"file": ("cargo_test.png", file_data, "image/png")}
+    )
+    assert response_upload_cargo.status_code == 200
+    po_data_cargo = response_upload_cargo.json()
+    assert "foto_carga_path" in po_data_cargo["partition_metadata"]
+    assert po_data_cargo["partition_metadata"]["foto_carga_path"].endswith(".png")
+    
+    # Check that nested logistics checklist is also updated
+    logistics = po_data_cargo["partition_metadata"]["logistics_checklist"]
+    assert logistics["foto_carga_path"] == po_data_cargo["partition_metadata"]["foto_carga_path"]
+    
+    # 3. Upload receipt photo
+    file_data_receipt = io.BytesIO(b"fake image data representing receipt photo")
+    response_upload_receipt = client.post(
+        f"/api/kanban/pos/{test_po['id']}/upload-receipt-photo",
+        headers={"Authorization": f"Bearer {auth_headers}"} if isinstance(auth_headers, str) else auth_headers,
+        files={"file": ("receipt_test.png", file_data_receipt, "image/png")}
+    )
+    assert response_upload_receipt.status_code == 200
+    po_data_receipt = response_upload_receipt.json()
+    assert "foto_canhoto_path" in po_data_receipt["partition_metadata"]
+    assert po_data_receipt["partition_metadata"]["foto_canhoto_path"].endswith(".png")
+    
+    # Check nested logistics checklist again
+    logistics_updated = po_data_receipt["partition_metadata"]["logistics_checklist"]
+    assert logistics_updated["foto_canhoto_path"] == po_data_receipt["partition_metadata"]["foto_canhoto_path"]
+    assert logistics_updated["foto_carga_path"] == po_data_cargo["partition_metadata"]["foto_carga_path"]
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])
 

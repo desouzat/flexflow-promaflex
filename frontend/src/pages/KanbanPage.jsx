@@ -643,35 +643,38 @@ const KanbanPage = () => {
         setUploadingEvidence(true)
         const formData = new FormData()
         formData.append('file', file)
-        formData.append('po_id', selectedPO.id)
+
+        const endpoint = field === 'foto_carga_path'
+            ? `/kanban/pos/${selectedPO.id}/upload-cargo-photo`
+            : `/kanban/pos/${selectedPO.id}/upload-receipt-photo`
 
         try {
-            // Upload file
-            const uploadResponse = await api.post('/import/upload-attachment', formData, {
+            // Upload file directly to the specific endpoint
+            const response = await api.post(endpoint, formData, {
                 headers: { 'Content-Type': 'multipart/form-data' }
             })
 
-            const filePath = uploadResponse.data.file_path
-
-            // Update checklist with file path
-            const updatedChecklist = { ...logisticsChecklist, [field]: filePath }
-            setLogisticsChecklist(updatedChecklist)
-
-            const response = await api.put(`/kanban/pos/${selectedPO.id}/logistics-checklist`, {
-                po_id: selectedPO.id,
-                ...updatedChecklist
-            })
-
-            if (response.data.po) {
-                setSelectedPO(response.data.po)
-                if (response.data.po.partition_metadata?.logistics_checklist) {
-                    setLogisticsChecklist(response.data.po.partition_metadata.logistics_checklist)
+            const updatedPO = response.data
+            if (updatedPO) {
+                setSelectedPO(updatedPO)
+                if (updatedPO.partition_metadata?.logistics_checklist) {
+                    setLogisticsChecklist(updatedPO.partition_metadata.logistics_checklist)
                 }
             }
 
             showSuccess(`${field === 'foto_carga_path' ? 'Foto da Carga' : 'Nota Fiscal com Canhoto Assinado'} enviada com sucesso`)
 
-            if (response.data.can_dispatch) {
+            const currentChecklist = updatedPO?.partition_metadata?.logistics_checklist || {}
+            const checklistComplete = (
+                currentChecklist.endereco_conferido &&
+                currentChecklist.peso_validado &&
+                currentChecklist.etiquetas_impressas
+            )
+            const evidenceComplete = (
+                currentChecklist.foto_carga_path &&
+                currentChecklist.foto_canhoto_path
+            )
+            if (checklistComplete && evidenceComplete) {
                 showSuccess('✅ Todas as evidências enviadas! Pronto para despacho.')
             }
         } catch (err) {
