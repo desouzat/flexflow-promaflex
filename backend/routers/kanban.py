@@ -102,7 +102,7 @@ def _map_single_po(po: PurchaseOrder, db: Session, is_privileged: bool) -> PORes
         unit_cost = Decimal("0.00")
         cost_meta = {}
         if material:
-            unit_cost = Decimal(str(material.custo_mp_kg)) * Decimal(str(material.rendimento))
+            unit_cost = Decimal(str(material.custo_mp_kg)) / Decimal(str(material.rendimento)) if material.rendimento > 0 else Decimal("0.00")
             cost_meta = {
                 "total_cost": float(unit_cost),
                 "cost_mp": float(unit_cost),
@@ -353,7 +353,7 @@ async def get_kanban_board(
                 unit_cost = Decimal("0.00")
                 cost_meta = {}
                 if material:
-                    unit_cost = Decimal(str(material.custo_mp_kg)) * Decimal(str(material.rendimento))
+                    unit_cost = Decimal(str(material.custo_mp_kg)) / Decimal(str(material.rendimento)) if material.rendimento > 0 else Decimal("0.00")
                     cost_meta = {
                         "total_cost": float(unit_cost),
                         "cost_mp": float(unit_cost),
@@ -533,7 +533,7 @@ async def list_purchase_orders(
             ).first()
             unit_cost = Decimal("0.00")
             if material:
-                unit_cost = Decimal(str(material.custo_mp_kg)) * Decimal(str(material.rendimento))
+                unit_cost = Decimal(str(material.custo_mp_kg)) / Decimal(str(material.rendimento)) if material.rendimento > 0 else Decimal("0.00")
             
             items.append(
                 POItemResponse(
@@ -2382,6 +2382,8 @@ async def nuke_tenant_data(
     print(f"ADMIN NUKE: Starting data cleaning for tenant_id {tenant_uuid}", flush=True)
 
     try:
+        # PROTECTION: We EXPLICITLY EXCLUDE the ClientPreference table from deletion
+        # to ensure client preferences/memory survive tests and nuke operations.
         from backend.models import AuditLog, OrderItem, PurchaseOrder
 
         # 1. Delete all AuditLogs associated with OrderItems of this tenant

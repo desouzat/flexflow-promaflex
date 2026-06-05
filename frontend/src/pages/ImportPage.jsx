@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { Upload, FileSpreadsheet, AlertCircle, CheckCircle, X, HelpCircle, Paperclip, Trash2, Cloud, ChevronLeft, ChevronRight, Globe, RefreshCw, DollarSign, CheckSquare, Square, Lock, Unlock, Package } from 'lucide-react'
+import { Upload, FileSpreadsheet, AlertCircle, CheckCircle, X, HelpCircle, Paperclip, Trash2, Cloud, ChevronLeft, ChevronRight, Globe, RefreshCw, DollarSign, CheckSquare, Square, Lock, Unlock, Package, Briefcase } from 'lucide-react'
 import api from '../utils/api'
 import { showSuccess, showError, showLoading, dismissToast } from '../utils/toast'
 import { useNotifications } from '../context/NotificationContext'
@@ -850,7 +850,10 @@ const ImportPage = () => {
         // Check if all POs have selected packaging type
         const allHavePackaging = stagingData?.po_list?.every(po => po.packaging_type && po.packaging_type.trim() !== '') || false
 
-        return allChecked && noErrors && !hasIntegrityErrors && allHavePackaging
+        // Check if all POs have selected business unit
+        const allHaveBusinessUnit = stagingData?.po_list?.every(po => po.business_unit && po.business_unit.trim() !== '') || false
+
+        return allChecked && noErrors && !hasIntegrityErrors && allHavePackaging && allHaveBusinessUnit
     }
 
     const handleCommitAll = async () => {
@@ -870,6 +873,7 @@ const ImportPage = () => {
                 pos: validPOs.map(po => ({
                     po_number: po.po_number,
                     client_name: po.client_name,
+                    business_unit: po.business_unit,
                     freight_cost: po.freight_cost || 0,
                     additional_costs: po.additional_costs || 0,
                     po_total_value: po.po_total_value !== undefined && po.po_total_value !== null ? parseFloat(po.po_total_value) : null,
@@ -1048,6 +1052,9 @@ const ImportPage = () => {
         if (currentPO && (!currentPO.packaging_type || currentPO.packaging_type.trim() === '')) {
             showError('⚠️ Atenção: Este pedido não possui tipo de embalagem selecionado!')
         }
+        if (currentPO && (!currentPO.business_unit || currentPO.business_unit.trim() === '')) {
+            showError('⚠️ Atenção: Este pedido não possui a Unidade de Negócio selecionada!')
+        }
         setSelectedPOIndex(prev => Math.max(0, prev - 1))
         setCurrentPage(1) // Reset to first page when switching POs
     }
@@ -1055,6 +1062,9 @@ const ImportPage = () => {
     const handleNextPO = () => {
         if (currentPO && (!currentPO.packaging_type || currentPO.packaging_type.trim() === '')) {
             showError('⚠️ Atenção: Este pedido não possui tipo de embalagem selecionado!')
+        }
+        if (currentPO && (!currentPO.business_unit || currentPO.business_unit.trim() === '')) {
+            showError('⚠️ Atenção: Este pedido não possui a Unidade de Negócio selecionada!')
         }
         if (stagingData && stagingData.po_list && Array.isArray(stagingData.po_list)) {
             setSelectedPOIndex(prev => Math.min(stagingData.po_list.length - 1, prev + 1))
@@ -1303,7 +1313,7 @@ const ImportPage = () => {
                                 )}
 
                                 {/* PO-Level Cost Fields */}
-                                <div className="grid grid-cols-3 gap-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+                                <div className="grid grid-cols-4 gap-4 p-4 bg-green-50 border border-green-200 rounded-lg">
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-2">
                                             <DollarSign className="w-4 h-4 inline mr-1" />
@@ -1353,6 +1363,23 @@ const ImportPage = () => {
                                             <option value="Fardo Plástico">Fardo Plástico</option>
                                             <option value="Granel">Granel</option>
                                             <option value="Filme">Filme</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-2 text-cyan-905">
+                                            <Briefcase className="w-4 h-4 inline mr-1 text-cyan-700" />
+                                            Unidade de Negócio <span className="text-red-500 font-bold">*</span>
+                                        </label>
+                                        <select
+                                            value={currentPO.business_unit || ''}
+                                            onChange={(e) => handlePOFieldChange('business_unit', e.target.value)}
+                                            className="w-full px-3 py-2 border border-gray-305 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-800 font-medium"
+                                        >
+                                            <option value="">Selecione...</option>
+                                            <option value="Indústria">Indústria</option>
+                                            <option value="Construção Civil">Construção Civil</option>
+                                            <option value="Varejo">Varejo</option>
+                                            <option value="Outros">Outros</option>
                                         </select>
                                     </div>
                                 </div>
@@ -1507,48 +1534,47 @@ const ImportPage = () => {
                                                                             </span>
                                                                             
                                                                             {/* Tooltip Popover "O Extrato" */}
-                                                                            <div className="absolute z-50 hidden group-hover:block bg-slate-900 text-slate-100 p-4 rounded-xl shadow-2xl w-80 text-xs border border-slate-700 -top-2 left-full ml-3 pointer-events-none animate-fade-in">
+                                                                            <div className="absolute z-[9999] hidden group-hover:block bg-slate-900 text-slate-100 p-4 rounded-xl shadow-2xl min-w-[320px] w-80 text-xs border border-slate-700 -top-2 left-full ml-3 pointer-events-none animate-fade-in">
                                                                                 <h4 className="font-bold text-white mb-2 border-b border-slate-700 pb-1 flex items-center justify-between">
                                                                                     <span>📊 Extrato de Margem</span>
-                                                                                    <span className="text-[10px] text-slate-400 font-normal">Fórmula Celso</span>
                                                                                 </h4>
-                                                                                <div className="space-y-1.5 font-sans">
-                                                                                    <div className="flex justify-between">
+                                                                                <div className="space-y-1 font-sans font-medium">
+                                                                                    <div className="flex justify-between py-1">
                                                                                         <span className="text-slate-400">(+) Valor Bruto:</span>
-                                                                                        <span className="font-mono">{formatCurrency(marginResult.breakdown.gross)}</span>
+                                                                                        <span className="font-mono text-white">{formatCurrency(marginResult.breakdown.gross)}</span>
                                                                                     </div>
-                                                                                    <div className="flex justify-between text-amber-400">
+                                                                                    <div className="flex justify-between text-amber-400 py-1">
                                                                                         <span className="text-slate-400">(-) Ajuste VP (Prazo):</span>
                                                                                         <span className="font-mono">-{formatCurrency(marginResult.breakdown.vpDiscount)}</span>
                                                                                     </div>
-                                                                                    <div className="flex justify-between border-t border-slate-800 pt-0.5">
+                                                                                    <div className="flex justify-between border-t border-slate-800 pt-1 pb-1">
                                                                                         <span className="text-slate-400 font-semibold">(=) Valor Presente (VP):</span>
-                                                                                        <span className="font-semibold font-mono">{formatCurrency(marginResult.breakdown.vp)}</span>
+                                                                                        <span className="font-semibold font-mono text-white">{formatCurrency(marginResult.breakdown.vp)}</span>
                                                                                     </div>
-                                                                                    <div className="flex justify-between text-red-400">
+                                                                                    <div className="flex justify-between text-red-400 py-1">
                                                                                         <span className="text-slate-400">(-) Impostos (22.25%):</span>
                                                                                         <span className="font-mono">-{formatCurrency(marginResult.breakdown.taxes)}</span>
                                                                                     </div>
                                                                                     {marginResult.breakdown.commission > 0 && (
-                                                                                        <div className="flex justify-between text-red-400">
+                                                                                        <div className="flex justify-between text-red-400 py-1">
                                                                                             <span className="text-slate-400">(-) Comissão ({commRate}%):</span>
                                                                                             <span className="font-mono">-{formatCurrency(marginResult.breakdown.commission)}</span>
                                                                                         </div>
                                                                                     )}
                                                                                     {marginResult.breakdown.freight > 0 && (
-                                                                                        <div className="flex justify-between text-red-400">
+                                                                                        <div className="flex justify-between text-red-400 py-1">
                                                                                             <span className="text-slate-400">(-) Frete:</span>
                                                                                             <span className="font-mono">-{formatCurrency(marginResult.breakdown.freight)}</span>
                                                                                         </div>
                                                                                     )}
                                                                                     <div className="border-t border-slate-800 my-1"></div>
-                                                                                    <div className="flex justify-between text-emerald-400 font-bold">
+                                                                                    <div className="flex justify-between text-emerald-400 font-bold py-1">
                                                                                         <span className="text-slate-300">(=) Margem Absoluta:</span>
-                                                                                        <span className="font-mono">{formatCurrency(marginResult.breakdown.absoluteMargin)}</span>
+                                                                                        <span className="font-mono text-white">{formatCurrency(marginResult.breakdown.absoluteMargin)}</span>
                                                                                     </div>
-                                                                                    <div className="flex justify-between text-slate-300">
+                                                                                    <div className="flex justify-between text-slate-300 py-1">
                                                                                         <span className="text-slate-400">(/) Custo Industrial:</span>
-                                                                                        <span className="font-mono">{formatCurrency(marginResult.breakdown.costs)}</span>
+                                                                                        <span className="font-mono text-white">{formatCurrency(marginResult.breakdown.costs)}</span>
                                                                                     </div>
                                                                                     <div className="border-t border-slate-700 pt-1.5 flex justify-between items-center">
                                                                                         <span className="font-bold text-white">Margem Final (%):</span>

@@ -60,6 +60,27 @@ async def lifespan(app: FastAPI):
             print("Successfully added 'area' column to users table.")
     except Exception as e:
         print(f"Adding 'area' column to users table skipped/failed (likely already exists): {e}")
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS client_preferences (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                    client_name VARCHAR(255) NOT NULL,
+                    business_unit VARCHAR(100) NOT NULL,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT unique_tenant_client UNIQUE (tenant_id, client_name)
+                );
+            """))
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_client_preference_tenant_id ON client_preferences(tenant_id);
+            """))
+            print("Successfully initialized client_preferences table.")
+    except Exception as e:
+        print(f"Initializing client_preferences table skipped/failed: {e}")
+
     
     # Start background worker for S3 sync (non-blocking)
     from backend.services.background_worker import start_background_worker, stop_background_worker

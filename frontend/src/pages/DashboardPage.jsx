@@ -117,7 +117,7 @@ const DashboardPage = () => {
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
                         <BarChart3 className="w-7 h-7 text-primary-600" />
-                        Dashboard de Negócios (Celso KPIs)
+                        Dashboard de Negócios (KPIs)
                     </h1>
                     <p className="text-sm text-gray-600 mt-0.5">
                         Métricas de portfólio, margens, faturamento e alertas operacionais

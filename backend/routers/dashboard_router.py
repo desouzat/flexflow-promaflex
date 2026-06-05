@@ -90,7 +90,7 @@ async def get_celso_kpis(
         # Calculate cost
         material = material_costs.get(item.sku)
         if material:
-            unit_cost = Decimal(str(material.custo_mp_kg)) * Decimal(str(material.rendimento))
+            unit_cost = Decimal(str(material.custo_mp_kg)) / Decimal(str(material.rendimento)) if material.rendimento > 0 else Decimal("0.00")
             item_cost = unit_cost * qty
         else:
             # Fallback to 70% cost ratio
@@ -108,9 +108,23 @@ async def get_celso_kpis(
     unit_values = {u: Decimal("0.00") for u in units}
     unit_costs = {u: Decimal("0.00") for u in units}
 
+    from backend.models import ClientPreference
+    client_prefs = {
+        cp.client_name: cp.business_unit 
+        for cp in db.query(ClientPreference).filter(ClientPreference.tenant_id == tenant_id).all()
+    }
+
     for po in pos:
         client_name = po.client_name or "Outros"
-        unit = ClientMappingService.classify_client(client_name)
+        unit = client_prefs.get(client_name)
+        if not unit and po.partition_metadata and "business_unit" in po.partition_metadata:
+            unit = po.partition_metadata["business_unit"]
+        if not unit:
+            unit = ClientMappingService.classify_client(client_name)
+        
+        if unit not in units:
+            unit = "Outros"
+
         
         # Calculate PO total value
         po_val = Decimal("0.00")

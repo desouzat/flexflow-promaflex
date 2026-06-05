@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react'
-import { Plus, Edit2, Trash2, Save, X, DollarSign, Package, TrendingUp, Search, AlertTriangle, Percent } from 'lucide-react'
+import React, { useState, useEffect, useRef } from 'react'
+import { Plus, Edit2, Trash2, Save, X, DollarSign, Package, TrendingUp, Search, AlertTriangle, Percent, Upload } from 'lucide-react'
 import api from '../utils/api'
-import { showSuccess, showError } from '../utils/toast'
+import { showSuccess, showError, showLoading, dismissToast } from '../utils/toast'
 import ErrorBoundary from '../components/ErrorBoundary'
 
 /**
@@ -43,6 +43,38 @@ const CostsPage = () => {
         commission_rate: '',
         has_alert: false
     })
+
+    const fileInputRef = useRef(null)
+
+    const handleExcelUpload = async (e) => {
+        const file = e.target.files[0]
+        if (!file) return
+
+        const formDataPayload = new FormData()
+        formDataPayload.append('file', file)
+
+        const toastId = showLoading('Fazendo upload da planilha de custos...')
+        try {
+            const response = await api.post('/costs/upload', formDataPayload, {
+                headers: {
+                    'Content-Type': 'multipart/form-data'
+                }
+            })
+            if (response.status === 200) {
+                showSuccess(response.data.message || 'Custos atualizados com sucesso!')
+                fetchMaterials()
+            }
+        } catch (err) {
+            console.error(err)
+            const errorMsg = err.response?.data?.detail || 'Erro ao processar planilha de custos.'
+            showError(errorMsg)
+        } finally {
+            dismissToast(toastId)
+            if (fileInputRef.current) {
+                fileInputRef.current.value = ''
+            }
+        }
+    }
 
     useEffect(() => {
         if (activeTab === 'materials') {
@@ -247,14 +279,11 @@ const CostsPage = () => {
     }) : []
 
     const calculateCostPerUnit = (material) => {
-        const costPerKg = parseFloat(material.custo_mp_kg)
-        const yield_kg = parseFloat(material.rendimento)
-        const taxRate = parseFloat(material.indice_impostos) / 100
-
-        const baseCost = costPerKg * yield_kg
-        const totalCost = baseCost * (1 + taxRate)
-
-        return totalCost.toFixed(2)
+        const costPerKg = parseFloat(material.custo_mp_kg) || 0
+        const yield_kg = parseFloat(material.rendimento) || 0
+        if (yield_kg <= 0) return '0.00'
+        const baseCost = costPerKg / yield_kg
+        return baseCost.toFixed(2)
     }
 
     if (loading) {
@@ -311,6 +340,21 @@ const CostsPage = () => {
                                             className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                                         />
                                     </div>
+                                    <input
+                                        type="file"
+                                        ref={fileInputRef}
+                                        className="hidden"
+                                        onChange={handleExcelUpload}
+                                        accept=".xlsx,.xls"
+                                    />
+                                    <button
+                                        onClick={() => fileInputRef.current?.click()}
+                                        className="px-4 py-2 border border-gray-300 rounded-lg text-gray-750 hover:bg-gray-50 flex items-center gap-2 font-medium transition-all"
+                                        title="Importar planilha de custos Celso (.xlsx)"
+                                    >
+                                        <Upload className="w-5 h-5 text-gray-500" />
+                                        Importar Planilha
+                                    </button>
                                     <button
                                         onClick={() => {
                                             setIsCreating(true)
@@ -463,7 +507,7 @@ const CostsPage = () => {
                                                 Impostos
                                             </th>
                                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                Custo/Unidade
+                                                Custo M2
                                             </th>
                                             <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                                                 Ações

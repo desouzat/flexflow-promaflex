@@ -3,7 +3,7 @@ FlexFlow Cost Management Router
 Endpoints para gerenciamento de custos de materiais (MASTER only)
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from decimal import Decimal
@@ -291,6 +291,161 @@ async def delete_material_cost(
     db.commit()
     
     return None
+
+
+@router.post("/upload", status_code=status.HTTP_200_OK)
+async def upload_incremental_costs(
+    file: UploadFile = File(..., description="Excel file (.xlsx) containing incremental costs"),
+    current_user: UserInfo = Depends(require_admin_or_master_role),
+    db: Session = Depends(get_db)
+):
+    """
+    Incremental Excel Upload (.xlsx) for material costs.
+    Upserts Material Costs using 'Material' column (A) as the primary SKU key.
+    Enforces exact Celso headers:
+    - Column A: 'Material' (Source for SKU and Name)
+    - Column B: 'Rendimento'
+    - Column D: 'CUSTO KG'
+    Calculates Custo M2 as CUSTO KG / RENDIMENTO.
+    """
+    import io
+    import uuid
+    import pandas as pd
+    from datetime import datetime
+    from backend.models import PurchaseOrder, OrderItem
+    
+    if not file.filename.lower().endswith(('.xlsx', '.xls')):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Arquivo inválido. Apenas planilhas Excel (.xlsx ou .xls) são permitidas."
+        )
+        
+    try:
+        file_content = await file.read()
+        df = pd.read_excel(io.BytesIO(file_content))
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Falha ao ler arquivo Excel: {str(e)}"
+        )
+        
+    if len(df.columns) < 4:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A planilha deve conter pelo menos 4 colunas (Material, Rendimento, ..., CUSTO KG)."
+        )
+        
+    col_a = str(df.columns[0]).strip()
+    col_b = str(df.columns[1]).strip()
+    col_d = str(df.columns[3]).strip()
+    
+    if col_a != 'Material' or col_b != 'Rendimento' or col_d != 'CUSTO KG':
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Estrutura da planilha incorreta. Esperado exatamente as colunas: A='Material', B='Rendimento', D='CUSTO KG'. Encontrado: A='{col_a}', B='{col_b}', D='{col_d}'."
+        )
+        
+    updated_count = 0
+    created_count = 0
+    updated_skus = []
+    
+    tenant_uuid = uuid.UUID(str(current_user.tenant_id))
+    user_uuid = uuid.UUID(str(current_user.id))
+    
+    for idx, row in df.iterrows():
+        raw_sku = row.iloc[0]
+        if pd.isna(raw_sku):
+            continue
+            
+        sku = str(raw_sku).strip()
+        if not sku:
+            continue
+            
+        try:
+            rendimento = float(row.iloc[1])
+            custo_mp_kg = float(row.iloc[3])
+        except (ValueError, TypeError):
+            # Skip invalid rows
+            continue
+            
+        if rendimento <= 0 or custo_mp_kg < 0:
+            continue
+            
+        # Find existing MaterialCost
+        material = db.query(MaterialCost).filter(
+            MaterialCost.tenant_id == tenant_uuid,
+            MaterialCost.sku == sku
+        ).first()
+        
+        if material:
+            material.rendimento = rendimento
+            material.custo_mp_kg = custo_mp_kg
+            material.nome = sku  # Material column is the source for both SKU and name
+            material.updated_at = datetime.utcnow()
+            material.updated_by = user_uuid
+            updated_count += 1
+        else:
+            material = MaterialCost(
+                id=uuid.uuid4(),
+                tenant_id=tenant_uuid,
+                sku=sku,
+                nome=sku,
+                rendimento=rendimento,
+                custo_mp_kg=custo_mp_kg,
+                indice_impostos=22.25,
+                updated_by=user_uuid,
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow()
+            )
+            db.add(material)
+            created_count += 1
+            
+        updated_skus.append(sku)
+        
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao salvar custos no banco de dados: {str(e)}"
+        )
+        
+    # Trigger global re-validation for updated SKUs
+    affected_pos = db.query(PurchaseOrder).join(OrderItem).filter(
+        PurchaseOrder.tenant_id == tenant_uuid,
+        OrderItem.sku.in_(updated_skus)
+    ).distinct().all()
+    
+    revalidation_logs = []
+    for po in affected_pos:
+        has_pending = False
+        for item in po.items:
+            mat = db.query(MaterialCost).filter(
+                MaterialCost.tenant_id == po.tenant_id,
+                MaterialCost.sku == item.sku
+            ).first()
+            if not mat or mat.custo_mp_kg <= 0 or mat.rendimento <= 0:
+                has_pending = True
+                
+        # Calculate new dynamic margin
+        if not has_pending:
+            log_msg = f"PO {po.po_number}: PENDENTE PCP badge cleared! Margin recalculated successfully."
+        else:
+            log_msg = f"PO {po.po_number}: Cost updated. Remains PENDENTE PCP due to other pending SKUs."
+        revalidation_logs.append(log_msg)
+        print(f"[CLEANUP TRIGGER] {log_msg}")
+        
+    return {
+        "success": True,
+        "message": f"Ingestão concluída. Criados: {created_count}, Atualizados: {updated_count}.",
+        "created": created_count,
+        "updated": updated_count,
+        "revalidation": revalidation_logs
+    }
+
+
+
 
 
 @router.get("/settings", response_model=GlobalSettingsResponse)

@@ -1059,3 +1059,48 @@ class SupportTicket(Base):
     
     def __repr__(self):
         return f"<SupportTicket(id={self.id}, user_id={self.user_id}, status={self.status})>"
+
+
+# ============================================================================
+# MODELO: ClientPreference
+# ============================================================================
+
+class ClientPreference(Base):
+    """
+    Modelo de Preferências do Cliente (Multi-tenancy).
+    Vincula o nome do cliente a uma unidade de negócio padrão.
+    """
+    __tablename__ = "client_preferences"
+    
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False
+    )
+    client_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    business_unit: Mapped[str] = mapped_column(String(100), nullable=False)  # 'Indústria', 'Construção Civil', 'Varejo'
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now()
+    )
+    
+    tenant: Mapped["Tenant"] = relationship("Tenant")
+    
+    __table_args__ = (
+        Index('idx_client_preference_tenant_id', 'tenant_id'),
+        Index('idx_client_preference_tenant_client', 'tenant_id', 'client_name', unique=True),
+    )
+
+    def __repr__(self):
+        return f"<ClientPreference(id={self.id}, client_name={self.client_name}, business_unit={self.business_unit})>"
+

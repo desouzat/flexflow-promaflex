@@ -847,10 +847,30 @@ async def confirm_staging(
                     "is_replacement": is_replacement,
                     "customization_notes": customization_notes,
                     "attachment_path": attachment_path,
-                    "additional_costs": po.additional_costs
+                    "additional_costs": po.additional_costs,
+                    "business_unit": po.business_unit
                 }
             )
             db.add(new_po)
+            db.flush()
+
+            # Upsert client preference memory
+            from backend.models import ClientPreference
+            from sqlalchemy import select
+            pref_stmt = select(ClientPreference).where(
+                ClientPreference.tenant_id == tenant_uuid,
+                ClientPreference.client_name == po.client_name
+            )
+            existing_pref = db.execute(pref_stmt).scalar_one_or_none()
+            if existing_pref:
+                existing_pref.business_unit = po.business_unit
+            else:
+                new_pref = ClientPreference(
+                    tenant_id=tenant_uuid,
+                    client_name=po.client_name,
+                    business_unit=po.business_unit
+                )
+                db.add(new_pref)
             db.flush()
 
             # 4. Process each item

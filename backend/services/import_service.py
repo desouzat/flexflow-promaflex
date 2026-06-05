@@ -711,7 +711,8 @@ class ImportService:
     def validate_import_data(
         self,
         df: pd.DataFrame,
-        mapping: ImportMapping
+        mapping: ImportMapping,
+        tenant_id: Optional[str] = None
     ) -> ImportValidationResult:
         """
         Validate all rows in the DataFrame and group by PO.
@@ -824,9 +825,29 @@ class ImportService:
         po_data_list = []
         try:
             for po_number, po_group in po_groups.items():
+                business_unit = None
+                if tenant_id:
+                    from backend.models import ClientPreference
+                    from sqlalchemy import select
+                    import uuid
+                    tenant_uuid = uuid.UUID(str(tenant_id))
+                    # DATABASE LOOKUP: SELECT business_unit FROM client_preferences WHERE tenant_id = :tenant_id AND client_name = :client_name
+                    stmt = select(ClientPreference).where(
+                        ClientPreference.tenant_id == tenant_uuid,
+                        ClientPreference.client_name == po_group['client_name']
+                    )
+                    pref = self.db.execute(stmt).scalar_one_or_none()
+                    if pref:
+                        business_unit = pref.business_unit
+                
+                if not business_unit:
+                    from backend.services.client_mapping_service import ClientMappingService
+                    business_unit = ClientMappingService.classify_client(po_group['client_name'])
+
                 po_data = ImportPOData(
                     po_number=po_group['po_number'],
                     client_name=po_group['client_name'],
+                    business_unit=business_unit,
                     items=po_group['items'],
                     po_total_value=po_group.get('po_total_value')  # Include PO-level total
                 )
@@ -895,7 +916,7 @@ class ImportService:
                 )
             
             # Step 3: Validate and parse data
-            validation_result = self.validate_import_data(df, request.mapping)
+            validation_result = self.validate_import_data(df, request.mapping, tenant_id=request.tenant_id)
             
             if not validation_result.success:
                 # Format error messages
@@ -953,6 +974,7 @@ class ImportService:
                 po_list.append({
                     'po_number': po_data.po_number,
                     'client_name': po_data.client_name,
+                    'business_unit': po_data.business_unit,
                     'items': [item.model_dump() for item in po_data.items],
                     'total_value': float(po_data.total_value) if po_data.total_value else None,
                     'total_cost': float(po_data.total_cost) if po_data.total_cost else None,

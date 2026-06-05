@@ -42,7 +42,7 @@ const KanbanColumn = ({ title, status, pos, onCardClick, onMoveCard, color = 'gr
                         onClick={() => setShowHelp(true)}
                         className="p-1 hover:bg-white hover:bg-opacity-30 rounded transition-colors"
                         aria-label="Ajuda"
-                        title="Ajuda - The Compass"
+                        title="Ajuda Contextual"
                     >
                         <HelpCircle className="w-4 h-4" />
                     </button>

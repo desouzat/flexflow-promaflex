@@ -246,6 +246,7 @@ class ImportPOData(BaseModel):
     po_number: str = Field(..., min_length=1, max_length=100)
     client_name: str = Field(..., min_length=1, max_length=255)
     items: List[ImportItemData] = Field(..., min_length=1)
+    business_unit: Optional[str] = Field(None, description="Business unit of the client")
     
     # NEW: PO total value from spreadsheet (22-field structure)
     po_total_value: Optional[Decimal] = Field(None, ge=0, description="PO total value from spreadsheet (Valor Total do Pedido)")
@@ -562,11 +563,21 @@ class ConfirmStagingItem(BaseModel):
 class ConfirmStagingPO(BaseModel):
     po_number: str
     client_name: str
+    business_unit: str
     freight_cost: float = 0.0
     additional_costs: float = 0.0
     po_total_value: Optional[float] = None
     packaging_type: Optional[str] = None
     items: List[ConfirmStagingItem]
+
+    @field_validator("business_unit")
+    @classmethod
+    def validate_business_unit(cls, v):
+        allowed = ["Indústria", "Construção Civil", "Varejo", "Outros"]
+        if v not in allowed:
+            raise ValueError(f"Business unit must be one of: {', '.join(allowed)}")
+        return v
+
 
 
 class ConfirmStagingPayload(BaseModel):

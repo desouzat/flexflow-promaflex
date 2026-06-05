@@ -1,5 +1,5 @@
 /**
- * FlexFlow - Sistema de Ajuda Contextual "The Compass"
+ * FlexFlow - Sistema de Ajuda Contextual
  * Configuração de ajuda para cada etapa do Kanban
  */
 
