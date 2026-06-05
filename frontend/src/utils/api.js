@@ -44,29 +44,21 @@ api.interceptors.response.use(
         const url = error.config?.url
         console.error('[API Interceptor] Response error:', status, url)
 
+        if (status === 403) {
+            console.warn('[API Interceptor] 403 Forbidden - Access Denied (Bypassing logout/redirect)')
+            return Promise.reject(error)
+        }
+
         if (status === 401) {
-            const token = localStorage.getItem('token')
-            const detail = error.response?.data?.detail || ''
-            const isPermissionError = detail.toLowerCase().includes('permiss') || 
-                                      detail.toLowerCase().includes('acess') || 
-                                      detail.toLowerCase().includes('role') || 
-                                      detail.toLowerCase().includes('negad') ||
-                                      detail.toLowerCase().includes('denied') ||
-                                      detail.toLowerCase().includes('forbidden')
-            
-            if (token && isPermissionError) {
-                console.warn('[API Interceptor] 401 converted to 403 (Permission Error)')
-                if (error.response) {
-                    error.response.status = 403
-                }
-            } else {
+            if (window.location.pathname !== '/login') {
                 console.warn('[API Interceptor] 401 Unauthorized - clearing localStorage and redirecting to login')
                 localStorage.clear()
                 window.location.href = '/login'
+            } else {
+                console.warn('[API Interceptor] 401 Unauthorized on login page - bypassing forced redirect loop')
             }
-        } else if (status === 403) {
-            console.warn('[API Interceptor] 403 Forbidden - Access Denied (Bypassing logout/redirect)')
         }
+
         return Promise.reject(error)
     }
 )

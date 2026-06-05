@@ -1,9 +1,9 @@
 """
 User Management Router
-RBAC-restricted endpoints for managing users (MASTER/ADMIN only)
+RBAC-restricted endpoints for managing users (ADMIN only)
 """
 
-from fastapi import APIRouter, Request, HTTPException, status, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 from datetime import datetime
@@ -13,8 +13,8 @@ import uuid
 
 from backend.database import get_db
 from backend.models import User
-from backend.middleware import get_request_context
-from backend.routers.auth import get_password_hash, SECURITY_PEPPER
+from backend.routers.auth import get_password_hash, SECURITY_PEPPER, get_current_user
+from backend.schemas.auth_schema import UserInfo
 
 print("[DEBUG] Pepper loaded in users router:", bool(SECURITY_PEPPER))
 
@@ -42,7 +42,6 @@ class UserUpdate(BaseModel):
     password: Optional[str] = None
 
 
-
 class UserResponse(BaseModel):
     """Schema for user response"""
     id: str
@@ -58,47 +57,34 @@ class UserResponse(BaseModel):
 
 
 # ============================================================================
-# HELPER FUNCTIONS
+# ENDPOINTS
 # ============================================================================
 
-def require_admin(request: Request):
-    """Verify that the user is ADMIN"""
-    context = get_request_context(request)
+
+@router.get("", response_model=List[UserResponse])
+@router.get("/", response_model=List[UserResponse])
+async def list_users(
+    db: Session = Depends(get_db),
+    current_user: UserInfo = Depends(get_current_user)
+):
+    """
+    List all users in the tenant (ADMIN only)
+    """
+    timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
     
     # SECURITY AUDIT: Strictly raise HTTP_403_FORBIDDEN on role mismatch
-    # This prevents the frontend from intercepting it as an expired session (401) and looping logouts
-    if context.token_payload.role != 'admin':
-        timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-        print(f"{timestamp} [RBAC] Access denied: user {context.user_id} (role: {context.token_payload.role}) attempted to access user management")
+    if current_user.role != 'admin':
+        print(f"{timestamp} [RBAC] Access denied: user {current_user.id} (role: {current_user.role}) attempted to access user management")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied. Only ADMIN users can manage users."
         )
     
-    return context
-
-
-# ============================================================================
-# ENDPOINTS
-# ============================================================================
-
-@router.get("", response_model=List[UserResponse])
-@router.get("/", response_model=List[UserResponse])
-async def list_users(
-    request: Request,
-    db: Session = Depends(get_db)
-):
-    """
-    List all users in the tenant (MASTER/ADMIN only)
-    """
-    timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-    context = require_admin(request)
-    
-    print(f"{timestamp} [USER MANAGEMENT] Listing users for tenant: {context.tenant_id}")
+    print(f"{timestamp} [USER MANAGEMENT] Listing users for tenant: {current_user.tenant_id}")
     
     try:
         # Query users in the same tenant (casted as UUID for strict PostgreSQL mapping)
-        stmt = select(User).where(User.tenant_id == uuid.UUID(context.tenant_id)).order_by(User.created_at.desc())
+        stmt = select(User).where(User.tenant_id == uuid.UUID(current_user.tenant_id)).order_by(User.created_at.desc())
         result = db.execute(stmt)
         users = result.scalars().all()
         
@@ -132,14 +118,21 @@ async def list_users(
 @router.post("/", response_model=UserResponse)
 async def create_user(
     user_data: UserCreate,
-    request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: UserInfo = Depends(get_current_user)
 ):
     """
-    Create a new user (MASTER/ADMIN only)
+    Create a new user (ADMIN only)
     """
     timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-    context = require_admin(request)
+    
+    # SECURITY AUDIT: Strictly raise HTTP_403_FORBIDDEN on role mismatch
+    if current_user.role != 'admin':
+        print(f"{timestamp} [RBAC] Access denied: user {current_user.id} (role: {current_user.role}) attempted to access user management")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied. Only ADMIN users can manage users."
+        )
     
     print(f"{timestamp} [USER MANAGEMENT] Creating user: {user_data.username} (role: {user_data.role})")
     
@@ -154,7 +147,7 @@ async def create_user(
         
         # Check if username already exists in tenant
         stmt = select(User).where(
-            User.tenant_id == uuid.UUID(context.tenant_id),
+            User.tenant_id == uuid.UUID(current_user.tenant_id),
             User.username == user_data.username
         )
         existing_user = db.execute(stmt).scalar_one_or_none()
@@ -167,7 +160,7 @@ async def create_user(
         
         # Check if email already exists in tenant
         stmt = select(User).where(
-            User.tenant_id == uuid.UUID(context.tenant_id),
+            User.tenant_id == uuid.UUID(current_user.tenant_id),
             User.email == user_data.email
         )
         existing_email = db.execute(stmt).scalar_one_or_none()
@@ -181,7 +174,7 @@ async def create_user(
         # Create new user
         new_user = User(
             id=uuid.uuid4(),
-            tenant_id=uuid.UUID(context.tenant_id),
+            tenant_id=uuid.UUID(current_user.tenant_id),
             username=user_data.username,
             email=user_data.email,
             hashed_password=get_password_hash(user_data.password),
@@ -221,14 +214,21 @@ async def create_user(
 @router.delete("/{user_id}")
 async def delete_user(
     user_id: str,
-    request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: UserInfo = Depends(get_current_user)
 ):
     """
-    Delete a user (MASTER/ADMIN only)
+    Delete a user (ADMIN only)
     """
     timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-    context = require_admin(request)
+    
+    # SECURITY AUDIT: Strictly raise HTTP_403_FORBIDDEN on role mismatch
+    if current_user.role != 'admin':
+        print(f"{timestamp} [RBAC] Access denied: user {current_user.id} (role: {current_user.role}) attempted to access user management")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied. Only ADMIN users can manage users."
+        )
     
     print(f"{timestamp} [USER MANAGEMENT] Deleting user: {user_id}")
     
@@ -236,7 +236,7 @@ async def delete_user(
         # Find user
         stmt = select(User).where(
             User.id == uuid.UUID(user_id),
-            User.tenant_id == uuid.UUID(context.tenant_id)
+            User.tenant_id == uuid.UUID(current_user.tenant_id)
         )
         user = db.execute(stmt).scalar_one_or_none()
         
@@ -247,7 +247,7 @@ async def delete_user(
             )
         
         # Prevent deleting yourself
-        if str(user.id) == context.user_id:
+        if str(user.id) == current_user.id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cannot delete your own account"
@@ -276,14 +276,21 @@ async def delete_user(
 async def update_user(
     user_id: str,
     user_data: UserUpdate,
-    request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: UserInfo = Depends(get_current_user)
 ):
     """
-    Update user's Role and Area (MASTER/ADMIN only)
+    Update user's Role and Area (ADMIN only)
     """
     timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-    context = require_admin(request)
+    
+    # SECURITY AUDIT: Strictly raise HTTP_403_FORBIDDEN on role mismatch
+    if current_user.role != 'admin':
+        print(f"{timestamp} [RBAC] Access denied: user {current_user.id} (role: {current_user.role}) attempted to access user management")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied. Only ADMIN users can manage users."
+        )
     
     print(f"{timestamp} [USER MANAGEMENT] Updating user {user_id}: role={user_data.role}, area={user_data.area}")
     
@@ -299,7 +306,7 @@ async def update_user(
         # Find user
         stmt = select(User).where(
             User.id == uuid.UUID(user_id),
-            User.tenant_id == uuid.UUID(context.tenant_id)
+            User.tenant_id == uuid.UUID(current_user.tenant_id)
         )
         user = db.execute(stmt).scalar_one_or_none()
         
@@ -342,4 +349,3 @@ async def update_user(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update user: {str(e)}"
         )
-
