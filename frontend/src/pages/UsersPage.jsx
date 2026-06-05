@@ -19,14 +19,45 @@ const UsersPage = () => {
     })
 
     useEffect(() => {
-        const token = localStorage.getItem('token')
-        const isAdmin = user && (user.role || '').toLowerCase() === 'admin'
-        if (!authLoading && token && isAdmin) {
-            loadUsers()
+        let attempts = 0
+        let intervalId = null
+
+        const checkAndLoad = () => {
+            const token = localStorage.getItem('token')
+            const isAdmin = user && (user.role || '').toLowerCase() === 'admin'
+            
+            if (token && isAdmin) {
+                loadUsers()
+                return true
+            }
+            return false
+        }
+
+        if (!authLoading) {
+            const success = checkAndLoad()
+            if (!success) {
+                // Retry every 100ms up to 10 times to wait for token/role sync
+                intervalId = setInterval(() => {
+                    attempts++
+                    const done = checkAndLoad()
+                    if (done || attempts >= 10) {
+                        clearInterval(intervalId)
+                    }
+                }, 100)
+            }
+        }
+
+        return () => {
+            if (intervalId) clearInterval(intervalId)
         }
     }, [user, authLoading])
 
     const loadUsers = async () => {
+        const token = localStorage.getItem('token')
+        if (!token) {
+            console.warn('[UsersPage] Fetch cancelled: no token present in localStorage')
+            return
+        }
         setLoading(true)
         try {
             const response = await api.get('/users')

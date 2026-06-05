@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react'
 import api from '../utils/api'
+import { useAuth } from './AuthContext'
 
 const NotificationContext = createContext()
 
@@ -12,6 +13,7 @@ export const useNotifications = () => {
 }
 
 export const NotificationProvider = ({ children }) => {
+    const { user } = useAuth()
     const [badges, setBadges] = useState({
         kanban: 0,
         import: 0,
@@ -19,6 +21,9 @@ export const NotificationProvider = ({ children }) => {
     })
 
     const fetchNotifications = async () => {
+        const token = localStorage.getItem('token')
+        if (!token) return
+
         try {
             // FIXED: Remove /api prefix - api.js baseURL already includes /api
             // So /kanban/pos becomes http://localhost:8000/api/kanban/pos
@@ -37,11 +42,14 @@ export const NotificationProvider = ({ children }) => {
     }
 
     useEffect(() => {
-        fetchNotifications()
-        // Refresh every 30 seconds
-        const interval = setInterval(fetchNotifications, 30000)
-        return () => clearInterval(interval)
-    }, [])
+        const token = localStorage.getItem('token')
+        if (token && user && user.id) {
+            fetchNotifications()
+            // Refresh every 30 seconds
+            const interval = setInterval(fetchNotifications, 30000)
+            return () => clearInterval(interval)
+        }
+    }, [user])
 
     const updateBadge = (key, value) => {
         setBadges(prev => ({

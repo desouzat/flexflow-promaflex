@@ -14,7 +14,9 @@ import uuid
 from backend.database import get_db
 from backend.models import User
 from backend.middleware import get_request_context
-from backend.routers.auth import get_password_hash
+from backend.routers.auth import get_password_hash, SECURITY_PEPPER
+
+print("[DEBUG] Pepper loaded in users router:", bool(SECURITY_PEPPER))
 
 router = APIRouter(prefix="/api/users", tags=["User Management"])
 
@@ -63,6 +65,8 @@ def require_admin(request: Request):
     """Verify that the user is ADMIN"""
     context = get_request_context(request)
     
+    # SECURITY AUDIT: Strictly raise HTTP_403_FORBIDDEN on role mismatch
+    # This prevents the frontend from intercepting it as an expired session (401) and looping logouts
     if context.token_payload.role != 'admin':
         timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
         print(f"{timestamp} [RBAC] Access denied: user {context.user_id} (role: {context.token_payload.role}) attempted to access user management")
@@ -93,8 +97,8 @@ async def list_users(
     print(f"{timestamp} [USER MANAGEMENT] Listing users for tenant: {context.tenant_id}")
     
     try:
-        # Query users in the same tenant
-        stmt = select(User).where(User.tenant_id == context.tenant_id).order_by(User.created_at.desc())
+        # Query users in the same tenant (casted as UUID for strict PostgreSQL mapping)
+        stmt = select(User).where(User.tenant_id == uuid.UUID(context.tenant_id)).order_by(User.created_at.desc())
         result = db.execute(stmt)
         users = result.scalars().all()
         
@@ -150,7 +154,7 @@ async def create_user(
         
         # Check if username already exists in tenant
         stmt = select(User).where(
-            User.tenant_id == context.tenant_id,
+            User.tenant_id == uuid.UUID(context.tenant_id),
             User.username == user_data.username
         )
         existing_user = db.execute(stmt).scalar_one_or_none()
@@ -163,7 +167,7 @@ async def create_user(
         
         # Check if email already exists in tenant
         stmt = select(User).where(
-            User.tenant_id == context.tenant_id,
+            User.tenant_id == uuid.UUID(context.tenant_id),
             User.email == user_data.email
         )
         existing_email = db.execute(stmt).scalar_one_or_none()
@@ -232,7 +236,7 @@ async def delete_user(
         # Find user
         stmt = select(User).where(
             User.id == uuid.UUID(user_id),
-            User.tenant_id == context.tenant_id
+            User.tenant_id == uuid.UUID(context.tenant_id)
         )
         user = db.execute(stmt).scalar_one_or_none()
         
@@ -295,7 +299,7 @@ async def update_user(
         # Find user
         stmt = select(User).where(
             User.id == uuid.UUID(user_id),
-            User.tenant_id == context.tenant_id
+            User.tenant_id == uuid.UUID(context.tenant_id)
         )
         user = db.execute(stmt).scalar_one_or_none()
         
