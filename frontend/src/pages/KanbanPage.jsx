@@ -638,15 +638,19 @@ const KanbanPage = () => {
     }
 
     const handleEvidenceUpload = async (field, file) => {
+        console.log('STEP 1: File selection detected')
         if (!file) return
 
         setUploadingEvidence(true)
         const formData = new FormData()
         formData.append('file', file)
+        console.log('STEP 2: FormData created')
 
         const endpoint = field === 'foto_carga_path'
             ? `/kanban/pos/${selectedPO.id}/upload-cargo-photo`
             : `/kanban/pos/${selectedPO.id}/upload-receipt-photo`
+
+        console.log('STEP 3: Attempting API POST to /api/kanban/pos/...')
 
         try {
             // Upload file directly to the specific endpoint
@@ -2192,12 +2196,13 @@ const KanbanPage = () => {
                                                                                                                 id="foto-carga-reupload"
                                                                                                                 disabled={uploadingEvidence}
                                                                                                             />
-                                                                                                            <label
-                                                                                                                htmlFor="foto-carga-reupload"
+                                                                                                            <button
+                                                                                                                type="button"
+                                                                                                                onClick={() => document.getElementById('foto-carga-reupload').click()}
                                                                                                                 className="inline-flex items-center gap-1 text-[10px] text-gray-500 bg-gray-100 hover:bg-gray-200 border border-gray-305 rounded px-2 py-0.5 cursor-pointer transition-colors"
                                                                                                             >
                                                                                                                 Substituir Arquivo
-                                                                                                            </label>
+                                                                                                            </button>
                                                                                                         </div>
                                                                                                     )}
                                                                                                 </div>
@@ -2211,13 +2216,14 @@ const KanbanPage = () => {
                                                                                                         id="foto-carga-upload"
                                                                                                         disabled={uploadingEvidence || isPhaseADisabled}
                                                                                                     />
-                                                                                                    <label
-                                                                                                        htmlFor={isPhaseADisabled ? undefined : "foto-carga-upload"}
+                                                                                                    <button
+                                                                                                        type="button"
+                                                                                                        onClick={() => document.getElementById('foto-carga-upload').click()}
                                                                                                         className={`flex items-center justify-center gap-2 px-4 py-2 bg-cyan-600 text-white rounded-lg transition-colors text-xs font-semibold shadow-xs ${isPhaseADisabled ? 'cursor-not-allowed opacity-50 bg-cyan-400' : 'hover:bg-cyan-700 cursor-pointer'}`}
                                                                                                     >
                                                                                                         <Upload className="w-4 h-4" />
                                                                                                         {uploadingEvidence ? 'Enviando...' : 'Enviar Foto da Carga'}
-                                                                                                    </label>
+                                                                                                    </button>
                                                                                                 </div>
                                                                                             )}
                                                                                         </div>
@@ -2251,12 +2257,13 @@ const KanbanPage = () => {
                                                                                                                 id="foto-canhoto-reupload"
                                                                                                                 disabled={uploadingEvidence}
                                                                                                             />
-                                                                                                            <label
-                                                                                                                htmlFor="foto-canhoto-reupload"
+                                                                                                            <button
+                                                                                                                type="button"
+                                                                                                                onClick={() => document.getElementById('foto-canhoto-reupload').click()}
                                                                                                                 className="inline-flex items-center gap-1 text-[10px] text-gray-500 bg-gray-100 hover:bg-gray-200 border border-gray-305 rounded px-2 py-0.5 cursor-pointer transition-colors"
                                                                                                             >
                                                                                                                 Substituir Arquivo
-                                                                                                            </label>
+                                                                                                            </button>
                                                                                                         </div>
                                                                                                     )}
                                                                                                 </div>
@@ -2270,13 +2277,14 @@ const KanbanPage = () => {
                                                                                                         id="foto-canhoto-upload"
                                                                                                         disabled={uploadingEvidence || isPhaseADisabled}
                                                                                                     />
-                                                                                                    <label
-                                                                                                        htmlFor={isPhaseADisabled ? undefined : "foto-canhoto-upload"}
+                                                                                                    <button
+                                                                                                        type="button"
+                                                                                                        onClick={() => document.getElementById('foto-canhoto-upload').click()}
                                                                                                         className={`flex items-center justify-center gap-2 px-4 py-2 bg-cyan-600 text-white rounded-lg transition-colors text-xs font-semibold shadow-xs ${isPhaseADisabled ? 'cursor-not-allowed opacity-50 bg-cyan-400' : 'hover:bg-cyan-700 cursor-pointer'}`}
                                                                                                     >
                                                                                                         <Upload className="w-4 h-4" />
                                                                                                         {uploadingEvidence ? 'Enviando...' : 'Enviar Nota Fiscal com Canhoto Assinado'}
-                                                                                                    </label>
+                                                                                                    </button>
                                                                                                 </div>
                                                                                             )}
                                                                                         </div>
