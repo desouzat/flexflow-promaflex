@@ -45,11 +45,29 @@ api.interceptors.response.use(
         console.error('[API Interceptor] Response error:', status, url)
 
         if (status === 401) {
-            console.warn('[API Interceptor] 401 Unauthorized - clearing auth and redirecting to login')
-            // Token expired or invalid
-            localStorage.removeItem('token')
-            localStorage.removeItem('user')
-            window.location.href = '/login'
+            const token = localStorage.getItem('token')
+            const isAuthRequest = url && (url.includes('/auth/me') || url.includes('/auth/login'))
+            if (token && !isAuthRequest && !error.config?._retry) {
+                console.warn('[API Interceptor] 401 Unauthorized but token exists - attempting state validation before logout')
+                error.config._retry = true
+                return api.get('/auth/me')
+                    .then(() => {
+                        console.log('[API Interceptor] Token verification successful - retrying original request')
+                        return api(error.config)
+                    })
+                    .catch((err) => {
+                        console.error('[API Interceptor] Token verification failed - clearing session and redirecting')
+                        localStorage.removeItem('token')
+                        localStorage.removeItem('user')
+                        window.location.href = '/login'
+                        return Promise.reject(err)
+                    })
+            } else {
+                console.warn('[API Interceptor] 401 Unauthorized - clearing auth and redirecting to login')
+                localStorage.removeItem('token')
+                localStorage.removeItem('user')
+                window.location.href = '/login'
+            }
         } else if (status === 403) {
             console.error('[API Interceptor] 403 Forbidden - token exists but access denied')
             console.error('[API Interceptor] This may indicate a token/state sync issue')

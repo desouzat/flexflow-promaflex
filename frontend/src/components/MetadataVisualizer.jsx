@@ -3,7 +3,11 @@ import { ChevronDown, ChevronRight, Edit2, Save, X, Paperclip } from 'lucide-rea
 
 const KEY_TRANSLATIONS = {
     is_export: 'Exportação',
-    is_replacement: 'Troca / Reposição',
+    is_replacement: 'Troca/Reposição',
+    is_new_client: 'Cliente Novo',
+    is_first_order: 'Cliente Novo',
+    attachment_filename: 'Nome do Arquivo',
+    'Attachment Filename': 'Nome do Arquivo',
     is_parted: 'Particionado',
     waiting_partition: 'Aguardando Partição',
     packaging_type: 'Tipo de Embalagem',
@@ -187,11 +191,12 @@ const MetadataVisualizer = ({ metadata, itemId, onUpdate, readOnly = false }) =>
             );
         }
 
-        // Boolean
-        if (typeof value === 'boolean') {
+        // Boolean or boolean-like string
+        if (typeof value === 'boolean' || (typeof value === 'string' && (value.toLowerCase() === 'true' || value.toLowerCase() === 'false'))) {
+            const isTrue = typeof value === 'boolean' ? value : value.toLowerCase() === 'true';
             return (
                 <div style={{ marginLeft: `${indent}px` }} className="text-blue-650 font-bold">
-                    {value ? 'Sim' : 'Não'}
+                    {isTrue ? 'Sim' : 'Não'}
                 </div>
             )
         }

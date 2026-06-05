@@ -10,7 +10,7 @@ from fastapi.exceptions import RequestValidationError
 from contextlib import asynccontextmanager
 import time
 
-from backend.routers import auth, import_router, kanban, dashboard, costs, workshop, partition, users, support
+from backend.routers import auth, import_router, kanban, dashboard, costs, workshop, partition, users, support, dashboard_router
 from backend.database import engine, Base
 from backend.middleware import AuthenticationMiddleware, TenantIsolationMiddleware
 
@@ -253,6 +253,7 @@ app.include_router(auth.router)
 app.include_router(import_router.router)
 app.include_router(kanban.router)
 app.include_router(dashboard.router)
+app.include_router(dashboard_router.router)
 app.include_router(costs.router)
 app.include_router(partition.router)
 app.include_router(users.router)

@@ -646,19 +646,33 @@ const KanbanPage = () => {
         formData.append('file', file)
         console.log('STEP 2: FormData created')
 
+        const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
         const endpoint = field === 'foto_carga_path'
-            ? `/kanban/pos/${selectedPO.id}/upload-cargo-photo`
-            : `/kanban/pos/${selectedPO.id}/upload-receipt-photo`
+            ? `${API_BASE_URL}/kanban/pos/${selectedPO.id}/upload-cargo-photo`
+            : `${API_BASE_URL}/kanban/pos/${selectedPO.id}/upload-receipt-photo`
 
         console.log('STEP 3: Attempting API POST to /api/kanban/pos/...')
 
         try {
-            // Upload file directly to the specific endpoint
-            const response = await api.post(endpoint, formData, {
-                headers: { 'Content-Type': 'multipart/form-data' }
+            const token = localStorage.getItem('token')
+            const headers = {}
+            if (token) {
+                headers['Authorization'] = `Bearer ${token}`
+            }
+
+            // Using standard fetch with standard FormData to bypass library eval() triggers
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: headers,
+                body: formData
             })
 
-            const updatedPO = response.data
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({}))
+                throw new Error(errData.detail || 'Falha ao enviar evidência')
+            }
+
+            const updatedPO = await response.json()
             if (updatedPO) {
                 setSelectedPO(updatedPO)
                 if (updatedPO.partition_metadata?.logistics_checklist) {
@@ -682,7 +696,7 @@ const KanbanPage = () => {
                 showSuccess('✅ Todas as evidências enviadas! Pronto para despacho.')
             }
         } catch (err) {
-            const errorMsg = err.response?.data?.detail || 'Falha ao enviar evidência'
+            const errorMsg = err.message || 'Falha ao enviar evidência'
             showError(errorMsg)
             console.error('Error uploading evidence:', err)
         } finally {
@@ -953,7 +967,7 @@ const KanbanPage = () => {
             indicators.push({ icon: Star, label: 'Primeiro Pedido', color: 'yellow' })
         }
         if (metadata.is_replacement) {
-            indicators.push({ icon: RefreshIcon, label: 'Reposição', color: 'purple' })
+            indicators.push({ icon: RefreshIcon, label: 'Troca/Reposição', color: 'purple' })
         }
         if (metadata.is_urgent) {
             indicators.push({ icon: Zap, label: 'Urgente', color: 'red' })
@@ -1009,12 +1023,13 @@ const KanbanPage = () => {
             const nfe = meta.numero_nfe || ''
             const carrier = meta.transportadora || ''
             
+            const currentChecklist = selectedPO.partition_metadata?.logistics_checklist || {}
             const checklistDone = 
-                logisticsChecklist.endereco_conferido &&
-                logisticsChecklist.peso_validado &&
-                logisticsChecklist.etiquetas_impressas &&
-                logisticsChecklist.foto_carga_path &&
-                logisticsChecklist.foto_canhoto_path
+                currentChecklist.endereco_conferido &&
+                currentChecklist.peso_validado &&
+                currentChecklist.etiquetas_impressas &&
+                currentChecklist.foto_carga_path &&
+                currentChecklist.foto_canhoto_path
 
             return nfe !== '' && carrier !== '' && checklistDone
         }
@@ -1059,12 +1074,13 @@ const KanbanPage = () => {
             if (nfe === '') missing.push('Número NF-e');
             if (carrier === '') missing.push('Transportadora');
             
+            const currentChecklist = selectedPO.partition_metadata?.logistics_checklist || {}
             const checklistMissing = [];
-            if (!logisticsChecklist.endereco_conferido) checklistMissing.push('Endereço');
-            if (!logisticsChecklist.peso_validado) checklistMissing.push('Peso');
-            if (!logisticsChecklist.etiquetas_impressas) checklistMissing.push('Etiquetas');
-            if (!logisticsChecklist.foto_carga_path) checklistMissing.push('Foto da Carga');
-            if (!logisticsChecklist.foto_canhoto_path) checklistMissing.push('Nota Fiscal com Canhoto Assinado');
+            if (!currentChecklist.endereco_conferido) checklistMissing.push('Endereço');
+            if (!currentChecklist.peso_validado) checklistMissing.push('Peso');
+            if (!currentChecklist.etiquetas_impressas) checklistMissing.push('Etiquetas');
+            if (!currentChecklist.foto_carga_path) checklistMissing.push('Foto da Carga');
+            if (!currentChecklist.foto_canhoto_path) checklistMissing.push('Nota Fiscal com Canhoto Assinado');
             
             if (checklistMissing.length > 0) {
                 missing.push(`Checklist pendente: ${checklistMissing.join(', ')}`);
@@ -1650,7 +1666,15 @@ const KanbanPage = () => {
                                                                         </div>
 
                                                                         {['admin', 'master'].includes((user?.role || '').toLowerCase()) && (() => {
-                                                                            const marginInfo = calculatePOMargins(selectedPO);
+                                                                            const marginInfo = (selectedPO?.margin_percentage === '***' || selectedPO?.margin_global === '***')
+                                                                                ? {
+                                                                                    status: 'OK',
+                                                                                    margin: '***',
+                                                                                    badgeColor: 'gray',
+                                                                                    formattedMargin: '***',
+                                                                                    breakdown: null
+                                                                                  }
+                                                                                : calculatePOMargins(selectedPO);
                                                                             return (
                                                                                 <div className="bg-slate-50 border border-gray-200 rounded-lg p-4 mt-2">
                                                                                     <div className="flex justify-between items-center">
@@ -1673,7 +1697,7 @@ const KanbanPage = () => {
                                                                                                 )}
                                                                                             </div>
                                                                                         </div>
-                                                                                        {marginInfo.status !== 'PENDENTE_PCP' && (
+                                                                                        {marginInfo.status !== 'PENDENTE_PCP' && marginInfo.breakdown && (
                                                                                             <div className="text-right text-xs text-gray-500 font-mono">
                                                                                                 <div>VP: {formatCurrency(marginInfo.breakdown.vp)}</div>
                                                                                                 <div>Custos: {formatCurrency(marginInfo.breakdown.costs)}</div>
@@ -2530,7 +2554,7 @@ const KanbanPage = () => {
                                                                                                 <p className="text-lg font-bold text-gray-800">
                                                                                                     {(() => {
                                                                                                         const marginVal = parseFloat(selectedPO.margin_percentage);
-                                                                                                        return isNaN(marginVal) ? 'PENDENTE PCP' : (marginVal > 1000 ? '> 1000%' : `${marginVal.toFixed(2)}%`);
+                                                                                                        return selectedPO.margin_percentage === '***' ? '***' : (isNaN(marginVal) ? 'PENDENTE PCP' : (marginVal > 1000 ? '> 1000%' : `${marginVal.toFixed(2)}%`));
                                                                                                     })()}
                                                                                                 </p>
                                                                                             </div>

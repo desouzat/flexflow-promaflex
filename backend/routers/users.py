@@ -7,7 +7,7 @@ from fastapi import APIRouter, Request, HTTPException, status, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel, EmailStr
 import uuid
 
@@ -23,6 +23,7 @@ router = APIRouter(prefix="/api/users", tags=["User Management"])
 # SCHEMAS
 # ============================================================================
 
+
 class UserCreate(BaseModel):
     """Schema for creating a new user"""
     username: str
@@ -30,6 +31,14 @@ class UserCreate(BaseModel):
     password: str
     role: str  # 'master', 'admin', 'user'
     area: str  # 'Comercial', 'PCP', 'Produção', etc.
+
+
+class UserUpdate(BaseModel):
+    """Schema for updating an existing user"""
+    role: str
+    area: str
+    password: Optional[str] = None
+
 
 
 class UserResponse(BaseModel):
@@ -50,16 +59,16 @@ class UserResponse(BaseModel):
 # HELPER FUNCTIONS
 # ============================================================================
 
-def require_master_or_admin(request: Request):
-    """Verify that the user is MASTER or ADMIN"""
+def require_admin(request: Request):
+    """Verify that the user is ADMIN"""
     context = get_request_context(request)
     
-    if context.token_payload.role not in ['master', 'admin']:
+    if context.token_payload.role != 'admin':
         timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
         print(f"{timestamp} [RBAC] Access denied: user {context.user_id} (role: {context.token_payload.role}) attempted to access user management")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied. Only MASTER or ADMIN users can manage users."
+            detail="Access denied. Only ADMIN users can manage users."
         )
     
     return context
@@ -69,6 +78,7 @@ def require_master_or_admin(request: Request):
 # ENDPOINTS
 # ============================================================================
 
+@router.get("", response_model=List[UserResponse])
 @router.get("/", response_model=List[UserResponse])
 async def list_users(
     request: Request,
@@ -78,7 +88,7 @@ async def list_users(
     List all users in the tenant (MASTER/ADMIN only)
     """
     timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-    context = require_master_or_admin(request)
+    context = require_admin(request)
     
     print(f"{timestamp} [USER MANAGEMENT] Listing users for tenant: {context.tenant_id}")
     
@@ -114,6 +124,7 @@ async def list_users(
         )
 
 
+@router.post("", response_model=UserResponse)
 @router.post("/", response_model=UserResponse)
 async def create_user(
     user_data: UserCreate,
@@ -124,13 +135,13 @@ async def create_user(
     Create a new user (MASTER/ADMIN only)
     """
     timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-    context = require_master_or_admin(request)
+    context = require_admin(request)
     
     print(f"{timestamp} [USER MANAGEMENT] Creating user: {user_data.username} (role: {user_data.role})")
     
     try:
         # Validate role
-        valid_roles = ['master', 'admin', 'user']
+        valid_roles = ['master', 'admin', 'operator', 'user']
         if user_data.role not in valid_roles:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -213,7 +224,7 @@ async def delete_user(
     Delete a user (MASTER/ADMIN only)
     """
     timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-    context = require_master_or_admin(request)
+    context = require_admin(request)
     
     print(f"{timestamp} [USER MANAGEMENT] Deleting user: {user_id}")
     
@@ -255,3 +266,76 @@ async def delete_user(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete user: {str(e)}"
         )
+
+
+@router.put("/{user_id}", response_model=UserResponse)
+async def update_user(
+    user_id: str,
+    user_data: UserUpdate,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    Update user's Role and Area (MASTER/ADMIN only)
+    """
+    timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
+    context = require_admin(request)
+    
+    print(f"{timestamp} [USER MANAGEMENT] Updating user {user_id}: role={user_data.role}, area={user_data.area}")
+    
+    try:
+        # Validate role
+        valid_roles = ['master', 'admin', 'operator', 'user']
+        if user_data.role not in valid_roles:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid role. Must be one of: {', '.join(valid_roles)}"
+            )
+            
+        # Find user
+        stmt = select(User).where(
+            User.id == uuid.UUID(user_id),
+            User.tenant_id == context.tenant_id
+        )
+        user = db.execute(stmt).scalar_one_or_none()
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+            
+        # Update fields
+        user.role = user_data.role
+        user.area = user_data.area
+        if user_data.password:
+            user.hashed_password = get_password_hash(user_data.password)
+        user.updated_at = datetime.utcnow()
+        
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        
+        print(f"{timestamp} [USER MANAGEMENT] User updated successfully: {user.id}")
+        
+        return UserResponse(
+            id=str(user.id),
+            username=user.username,
+            email=user.email,
+            role=user.role,
+            area=user.area or "N/A",
+            tenant_id=str(user.tenant_id),
+            created_at=user.created_at.isoformat() if user.created_at else ""
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
+        print(f"{timestamp} [ERROR] Failed to update user: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update user: {str(e)}"
+        )
+

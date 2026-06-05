@@ -120,8 +120,8 @@ def _map_single_po(po: PurchaseOrder, db: Session, is_privileged: bool) -> PORes
                 sku=item.sku,
                 quantity=item.quantity,
                 price=Decimal(str(item.price)),
-                status_item=item.status_item,
-                margin_item=Decimal("0.00") if is_privileged else "***",
+                                status_item=item.status_item,
+                margin_item=(Decimal(str(item.price)) - unit_cost) if is_privileged else "***",
                 total_cost=unit_cost,
                 item_total_value=Decimal(str(item.item_total_value)) if item.item_total_value is not None else None,
                 manual_commission_rate=Decimal(str(item.extra_metadata.get("manual_commission_rate"))) if item.extra_metadata and "manual_commission_rate" in item.extra_metadata else None,
@@ -371,8 +371,8 @@ async def get_kanban_board(
                         sku=item.sku,
                         quantity=item.quantity,
                         price=Decimal(str(item.price)),
-                        status_item=item.status_item,
-                        margin_item=Decimal("0.00") if is_privileged else "***",
+                                                status_item=item.status_item,
+                        margin_item=(Decimal(str(item.price)) - unit_cost) if is_privileged else "***",
                         total_cost=unit_cost,
                         item_total_value=Decimal(str(item.item_total_value)) if item.item_total_value is not None else None,
                         manual_commission_rate=Decimal(str(item.extra_metadata.get("manual_commission_rate"))) if item.extra_metadata and "manual_commission_rate" in item.extra_metadata else None,
@@ -525,23 +525,32 @@ async def list_purchase_orders(
     for po in pos:
         metrics = calculate_po_metrics(po)
         
-        items = [
-            POItemResponse(
-                id=str(item.id),
-                sku=item.sku,
-                quantity=item.quantity,
-                price=Decimal(str(item.price)),
-                status_item=item.status_item,
-                margin_item=Decimal("0.00") if is_privileged else "***",
-                total_cost=Decimal("0.00"),
-                item_total_value=Decimal(str(item.item_total_value)) if item.item_total_value is not None else None,
-                manual_commission_rate=Decimal(str(item.extra_metadata.get("manual_commission_rate"))) if item.extra_metadata and "manual_commission_rate" in item.extra_metadata else None,
-                extra_metadata=item.extra_metadata,
-                created_at=item.created_at,
-                updated_at=item.updated_at
+        items = []
+        for item in po.items:
+            material = db.query(MaterialCost).filter(
+                MaterialCost.tenant_id == po.tenant_id,
+                MaterialCost.sku == item.sku
+            ).first()
+            unit_cost = Decimal("0.00")
+            if material:
+                unit_cost = Decimal(str(material.custo_mp_kg)) * Decimal(str(material.rendimento))
+            
+            items.append(
+                POItemResponse(
+                    id=str(item.id),
+                    sku=item.sku,
+                    quantity=item.quantity,
+                    price=Decimal(str(item.price)),
+                    status_item=item.status_item,
+                    margin_item=(Decimal(str(item.price)) - unit_cost) if is_privileged else "***",
+                    total_cost=unit_cost,
+                    item_total_value=Decimal(str(item.item_total_value)) if item.item_total_value is not None else None,
+                    manual_commission_rate=Decimal(str(item.extra_metadata.get("manual_commission_rate"))) if item.extra_metadata and "manual_commission_rate" in item.extra_metadata else None,
+                    extra_metadata=item.extra_metadata,
+                    created_at=item.created_at,
+                    updated_at=item.updated_at
+                )
             )
-            for item in po.items
-        ]
         
         # Get commission rate
         commission_rate = None

@@ -45,15 +45,29 @@ security = HTTPBearer()
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
+SECURITY_PEPPER: str = os.getenv("SECURITY_PEPPER", "")
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a password against its hash"""
-    return pwd_context.verify(plain_password, hashed_password)
+    """Verify a password against its hash using SECURITY_PEPPER, with fallback for legacy hashes"""
+    # Try with pepper first
+    peppered = plain_password + SECURITY_PEPPER
+    try:
+        if pwd_context.verify(peppered, hashed_password):
+            return True
+    except Exception:
+        pass
+    
+    # Fallback to unpeppered for legacy hashes
+    try:
+        return pwd_context.verify(plain_password, hashed_password)
+    except Exception:
+        return False
 
 
 def get_password_hash(password: str) -> str:
-    """Hash a password"""
-    return pwd_context.hash(password)
+    """Hash a password using SECURITY_PEPPER"""
+    peppered = password + SECURITY_PEPPER
+    return pwd_context.hash(peppered)
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:

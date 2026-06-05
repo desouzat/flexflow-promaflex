@@ -63,7 +63,7 @@ export const HELP_CONFIG = {
         nextSteps: [
             "Revisar dados importados e validar os 19 campos obrigatórios",
             "Verificar se há bloqueio de crédito ativo",
-            "Confirmar flags estratégicas (Exportação, Primeira Ordem, Reposição)",
+            "Confirmar flags estratégicas (Exportação, Primeira Ordem, Troca/Reposição)",
             "Adicionar notas de customização para itens personalizados",
             "Para pedidos com badge roxo: Decidir sobre partição sugerida pelo PCP",
             "Mover para PCP quando validação comercial estiver completa"
@@ -236,7 +236,7 @@ export const STRATEGIC_INDICATORS = {
         tooltip: "Primeira ordem do cliente - Prioridade para garantir qualidade e impressão positiva"
     },
     is_replacement: {
-        label: "Reposição",
+        label: "Troca/Reposição",
         icon: "🔄",
         color: "green",
         tooltip: "Pedido de reposição - SLA reduzido (50% do tempo normal)"

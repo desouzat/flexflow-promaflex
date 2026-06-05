@@ -1,5 +1,16 @@
 import React, { useState, useEffect } from 'react'
-import { BarChart3, TrendingUp, Package, DollarSign, Clock } from 'lucide-react'
+import { 
+    BarChart3, 
+    TrendingUp, 
+    Package, 
+    DollarSign, 
+    Clock, 
+    AlertTriangle, 
+    ShieldAlert, 
+    Calendar,
+    Users as UsersIcon,
+    Lock
+} from 'lucide-react'
 import {
     BarChart,
     Bar,
@@ -15,284 +26,365 @@ import {
 } from 'recharts'
 import api from '../utils/api'
 import { showError } from '../utils/toast'
+import { useAuth } from '../context/AuthContext'
 
 const DashboardPage = () => {
+    const { user } = useAuth()
     const [loading, setLoading] = useState(true)
-    const [dashboardData, setDashboardData] = useState(null)
+    const [kpiData, setKpiData] = useState(null)
 
     useEffect(() => {
-        fetchDashboardData()
+        fetchCelsoKpis()
     }, [])
 
-    const fetchDashboardData = async () => {
+    const fetchCelsoKpis = async () => {
         try {
             setLoading(true)
-            const response = await api.get('/dashboard/metrics')
-            const data = response.data
-
-            // Transform backend data to frontend format
-            const transformedData = {
-                total_pos: data.margin?.po_count || 0,
-                total_value: parseFloat(data.margin?.total_value || 0),
-                total_margin: parseFloat(data.margin?.total_margin || 0),
-                pending_approval: data.items_by_area?.by_area?.find(a => a.area === 'Comercial')?.count || 0,
-                delivered: data.items_by_area?.by_area?.find(a => a.area === 'Concluído')?.count || 0,
-                area_distribution: data.items_by_area?.by_area?.map(area => ({
-                    area: area.area,
-                    count: area.count,
-                    value: 0 // Backend doesn't provide value per area yet
-                })) || [],
-                margin_by_category: [], // Not yet implemented in backend
-                average_lead_time: data.lead_time?.average_lead_time_days || 0,
-            }
-
-            setDashboardData(transformedData)
+            const response = await api.get('/dashboard/celso-kpis')
+            setKpiData(response.data)
         } catch (error) {
-            console.error('Erro ao carregar dados do dashboard:', error)
-            showError('Falha ao carregar dados do dashboard')
-            // Set mock data for demo
-            setDashboardData(getMockData())
+            console.error('Erro ao carregar KPIs do Celso:', error)
+            showError('Falha ao carregar indicadores do dashboard')
         } finally {
             setLoading(false)
         }
     }
 
-    const getMockData = () => ({
-        total_pos: 45,
-        total_value: 1250000.50,
-        pending_approval: 8,
-        delivered: 28,
-        area_distribution: [
-            { area: 'IT', count: 15, value: 450000 },
-            { area: 'Operations', count: 12, value: 380000 },
-            { area: 'Marketing', count: 8, value: 220000 },
-            { area: 'HR', count: 6, value: 120000 },
-            { area: 'Finance', count: 4, value: 80000 },
-        ],
-        margin_by_category: [
-            { category: 'Hardware', margin: 15.5, value: 350000 },
-            { category: 'Software', margin: 25.3, value: 280000 },
-            { category: 'Services', margin: 18.7, value: 420000 },
-            { category: 'Supplies', margin: 12.2, value: 200000 },
-        ],
-        average_lead_time: 12.5,
-    })
+    const formatCurrency = (value) => {
+        if (value === '***') return '***'
+        const num = parseFloat(value)
+        if (isNaN(num)) return value
+        return new Intl.NumberFormat('pt-BR', {
+            style: 'currency',
+            currency: 'BRL',
+        }).format(num)
+    }
 
     if (loading) {
         return (
             <div className="flex items-center justify-center h-full">
                 <div className="text-center">
                     <div className="w-16 h-16 border-4 border-primary-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-                    <p className="text-gray-600">Carregando dashboard...</p>
+                    <p className="text-gray-650 font-medium">Carregando painel de KPIs...</p>
                 </div>
             </div>
         )
     }
 
-    const data = dashboardData || getMockData()
+    // Default fallbacks if backend returns empty/null
+    const portfolio = kpiData?.portfolio_by_unit || { "Indústria": 0, "Construção Civil": 0, "Varejo": 0, "Outros": 0 }
+    const margin = kpiData?.margin_by_unit || {
+        "Indústria": { "total_margin": 0, "margin_percentage": 0 },
+        "Construção Civil": { "total_margin": 0, "margin_percentage": 0 },
+        "Varejo": { "total_margin": 0, "margin_percentage": 0 },
+        "Outros": { "total_margin": 0, "margin_percentage": 0 }
+    }
+    const billing = kpiData?.billing_status || { "current_month": 0, "next_month": 0 }
+    const readyNotBilled = kpiData?.ready_not_billed?.ready_not_billed_total ?? 0
+    const ageingDays = kpiData?.ageing?.average_ageing_days ?? 0.0
+    const salesRank = kpiData?.sales_ranking || []
+    const alerts = kpiData?.alerts || { total_alerts: 0, details: [] }
+    const generatedAt = kpiData?.generated_at ?? 'N/A'
 
-    const stats = [
-        {
-            label: 'Total de Pedidos',
-            value: (data?.total_pos ?? 0).toString(),
-            icon: Package,
-            color: 'bg-blue-500',
-            change: `${data?.total_pos ?? 0} POs`,
-        },
-        {
-            label: 'Valor Total',
-            value: new Intl.NumberFormat('pt-BR', {
-                style: 'currency',
-                currency: 'BRL',
-            }).format(data?.total_value ?? 0),
-            icon: DollarSign,
-            color: 'bg-green-500',
-            change: 'Margem: ' + new Intl.NumberFormat('pt-BR', {
-                style: 'currency',
-                currency: 'BRL',
-            }).format(data?.total_margin ?? 0),
-        },
-        {
-            label: 'Em Comercial',
-            value: (data?.pending_approval ?? 0).toString(),
-            icon: TrendingUp,
-            color: 'bg-yellow-500',
-            change: `${data?.pending_approval ?? 0} itens`,
-        },
-        {
-            label: 'Concluídos',
-            value: (data?.delivered ?? 0).toString(),
-            icon: BarChart3,
-            color: 'bg-purple-500',
-            change: `${data?.delivered ?? 0} itens`,
-        },
+    // Check if margins are masked
+    const isMarginMasked = Object.values(margin).some(m => m.total_margin === '***')
+
+    // Data transformation for Recharts
+    const portfolioChartData = Object.keys(portfolio).map(key => ({
+        name: key,
+        value: portfolio[key]
+    }))
+
+    const marginChartData = isMarginMasked 
+        ? [] 
+        : Object.keys(margin).map(key => ({
+            name: key,
+            'Margem Absoluta': parseFloat(margin[key].total_margin || 0),
+            'Margem %': parseFloat(margin[key].margin_percentage || 0)
+        }))
+
+    const billingChartData = [
+        { name: 'Mês Atual', Valor: billing.current_month },
+        { name: 'Próximo Mês', Valor: billing.next_month }
     ]
 
-    const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6']
-
-    const formatCurrency = (value) => {
-        return new Intl.NumberFormat('pt-BR', {
-            style: 'currency',
-            currency: 'BRL',
-            minimumFractionDigits: 0,
-        }).format(value)
-    }
+    const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6']
 
     return (
-        <div className="h-full flex flex-col">
+        <div className="h-full flex flex-col bg-gray-50">
             {/* Header */}
-            <div className="bg-white border-b border-gray-200 px-6 py-4">
-                <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-                <p className="text-sm text-gray-600 mt-1">
-                    Visão geral das métricas de pedidos
-                </p>
+            <div className="bg-white border-b border-gray-200 px-6 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div>
+                    <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                        <BarChart3 className="w-7 h-7 text-primary-600" />
+                        Dashboard de Negócios (Celso KPIs)
+                    </h1>
+                    <p className="text-sm text-gray-600 mt-0.5">
+                        Métricas de portfólio, margens, faturamento e alertas operacionais
+                    </p>
+                </div>
+                <div className="flex items-center gap-1.5 text-xs text-gray-500 bg-gray-100 px-3 py-1.5 rounded-lg border border-gray-200 self-start sm:self-center">
+                    <Calendar className="w-4 h-4 text-gray-400" />
+                    <span>Gerado em: <strong>{generatedAt}</strong></span>
+                </div>
             </div>
 
             {/* Content */}
-            <div className="flex-1 p-6 overflow-auto">
-                {/* Stats Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
-                    {stats.map((stat, index) => (
-                        <div key={index} className="card">
-                            <div className="flex items-center justify-between mb-4">
-                                <div className={`${stat.color} p-3 rounded-lg`}>
-                                    <stat.icon className="w-6 h-6 text-white" />
-                                </div>
-                                <span className="text-sm font-medium text-green-600">
-                                    {stat.change}
-                                </span>
+            <div className="flex-1 p-6 overflow-auto space-y-6">
+                {/* Stats Row */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="card shadow-xs hover:shadow-md transition-all duration-300">
+                        <div className="flex items-center justify-between mb-3">
+                            <div className="bg-blue-500 p-3 rounded-lg text-white">
+                                <Package className="w-6 h-6" />
                             </div>
-                            <h3 className="text-2xl font-bold text-gray-900 mb-1">
-                                {stat.value}
-                            </h3>
-                            <p className="text-sm text-gray-600">{stat.label}</p>
+                            <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-200">
+                                Expedição
+                            </span>
                         </div>
-                    ))}
+                        <h3 className="text-2xl font-extrabold text-gray-900 mb-1">
+                            {formatCurrency(readyNotBilled)}
+                        </h3>
+                        <p className="text-xs text-gray-500 font-semibold uppercase tracking-wider">Pronto / Não Faturado</p>
+                    </div>
+
+                    <div className="card shadow-xs hover:shadow-md transition-all duration-300">
+                        <div className="flex items-center justify-between mb-3">
+                            <div className="bg-indigo-500 p-3 rounded-lg text-white">
+                                <Clock className="w-6 h-6" />
+                            </div>
+                            <span className="text-xs font-semibold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-full border border-indigo-200">
+                                Média Histórica
+                            </span>
+                        </div>
+                        <h3 className="text-2xl font-extrabold text-gray-900 mb-1">
+                            {ageingDays} <span className="text-sm text-gray-500 font-bold">dias</span>
+                        </h3>
+                        <p className="text-xs text-gray-500 font-semibold uppercase tracking-wider">Ageing (Faturamento ➔ Entrega)</p>
+                    </div>
+
+                    <div className="card shadow-xs hover:shadow-md transition-all duration-300">
+                        <div className="flex items-center justify-between mb-3">
+                            <div className="bg-red-500 p-3 rounded-lg text-white">
+                                <AlertTriangle className="w-6 h-6" />
+                            </div>
+                            <span className="text-xs font-semibold text-red-600 bg-red-50 px-2.5 py-1 rounded-full border border-red-200">
+                                Atenção Requerida
+                            </span>
+                        </div>
+                        <h3 className="text-2xl font-extrabold text-gray-900 mb-1">
+                            {alerts.total_alerts}
+                        </h3>
+                        <p className="text-xs text-gray-500 font-semibold uppercase tracking-wider">Alertas de SLA / Produção</p>
+                    </div>
                 </div>
 
                 {/* Charts Grid */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-                    {/* Area Distribution Bar Chart */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Portfolio by Unit */}
                     <div className="card">
-                        <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                            Distribuição por Área
+                        <h3 className="text-base font-bold text-gray-900 mb-4 flex items-center gap-2 border-b border-gray-100 pb-2">
+                            <span>💼</span> Portfólio por Unidade de Negócio (Faturamento Total)
                         </h3>
-                        <ResponsiveContainer width="100%" height={300}>
-                            <BarChart data={data?.area_distribution ?? []}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                                <XAxis
-                                    dataKey="area"
-                                    tick={{ fill: '#6b7280', fontSize: 12 }}
-                                />
-                                <YAxis tick={{ fill: '#6b7280', fontSize: 12 }} />
-                                <Tooltip
-                                    contentStyle={{
-                                        backgroundColor: '#fff',
-                                        border: '1px solid #e5e7eb',
-                                        borderRadius: '8px',
-                                    }}
-                                    formatter={(value, name) => {
-                                        if (name === 'value') return formatCurrency(value)
-                                        return value
-                                    }}
-                                />
-                                <Legend />
-                                <Bar dataKey="count" fill="#3b82f6" name="Quantidade" />
-                            </BarChart>
-                        </ResponsiveContainer>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+                            <div className="h-64">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <PieChart>
+                                        <Pie
+                                            data={portfolioChartData}
+                                            cx="50%"
+                                            cy="50%"
+                                            labelLine={false}
+                                            outerRadius={80}
+                                            fill="#8884d8"
+                                            dataKey="value"
+                                        >
+                                            {portfolioChartData.map((entry, index) => (
+                                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                            ))}
+                                        </Pie>
+                                        <Tooltip formatter={(value) => formatCurrency(value)} />
+                                    </PieChart>
+                                </ResponsiveContainer>
+                            </div>
+                            <div className="space-y-2.5">
+                                {portfolioChartData.map((item, idx) => (
+                                    <div key={idx} className="flex justify-between items-center bg-gray-50 p-2.5 rounded-lg border border-gray-200">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-3.5 h-3.5 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />
+                                            <span className="text-xs font-bold text-gray-700">{item.name}</span>
+                                        </div>
+                                        <span className="text-xs font-mono font-bold text-gray-950">{formatCurrency(item.value)}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
                     </div>
 
-                    {/* Margin by Category Pie Chart */}
+                    {/* Margin by Unit */}
                     <div className="card">
-                        <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                            Margem Média por Categoria
+                        <h3 className="text-base font-bold text-gray-900 mb-4 flex items-center gap-2 border-b border-gray-100 pb-2">
+                            <span>📊</span> Margem de Contribuição por Unidade
                         </h3>
-                        <ResponsiveContainer width="100%" height={300}>
-                            <PieChart>
-                                <Pie
-                                    data={data?.margin_by_category ?? []}
-                                    cx="50%"
-                                    cy="50%"
-                                    labelLine={false}
-                                    label={({ category, margin }) =>
-                                        `${category}: ${margin}%`
-                                    }
-                                    outerRadius={100}
-                                    fill="#8884d8"
-                                    dataKey="margin"
-                                >
-                                    {(data?.margin_by_category ?? []).map((entry, index) => (
-                                        <Cell
-                                            key={`cell-${index}`}
-                                            fill={COLORS[index % COLORS.length]}
-                                        />
-                                    ))}
-                                </Pie>
-                                <Tooltip
-                                    formatter={(value) => `${value}%`}
-                                    contentStyle={{
-                                        backgroundColor: '#fff',
-                                        border: '1px solid #e5e7eb',
-                                        borderRadius: '8px',
-                                    }}
-                                />
-                            </PieChart>
-                        </ResponsiveContainer>
+                        {isMarginMasked ? (
+                            <div className="h-64 flex flex-col items-center justify-center bg-gray-50 border border-dashed border-gray-300 rounded-lg p-6 text-center">
+                                <div className="flex items-center gap-2 text-amber-600 mb-2">
+                                    <Lock className="w-5 h-5 animate-pulse" />
+                                    <h4 className="font-bold text-gray-800 text-sm">Acesso restrito à diretoria</h4>
+                                </div>
+                                <p className="text-xs text-gray-500 mt-1 max-w-xs">
+                                    Informações financeiras confidenciais. Apenas usuários com perfil de diretoria possuem acesso a estas métricas.
+                                </p>
+                            </div>
+                        ) : (
+                            <div className="h-64">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart data={marginChartData}>
+                                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                                        <XAxis dataKey="name" tick={{ fill: '#4b5563', fontSize: 11, fontWeight: 'bold' }} />
+                                        <YAxis tick={{ fill: '#6b7280', fontSize: 10 }} />
+                                        <Tooltip formatter={(value, name) => name === 'Margem %' ? `${value}%` : formatCurrency(value)} />
+                                        <Legend />
+                                        <Bar dataKey="Margem Absoluta" fill="#10b981" name="Margem Absoluta" />
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            </div>
+                        )}
                     </div>
                 </div>
 
-                {/* Lead Time Indicator */}
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    {/* Billing Status */}
                     <div className="card lg:col-span-1">
-                        <div className="flex items-center gap-4">
-                            <div className="bg-indigo-500 p-4 rounded-lg">
-                                <Clock className="w-8 h-8 text-white" />
-                            </div>
-                            <div>
-                                <p className="text-sm text-gray-600 mb-1">
-                                    Lead Time Médio
-                                </p>
-                                <h3 className="text-3xl font-bold text-gray-900">
-                                    {data?.average_lead_time ?? 0}
-                                    <span className="text-lg text-gray-600 ml-1">dias</span>
-                                </h3>
-                            </div>
+                        <h3 className="text-base font-bold text-gray-900 mb-4 flex items-center gap-2 border-b border-gray-100 pb-2">
+                            <span>📅</span> Status de Faturamento
+                        </h3>
+                        <div className="h-56">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={billingChartData}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                                    <XAxis dataKey="name" tick={{ fill: '#4b5563', fontSize: 11, fontWeight: 'bold' }} />
+                                    <YAxis tick={{ fill: '#6b7280', fontSize: 10 }} />
+                                    <Tooltip formatter={(value) => formatCurrency(value)} />
+                                    <Bar dataKey="Valor" fill="#f59e0b" name="Faturamento Previsto">
+                                        <Cell fill="#f59e0b" />
+                                        <Cell fill="#8b5cf6" />
+                                    </Bar>
+                                </BarChart>
+                            </ResponsiveContainer>
                         </div>
-                        <div className="mt-4 pt-4 border-t border-gray-100">
-                            <p className="text-xs text-gray-500">
-                                Tempo médio desde a criação até a entrega
-                            </p>
+                        <div className="grid grid-cols-2 gap-4 mt-2">
+                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-2.5 text-center">
+                                <span className="text-[10px] text-amber-700 font-bold uppercase tracking-wider block">Mês Atual</span>
+                                <span className="text-sm font-mono font-bold text-amber-950">{formatCurrency(billing.current_month)}</span>
+                            </div>
+                            <div className="bg-purple-50 border border-purple-200 rounded-lg p-2.5 text-center">
+                                <span className="text-[10px] text-purple-700 font-bold uppercase tracking-wider block">Próximo Mês</span>
+                                <span className="text-sm font-mono font-bold text-purple-950">{formatCurrency(billing.next_month)}</span>
+                            </div>
                         </div>
                     </div>
 
-                    {/* Additional Metrics */}
+                    {/* Sales Ranking Table */}
                     <div className="card lg:col-span-2">
-                        <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                            Resumo de Valores por Área
+                        <h3 className="text-base font-bold text-gray-900 mb-4 flex items-center gap-2 border-b border-gray-100 pb-2">
+                            <UsersIcon className="w-5 h-5 text-gray-500" />
+                            Ranking de Vendas por Vendedor
                         </h3>
-                        <div className="space-y-3">
-                            {(data?.area_distribution ?? []).map((area, index) => (
-                                <div key={index} className="flex items-center justify-between">
-                                    <div className="flex items-center gap-3">
-                                        <div
-                                            className="w-3 h-3 rounded-full"
-                                            style={{ backgroundColor: COLORS[index % COLORS.length] }}
-                                        />
-                                        <span className="text-sm font-medium text-gray-700">
-                                            {area.area}
-                                        </span>
-                                    </div>
-                                    <div className="flex items-center gap-4">
-                                        <span className="text-sm text-gray-600">
-                                            {area.count} POs
-                                        </span>
-                                        <span className="text-sm font-semibold text-gray-900">
-                                            {formatCurrency(area.value)}
-                                        </span>
-                                    </div>
-                                </div>
-                            ))}
+                        <div className="overflow-auto max-h-[268px] border border-gray-200 rounded-lg">
+                            <table className="w-full text-xs text-left">
+                                <thead className="bg-gray-100 text-gray-700 uppercase sticky top-0">
+                                    <tr>
+                                        <th className="py-2.5 px-4 font-bold">Posição</th>
+                                        <th className="py-2.5 px-4 font-bold">Vendedor</th>
+                                        <th className="py-2.5 px-4 text-right font-bold">Valor Total Vendido</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {salesRank.length === 0 ? (
+                                        <tr>
+                                            <td colSpan={3} className="py-8 text-center text-gray-500 italic">
+                                                Nenhum dado de vendas disponível
+                                            </td>
+                                        </tr>
+                                    ) : (
+                                        salesRank.map((rank, index) => (
+                                            <tr key={index} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                                                <td className="py-2 px-4 font-bold text-gray-500">
+                                                    #{index + 1}
+                                                </td>
+                                                <td className="py-2 px-4 font-semibold text-gray-800">
+                                                    {rank.salesperson}
+                                                </td>
+                                                <td className="py-2 px-4 text-right font-mono font-bold text-green-700">
+                                                    {formatCurrency(rank.total_value)}
+                                                </td>
+                                            </tr>
+                                        ))
+                                    )}
+                                </tbody>
+                            </table>
                         </div>
+                    </div>
+                </div>
+
+                {/* Alerts List */}
+                <div className="card">
+                    <h3 className="text-base font-bold text-gray-900 mb-4 flex items-center gap-2 border-b border-gray-100 pb-2">
+                        <AlertTriangle className="w-5 h-5 text-red-500" />
+                        Alertas Ativos (Estoque / SLA de Entrega)
+                    </h3>
+                    <div className="overflow-auto max-h-[300px] border border-gray-200 rounded-lg">
+                        <table className="w-full text-xs text-left">
+                            <thead className="bg-gray-100 text-gray-700 uppercase sticky top-0">
+                                <tr>
+                                    <th className="py-2.5 px-4 font-bold">Pedido</th>
+                                    <th className="py-2.5 px-4 font-bold">Cliente</th>
+                                    <th className="py-2.5 px-4 font-bold">Tipo de Alerta</th>
+                                    <th className="py-2.5 px-4 font-bold">Descrição da Pendência</th>
+                                    <th className="py-2.5 px-4 font-bold text-center">Entrega Programada</th>
+                                    <th className="py-2.5 px-4 text-center font-bold">Atraso</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {alerts.details.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={6} className="py-8 text-center text-green-600 font-bold bg-green-50">
+                                            ✓ Todos os prazos em dia. Nenhum gargalo operacional detectado!
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    alerts.details.map((alert, index) => (
+                                        <tr key={index} className="border-b border-gray-100 hover:bg-red-50/30 transition-colors">
+                                            <td className="py-2.5 px-4 font-bold text-gray-900">
+                                                {alert.po_number}
+                                            </td>
+                                            <td className="py-2.5 px-4 font-semibold text-gray-700">
+                                                {alert.client_name}
+                                            </td>
+                                            <td className="py-2.5 px-4">
+                                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full font-bold uppercase ${
+                                                    alert.alert_type === 'SLA_BREACH' 
+                                                        ? 'bg-red-100 text-red-800 border border-red-200' 
+                                                        : 'bg-orange-100 text-orange-800 border border-orange-200'
+                                                }`}>
+                                                    {alert.alert_type === 'SLA_BREACH' ? 'SLA Vencido' : 'Atraso PCP'}
+                                                </span>
+                                            </td>
+                                            <td className="py-2.5 px-4 font-medium text-gray-800">
+                                                {alert.message}
+                                            </td>
+                                            <td className="py-2.5 px-4 text-center font-semibold text-gray-800">
+                                                {alert.expected_delivery_date}
+                                            </td>
+                                            <td className="py-2.5 px-4 text-center font-bold font-mono text-red-600">
+                                                {alert.days_past} dias
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>

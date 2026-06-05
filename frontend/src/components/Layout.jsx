@@ -35,7 +35,7 @@ const Layout = () => {
         { path: '/import', icon: Upload, label: 'Import POs', badge: 'import' },
         { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', badge: 'dashboard' },
         { path: '/costs', icon: DollarSign, label: 'Gerenciar Custos', badge: 'costs', adminOnly: true },
-        { path: '/users', icon: Users, label: 'Gestão de Equipe', badge: 'users', masterOnly: true },
+        { path: '/users', icon: Users, label: 'Gestão de Usuários', badge: 'users', strictAdminOnly: true },
     ]
 
     const handleReportProblem = async () => {
@@ -91,6 +91,11 @@ const Layout = () => {
                 {/* Navigation */}
                 <nav className="flex-1 px-3 py-4 space-y-1">
                     {navItems.map((item) => {
+                        // Hide strictAdminOnly items if user is not admin
+                        if (item.strictAdminOnly && (user?.role || '').toLowerCase() !== 'admin') {
+                            return null
+                        }
+
                         // Hide admin-only items if user is not admin or master
                         if (item.adminOnly && (user?.role || '').toLowerCase() !== 'admin' && (user?.role || '').toLowerCase() !== 'master') {
                             return null
