@@ -23,7 +23,7 @@ load_dotenv(dotenv_path=env_path)
 # Get database URL
 SQLALCHEMY_DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql://flexflow_app:Souza%40123@127.0.0.1:5433/flexflow_prod"
+    "postgresql://flexflow_app:Souza%40123@127.0.0.1:5434/flexflow_prod"
 )
 
 

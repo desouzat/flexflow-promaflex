@@ -11,10 +11,17 @@ from botocore.exceptions import ClientError
 if sys.platform == 'win32':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
-# Real credentials from IT
-S3_ENDPOINT = "https://s3-dc3-002.mspclouds.com"
-S3_ACCESS_KEY = "ZE7VWSHR2C2E6UGIKKD3"
-S3_SECRET_KEY = "p9KflD76SkGTOZlrefGZFZXfi4UXAC1LfdJbJZmB"
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+# Real credentials from IT (with environment overrides)
+S3_ENDPOINT = os.getenv('S3_ENDPOINT', "https://s3-dc3-002.mspclouds.com")
+S3_ACCESS_KEY = os.getenv('S3_ACCESS_KEY', "ZE7VWSHR2C2E6UGIKKD3")
+S3_SECRET_KEY = os.getenv('S3_SECRET_KEY', "p9KflD76SkGTOZlrefGZFZXfi4UXAC1LfdJbJZmB")
+
 
 def discover_buckets():
     """Discover available S3 buckets"""

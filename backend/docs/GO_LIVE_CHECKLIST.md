@@ -10,7 +10,7 @@ O arquivo `.env` deve ser colocado na raiz da pasta `backend/` e preenchido com 
 
 | Variável | Descrição | Exemplo / Padrão |
 | :--- | :--- | :--- |
-| `DATABASE_URL` | String de conexão com o banco de dados PostgreSQL (GCP Cloud SQL via Proxy). | `postgresql://user:pass@127.0.0.1:5433/dbname` |
+| `DATABASE_URL` | String de conexão com o banco de dados PostgreSQL (GCP Cloud SQL via Proxy). | `postgresql://user:pass@127.0.0.1:5434/dbname` |
 | `SECURITY_PEPPER` | Valor fixo de 32 bytes (hexadecimal) para salgar os hashes de senhas e dados. | `4d87c5ab5cb30f0a1e1c4440ca08e305` |
 | `SECRET_KEY` | Chave criptográfica para assinatura de tokens JWT. | `your-secret-key-here-change-in-production` |
 | `ALGORITHM` | Algoritmo de hash para o JWT. | `HS256` |
@@ -30,9 +30,9 @@ O arquivo `.env` deve ser colocado na raiz da pasta `backend/` e preenchido com 
 ## 2. Passos de Deploy (Infraestrutura)
 
 ### 2.1. Banco de Dados (GCP Cloud SQL)
-1. **Cloud SQL Proxy:** Certifique-se de iniciar o proxy do GCP Cloud SQL apontando para a porta `5433` (e não a `5411` ou a padrão `5432`, reservada para instâncias locais).
+1. **Cloud SQL Proxy:** Certifique-se de iniciar o proxy do GCP Cloud SQL apontando para a porta `5434` (e não a `5411` ou a padrão `5432`, reservada para instâncias locais).
    ```powershell
-   ./cloud-sql-proxy.exe --port 5433 <INSTANCE_CONNECTION_NAME>
+   ./cloud-sql-proxy.exe --port 5434 <INSTANCE_CONNECTION_NAME>
    ```
 2. **Migrations:** Execute as migrações automáticas de banco no startup (lifespan FastAPI) para garantir que as tabelas (`tenants`, `users`, `purchase_orders`, `order_items`, `client_preferences`, `SupportTickets` e `GlobalConfig`) sejam criadas.
 

@@ -186,16 +186,34 @@ app = FastAPI(
 # CORS Middleware (must be first)
 # CRITICAL: Cannot use allow_origins=["*"] with allow_credentials=True
 # Must specify explicit origins when using credentials
+import os
+
+cors_origins_env = os.getenv("CORS_ORIGINS")
+app_env = os.getenv("APP_ENV", "development").lower()
+is_prod = app_env == "production" or os.getenv("DEBUG", "true").lower() == "false"
+
+if is_prod:
+    if cors_origins_env:
+        origins = [origin.strip() for origin in cors_origins_env.split(",") if origin.strip()]
+    else:
+        # Strict fallback to production domain only
+        origins = ["https://flexflow.promaflex.com.br"]
+else:
+    if cors_origins_env:
+        origins = [origin.strip() for origin in cors_origins_env.split(",") if origin.strip()]
+    else:
+        origins = [
+            "http://localhost:3000",
+            "http://localhost:3001",
+            "http://localhost:3002",
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:3001",
+            "http://127.0.0.1:3002"
+        ]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://localhost:3002",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:3001",
-        "http://127.0.0.1:3002"
-    ],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
