@@ -83,7 +83,7 @@ export const HELP_CONFIG = {
         title: "PCP - Planejamento e Controle de Produção",
         description: "Análise técnica, mapeamento de SKUs e vinculação de custos de matéria-prima.",
         rules: [
-            "🔗 VÍNCULO DE SKU / NOME AMIGÁVEL: Use o sistema de Vínculo de SKU / Nome Amigável para mapear SKUs similares (Ex: 'SKU-A' → 'SKU-MASTER'). Isso permite reutilizar custos e especificações técnicas",
+            "🔗 VÍNCULO DE SKU / NOME DO PRODUTO (SKU): Use o sistema de Vínculo de SKU / Nome do Produto (SKU) para mapear SKUs similares (Ex: 'SKU-A' → 'SKU-MASTER'). Isso permite reutilizar custos e especificações técnicas",
             "💰 CUSTO OBRIGATÓRIO: Cada SKU DEVE ter custo de matéria-prima vinculado (R$/kg) antes de avançar para Produção",
             "📊 MOTOR DE MARGEM PCP: CM = (VP - Impostos 22.25% - Comissão - Frete) / Custos. Se Custos = 0 ou Nulo, a margem passa para o status 'PENDENTE PCP'",
             "🎨 LIMITES DE MARGEM: Verde (>= 30%), Amarelo (< 30%), Laranja (< 19%), Vermelho (< 10% ou negativa)",
@@ -95,7 +95,7 @@ export const HELP_CONFIG = {
         ],
         nextSteps: [
             "Acessar a página de Custos para vincular matéria-prima a cada SKU",
-            "Usar o sistema de Vínculo de SKU / Nome Amigável para SKUs similares",
+            "Usar o sistema de Vínculo de SKU / Nome do Produto (SKU) para SKUs similares",
             "Se houver falta de MP, clicar em 'Sugerir Partição' para dividir o pedido",
             "Validar anexos técnicos para itens personalizados",
             "Preencher metadados de produção (tipo de embalagem, rendimento)",
@@ -106,7 +106,7 @@ export const HELP_CONFIG = {
             "Custo de matéria-prima (custo_mp_kg) para cada SKU",
             "Rendimento (kg por unidade)",
             "Tipo de embalagem",
-            "Vínculo de SKU / Nome Amigável (se aplicável)"
+            "Vínculo de SKU / Nome do Produto (SKU) (se aplicável)"
         ]
     },
 
