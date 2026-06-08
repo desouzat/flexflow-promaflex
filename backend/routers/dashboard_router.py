@@ -70,7 +70,7 @@ async def get_celso_kpis(
     7. Alerts (POs with delayed production or SLA breaches)
     """
     tenant_id = current_user.tenant_id
-    is_privileged = current_user.role in ["admin", "master"]
+    is_privileged = current_user.role.lower() in ["admin", "master"]
 
     # 1. Fetch all POs and items for this tenant
     pos = db.query(PurchaseOrder).filter(PurchaseOrder.tenant_id == tenant_id).all()

@@ -918,7 +918,7 @@ class GlobalConfig(Base):
     Armazena parâmetros configuráveis como multiplicadores de SLA.
     Acesso exclusivo para role MASTER.
     """
-    __tablename__ = "global_config"
+    __tablename__ = "GlobalConfig"
     
     # Colunas
     id: Mapped[uuid.UUID] = mapped_column(
@@ -1010,7 +1010,7 @@ class SupportTicket(Base):
     Modelo de Ticket de Suporte.
     Permite que usuários reportem problemas e recebam assistência técnica.
     """
-    __tablename__ = "support_tickets"
+    __tablename__ = "SupportTickets"
     
     # Colunas
     id: Mapped[uuid.UUID] = mapped_column(
@@ -1018,12 +1018,21 @@ class SupportTicket(Base):
         primary_key=True,
         default=uuid.uuid4
     )
+    ticket_id: Mapped[str] = mapped_column(
+        String(50),
+        unique=True,
+        nullable=False
+    )
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False
     )
     description: Mapped[str] = mapped_column(Text, nullable=False)
+    attachment_path: Mapped[Optional[str]] = mapped_column(
+        String(500),
+        nullable=True
+    )
     status: Mapped[str] = mapped_column(
         String(50),
         default="OPEN",

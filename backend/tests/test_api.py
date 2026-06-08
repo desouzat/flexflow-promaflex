@@ -627,6 +627,7 @@ def test_routing_logic(auth_headers):
             {
                 "po_number": "po-clean-123",
                 "client_name": "Clean Client Ltd",
+                "business_unit": "Indústria",
                 "freight_cost": 100.0,
                 "additional_costs": 0.0,
                 "po_total_value": 1100.0,
@@ -663,6 +664,7 @@ def test_routing_logic(auth_headers):
             {
                 "po_number": "po-blocked-123",
                 "client_name": "Blocked Client Ltd",
+                "business_unit": "Indústria",
                 "freight_cost": 100.0,
                 "additional_costs": 0.0,
                 "po_total_value": 1100.0,
@@ -732,6 +734,7 @@ def test_partition_approval_and_freight_allocation(auth_headers):
             {
                 "po_number": "po-part-999",
                 "client_name": "Partition Client Ltd",
+                "business_unit": "Indústria",
                 "freight_cost": 250.0,
                 "additional_costs": 0.0,
                 "po_total_value": 2000.0,
@@ -871,6 +874,7 @@ def test_expedition_attachments_upload(auth_headers):
             {
                 "po_number": "po-upload-test-888",
                 "client_name": "Upload Client",
+                "business_unit": "Indústria",
                 "freight_cost": 100.0,
                 "additional_costs": 0.0,
                 "po_total_value": 1000.0,

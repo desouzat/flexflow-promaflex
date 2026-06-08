@@ -73,7 +73,7 @@ async def list_users(
     timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
     
     # SECURITY AUDIT: Strictly raise HTTP_403_FORBIDDEN on role mismatch
-    if current_user.role != 'admin':
+    if current_user.role.lower() != 'admin':
         print(f"{timestamp} [RBAC] Access denied: user {current_user.id} (role: {current_user.role}) attempted to access user management")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -127,7 +127,7 @@ async def create_user(
     timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
     
     # SECURITY AUDIT: Strictly raise HTTP_403_FORBIDDEN on role mismatch
-    if current_user.role != 'admin':
+    if current_user.role.lower() != 'admin':
         print(f"{timestamp} [RBAC] Access denied: user {current_user.id} (role: {current_user.role}) attempted to access user management")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -223,7 +223,7 @@ async def delete_user(
     timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
     
     # SECURITY AUDIT: Strictly raise HTTP_403_FORBIDDEN on role mismatch
-    if current_user.role != 'admin':
+    if current_user.role.lower() != 'admin':
         print(f"{timestamp} [RBAC] Access denied: user {current_user.id} (role: {current_user.role}) attempted to access user management")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -285,7 +285,7 @@ async def update_user(
     timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
     
     # SECURITY AUDIT: Strictly raise HTTP_403_FORBIDDEN on role mismatch
-    if current_user.role != 'admin':
+    if current_user.role.lower() != 'admin':
         print(f"{timestamp} [RBAC] Access denied: user {current_user.id} (role: {current_user.role}) attempted to access user management")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

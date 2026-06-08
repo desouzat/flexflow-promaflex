@@ -10,6 +10,7 @@ import ImportPage from './pages/ImportPage'
 import DashboardPage from './pages/DashboardPage'
 import CostsPage from './pages/CostsPage'
 import UsersPage from './pages/UsersPage'
+import SettingsPage from './pages/SettingsPage'
 
 // Protected Route Component
 const ProtectedRoute = ({ children }) => {
@@ -74,6 +75,7 @@ function AppRoutes() {
                 <Route path="dashboard" element={<DashboardPage />} />
                 <Route path="costs" element={<CostsPage />} />
                 <Route path="users" element={<UsersPage />} />
+                <Route path="settings" element={<SettingsPage />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

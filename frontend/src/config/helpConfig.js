@@ -1,6 +1,6 @@
 /**
  * FlexFlow - Sistema de Ajuda Contextual
- * Configuração de ajuda para cada etapa do Kanban
+ * Configuração de ajuda para cada etapa do Kanban e Mesa de Conferência
  */
 
 export const HELP_CONFIG = {
@@ -22,10 +22,11 @@ export const HELP_CONFIG = {
             "💸 REGRA DO FINANCIAL GATE: Pedidos que excedem o limite de crédito do cliente são bloqueados automaticamente pelo Financial Gate, necessitando de liberação manual.",
             "🔄 BYPASS DE TROCA/REPOSIÇÃO: Itens bloqueados marcados com a flag de 'Troca/Reposição' ativam o bypass financeiro e recebem o status 'CRÉDITO PRÉ-APROVADO (TROCA)'.",
             "📦 SELEÇÃO DE EMBALAGEM OBRIGATÓRIA: O tipo de embalagem deve ser selecionado obrigatoriamente na Mesa de Conferência antes de confirmar o pedido.",
-            "📸 REGISTRO FOTOGRÁFICO E NFE OBRIGATÓRIOS PARA FECHAMENTO: A Nota Fiscal com Canhoto Assinado e a Foto da Carga, juntamente com o número da NF-e, são estritamente obrigatórios para concluir o pedido na Expedição."
+            "🏢 SELEÇÃO DE UNIDADE DE NEGÓCIO OBRIGATÓRIA: A Unidade de Negócio ('Indústria', 'Construção Civil' ou 'Varejo') deve ser selecionada de forma obrigatória. Esta escolha alimenta a inteligência de memória do cliente (sendo pré-preenchida no próximo import) e os indicadores de performance do Dashboard corporativo."
         ],
         nextSteps: [
             "Revisar cada item importado no painel de staging",
+            "Selecionar a Unidade de Negócio correspondente para cada pedido no lote",
             "Marcar itens personalizados e clientes novos conforme necessário",
             "Adicionar descrições de customização para itens personalizados",
             "Fazer upload de anexos para clientes novos com itens personalizados (máx 5MB)",
@@ -37,12 +38,13 @@ export const HELP_CONFIG = {
         requiredFields: [
             "Descrição da customização (se Personalizado)",
             "Anexo (se Personalizado + Cliente Novo)",
+            "Unidade de Negócio selecionada",
             "Todos os itens marcados como 'Checado' (100%)"
         ],
         criticalRules: [
             "🚫 REGRA 100%: Impossível confirmar sem todos os itens checados",
             "⚠️ PAINEL DE RISCO: Monitora erros em tempo real",
-            "📦 LIMITE 5MB: Arquivos maiores serão rejeitados"
+            "🏢 UNIDADE DE NEGÓCIO: Preenchimento obrigatório para liberação do pedido"
         ]
     },
 
@@ -50,27 +52,28 @@ export const HELP_CONFIG = {
         title: "Comercial - Validação e Processamento Inicial",
         description: "Pedidos aguardando análise comercial. Inclui pedidos SUBMITTED e aqueles aguardando decisão de partição (WAITING_COMMERCIAL_PARTITION).",
         rules: [
-            "📊 IMPORTAÇÃO: A planilha Excel deve conter exatamente 19 campos obrigatórios (PO Number, Customer, SKU, Quantity, Unit Price, Delivery Date, etc.)",
+            "📊 INTEGRAÇÃO S3 (AUTOMÁTICA): Os pedidos são ingeridos continuamente de forma automática através do bucket S3. A planilha Excel serve apenas como contingência/fallback de emergência caso haja indisponibilidade do S3.",
             "📝 NOTAS OBRIGATÓRIAS: Itens personalizados DEVEM ter descrição da customização preenchida",
             "🌍 FLAG EXPORTAÇÃO: Pedidos de exportação são marcados automaticamente e têm prioridade visual no Kanban",
-            "⭐ FLAG PRIMEIRA ORDEM: Primeira ordem do cliente recebe atenção especial para garantir qualidade",
-            "🔄 FLAG REPOSIÇÃO: Pedidos de reposição têm SLA reduzido em 50% (Ex: 10 dias → 5 dias)",
+            "⭐ FLAG PRIMEIRO PEDIDO: O Primeiro Pedido do cliente recebe atenção especial para garantir qualidade e validação de especificações",
+            "🔄 Pedidos de Reposição (Troca): Redução de 50% no SLA (barra ciano)",
             "🔒 BLOQUEIO DE CRÉDITO: Sistema verifica automaticamente o limite de crédito do cliente. Se excedido, o pedido é bloqueado até liberação manual",
             "✅ Todos os campos obrigatórios devem estar preenchidos antes de avançar para PCP",
             "🟣 AGUARDANDO PARTIÇÃO: Pedidos com badge roxo 'Aguardando Decisão de Partição' foram sugeridos para divisão pelo PCP e aguardam decisão comercial",
-            "🟣 Partição de Pedido: C1 mantém a data original; C2 recebe a nova data sugerida pelo PCP."
+            "🟣 Partição de Pedido: C1 mantém a data original; C2 recebe a nova data sugerida pelo PCP.",
+            "⏱️ SLA DO PEDIDO: O SLA não para durante a espera de insumos (Transparência Total)."
         ],
         nextSteps: [
-            "Revisar dados importados e validar os 19 campos obrigatórios",
+            "Revisar dados importados e validar todos os campos obrigatórios",
             "Verificar se há bloqueio de crédito ativo",
-            "Confirmar flags estratégicas (Exportação, Primeira Ordem, Troca/Reposição)",
+            "Confirmar flags estratégicas (Exportação, Primeiro Pedido, Troca/Reposição)",
             "Adicionar notas de customização para itens personalizados",
             "Para pedidos com badge roxo: Decidir sobre partição sugerida pelo PCP",
             "Mover para PCP quando validação comercial estiver completa"
         ],
         icon: "📋",
         requiredFields: [
-            "19 campos da planilha Excel",
+            "Campos obrigatórios integrados via S3 ou planilha Excel de fallback",
             "Descrição de customização (se item personalizado)",
             "Liberação de crédito (se bloqueado)"
         ]
@@ -80,7 +83,7 @@ export const HELP_CONFIG = {
         title: "PCP - Planejamento e Controle de Produção",
         description: "Análise técnica, mapeamento de SKUs e vinculação de custos de matéria-prima.",
         rules: [
-            "🔗 MAPEAMENTO DE-PARA: Use o sistema de Alias para mapear SKUs similares (Ex: 'SKU-A' → 'SKU-MASTER'). Isso permite reutilizar custos e especificações técnicas",
+            "🔗 VÍNCULO DE SKU / NOME AMIGÁVEL: Use o sistema de Vínculo de SKU / Nome Amigável para mapear SKUs similares (Ex: 'SKU-A' → 'SKU-MASTER'). Isso permite reutilizar custos e especificações técnicas",
             "💰 CUSTO OBRIGATÓRIO: Cada SKU DEVE ter custo de matéria-prima vinculado (R$/kg) antes de avançar para Produção",
             "📊 MOTOR DE MARGEM PCP: CM = (VP - Impostos 22.25% - Comissão - Frete) / Custos. Se Custos = 0 ou Nulo, a margem passa para o status 'PENDENTE PCP'",
             "🎨 LIMITES DE MARGEM: Verde (>= 30%), Amarelo (< 30%), Laranja (< 19%), Vermelho (< 10% ou negativa)",
@@ -92,7 +95,7 @@ export const HELP_CONFIG = {
         ],
         nextSteps: [
             "Acessar a página de Custos para vincular matéria-prima a cada SKU",
-            "Usar o sistema De-Para (Alias) para SKUs similares",
+            "Usar o sistema de Vínculo de SKU / Nome Amigável para SKUs similares",
             "Se houver falta de MP, clicar em 'Sugerir Partição' para dividir o pedido",
             "Validar anexos técnicos para itens personalizados",
             "Preencher metadados de produção (tipo de embalagem, rendimento)",
@@ -103,7 +106,7 @@ export const HELP_CONFIG = {
             "Custo de matéria-prima (custo_mp_kg) para cada SKU",
             "Rendimento (kg por unidade)",
             "Tipo de embalagem",
-            "Mapeamento De-Para (se aplicável)"
+            "Vínculo de SKU / Nome Amigável (se aplicável)"
         ]
     },
 
@@ -112,8 +115,8 @@ export const HELP_CONFIG = {
         description: "Execução da produção, registro de quantidades reais e rastreamento automático de SLA.",
         rules: [
             "📊 QUANTIDADE REAL PRODUZIDA: Campo OBRIGATÓRIO - Registrar a quantidade efetivamente produzida (pode diferir da quantidade pedida)",
-            "⏱️ RASTREAMENTO AUTOMÁTICO DE SLA: O sistema monitora automaticamente o tempo de produção e alerta quando o SLA está próximo do vencimento",
-            "🔄 PEDIDOS DE REPOSIÇÃO: Lembrar que têm SLA reduzido em 50% - priorizar na fila de produção",
+            "⏱️ SLA: Cronômetro contínuo. O SLA não para durante a espera de insumos (Transparência Total)",
+            "🔄 Pedidos de Reposição: Redução de 50% no SLA (barra ciano) - priorizar na fila de produção",
             "📉 PERDAS E REFUGOS: Registrar perdas de material e refugos para análise de eficiência",
             "⚠️ PROBLEMAS DE QUALIDADE: Documentar não-conformidades e problemas técnicos",
             "🔧 IMPEDIMENTOS: Atualizar status de impedimentos (equipamento, falta de insumo, etc.)",
@@ -136,9 +139,9 @@ export const HELP_CONFIG = {
 
     "Faturamento/Expedição": {
         title: "Faturamento/Expedição - Preparação e Envio",
-        description: "Embalagem final, sincronismo de despacho e preparação para envio ao cliente. Após conclusão, pedido avança para Financeiro.",
+        description: "Embalagem final, sincronismo de despacho e preparação para envio ao cliente.",
         rules: [
-            "🔄 SINCRONISMO DE DESPACHO: Sistema EXIGE dois documentos obrigatórios antes de finalizar:",
+            "🔄 PORTÃO DE EXPEDIÇÃO: O fechamento do pedido exige obrigatoriamente o número da NF-e (que se refere ao Número da Nota Fiscal/Invoice Number, e não à chave de acesso XML de 44 dígitos), o PDF da Nota Fiscal e fotos anexas (Canhoto Assinado e Carga).",
             "   • PDF da Nota Fiscal (NF) - Upload obrigatório",
             "   • Foto da Carga - Registro fotográfico do produto embalado e pronto para envio",
             "📋 CHECKLIST LOGÍSTICO:",
@@ -160,8 +163,9 @@ export const HELP_CONFIG = {
         ],
         icon: "📦",
         requiredFields: [
-            "PDF da Nota Fiscal (upload obrigatório)",
-            "Foto da Carga (upload obrigatório)",
+            "Número da NF-e (Invoice Number)",
+            "PDF da Nota Fiscal (NF)",
+            "Foto da Carga (Canhoto Assinado e Carga)",
             "Data de envio",
             "Transportadora",
             "Código de rastreamento"
@@ -169,37 +173,44 @@ export const HELP_CONFIG = {
     },
 
     Financeiro: {
-        title: "Financeiro - Auditoria e Conclusão",
-        description: "Pedidos despachados aguardando auditoria financeira final e conclusão. Inclui pedidos em AUDIT_PENDING e COMPLETED.",
+        title: "Financeiro - Controle de Crédito",
+        description: "Exclusivo para análise e liberação de bloqueios de crédito.",
         rules: [
-            "💰 AUDITORIA FINANCEIRA: Revisão final de valores, comissões e margens",
-            "📄 DOCUMENTAÇÃO COMPLETA: Validação de todos os documentos (NF, fotos, anexos técnicos)",
-            "✅ PEDIDO DESPACHADO: Produto foi enviado ao cliente com sucesso",
-            "🔗 BLOCKCHAIN AUDIT LOG: Cada transição de status foi registrada de forma imutável com:",
-            "   • Timestamp exato da mudança",
-            "   • Usuário responsável pela ação",
-            "   • Status anterior e novo status",
-            "   • Metadados adicionais (comentários, anexos, etc.)",
-            "📊 MÉTRICAS REGISTRADAS: Performance de SLA, tempo de produção, perdas e eficiência foram capturadas",
-            "🗄️ POLÍTICA DE ARMAZENAMENTO: Todos os dados são mantidos por 24 meses para auditoria e análise histórica",
-            "📈 ANÁLISE DISPONÍVEL: Dados podem ser usados para relatórios gerenciais e melhoria contínua"
+            "🔒 ANÁLISE DE CRÉDITO: Esta etapa é exclusiva para análise e liberação de bloqueios de crédito baseados no histórico e limite financeiro do cliente.",
+            "✅ LIBERAÇÃO FINANCEIRA: Aprovadores autorizados revisam a justificativa comercial anexada para autorizar ou recusar o prosseguimento do pedido.",
+            "🔄 BYPASS DE TROCA: Pedidos sinalizados como Troca/Reposição têm liberação de crédito automática (Crédito Pré-Aprovado).",
+            "🔗 BLOCKCHAIN AUDIT LOG: Toda alteração de status e liberação é registrada com assinatura hash de forma imutável, garantindo auditoria completa."
         ],
         nextSteps: [
-            "Realizar auditoria financeira final",
-            "Validar comissões e margens calculadas",
-            "Confirmar recebimento de pagamento (se aplicável)",
-            "Arquivar documentação física e digital",
-            "Analisar métricas de performance e SLA",
-            "Revisar Audit Log para auditoria interna",
-            "Marcar como COMPLETED após auditoria aprovada"
+            "Revisar o limite de crédito do cliente",
+            "Analisar a justificativa comercial anexada ao pedido bloqueado",
+            "Mover para PCP/Aprovados após liberação de crédito concedida"
         ],
         icon: "💰",
         auditFeatures: [
-            "Auditoria financeira obrigatória",
+            "Análise exclusiva de liberação de crédito",
             "Blockchain Audit Log completo",
-            "Armazenamento de 24 meses",
             "Rastreabilidade total de mudanças",
-            "Análise histórica disponível"
+            "Auditoria de justificativas comerciais"
+        ]
+    },
+
+    "Concluídos": {
+        title: "Concluídos - Histórico e Auditoria",
+        description: "Repositório histórico para consulta de pedidos finalizados e auditoria de Timeline.",
+        rules: [
+            "📂 HISTÓRICO IMUTÁVEL: Pedidos concluídos servem como registro histórico permanente.",
+            "⏱️ SLA FINALIZADO: O cronômetro de SLA está encerrado e registrado para fins de indicadores de performance (KPIs).",
+            "🔗 AUDITORIA COMPLETA: Toda a timeline e o log de transições de status (Audit Log) estão disponíveis para consulta."
+        ],
+        nextSteps: [
+            "Consultar métricas de SLA e lead time no Dashboard",
+            "Verificar logs de auditoria caso necessário"
+        ],
+        icon: "📂",
+        requiredFields: [],
+        criticalRules: [
+            "🔒 IMUTABILIDADE: Não é possível mover pedidos fora desta coluna sem justificativa de exceção de auditoria"
         ]
     }
 };
@@ -230,10 +241,10 @@ export const STRATEGIC_INDICATORS = {
         tooltip: "Pedido de exportação - Atenção especial para documentação e prazos alfandegários"
     },
     is_first_order: {
-        label: "Primeira Ordem",
+        label: "Primeiro Pedido",
         icon: "⭐",
         color: "yellow",
-        tooltip: "Primeira ordem do cliente - Prioridade para garantir qualidade e impressão positiva"
+        tooltip: "Primeiro pedido do cliente - Prioridade para garantir qualidade e impressão positiva"
     },
     is_replacement: {
         label: "Troca/Reposição",

@@ -14,13 +14,17 @@ import {
     User,
     DollarSign,
     Users,
-    AlertCircle
+    AlertCircle,
+    Settings
 } from 'lucide-react'
 
 const Layout = () => {
     const [sidebarOpen, setSidebarOpen] = useState(true)
     const [showReportModal, setShowReportModal] = useState(false)
     const [reportDescription, setReportDescription] = useState('')
+    const [reportAttachment, setReportAttachment] = useState(null)
+    const [showSuccessModal, setShowSuccessModal] = useState(false)
+    const [successTicketId, setSuccessTicketId] = useState('')
     const { user, logout } = useAuth()
     const { badges } = useNotifications()
     const navigate = useNavigate()
@@ -36,6 +40,7 @@ const Layout = () => {
         { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', badge: 'dashboard' },
         { path: '/costs', icon: DollarSign, label: 'Gerenciar Custos', badge: 'costs', adminOnly: true },
         { path: '/users', icon: Users, label: 'Gestão de Usuários', badge: 'users', strictAdminOnly: true },
+        { path: '/settings', icon: Settings, label: 'Configurações', badge: 'settings', strictAdminOnly: true },
     ]
 
     const handleReportProblem = async () => {
@@ -44,17 +49,30 @@ const Layout = () => {
             return
         }
 
-        const toastId = showLoading('Enviando relatório...')
+        const toastId = showLoading('Enviando chamado...')
 
         try {
-            const response = await api.post('/support/report', {
-                description: reportDescription
+            const formData = new FormData()
+            formData.append('description', reportDescription)
+            if (reportAttachment) {
+                formData.append('attachment', reportAttachment)
+            }
+
+            const response = await api.post('/support/ticket', formData, {
+                headers: {
+                    'Content-Type': 'multipart/form-data'
+                }
             })
 
             dismissToast(toastId)
-            showSuccess(`Problema reportado com sucesso! Ticket ID: ${response.data.id.substring(0, 8)}...`)
+            
+            const ticketId = response.data.ticket_id
+            setSuccessTicketId(ticketId)
+            setShowSuccessModal(true)
+            showSuccess(`Chamado registrado! Guarde seu ID: ${ticketId}`)
 
             setReportDescription('')
+            setReportAttachment(null)
             setShowReportModal(false)
         } catch (error) {
             dismissToast(toastId)
@@ -198,11 +216,30 @@ const Layout = () => {
                                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent mb-4"
                             />
 
+                            {/* Attachment Input */}
+                            <div className="mb-4 text-left">
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Anexo (opcional, PDF/JPG/PNG, máx 5MB)
+                                </label>
+                                <input
+                                    type="file"
+                                    accept=".pdf,.jpg,.jpeg,.png"
+                                    onChange={(e) => setReportAttachment(e.target.files[0] || null)}
+                                    className="w-full text-sm text-gray-550 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100 cursor-pointer border border-gray-300 rounded-lg p-1"
+                                />
+                                {reportAttachment && (
+                                    <p className="text-xs text-green-600 mt-1 font-medium">
+                                        ✓ Arquivo selecionado: {reportAttachment.name}
+                                    </p>
+                                )}
+                            </div>
+
                             <div className="flex items-center justify-end gap-3">
                                 <button
                                     onClick={() => {
                                         setShowReportModal(false)
                                         setReportDescription('')
+                                        setReportAttachment(null)
                                     }}
                                     className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors"
                                 >
@@ -216,6 +253,36 @@ const Layout = () => {
                                 </button>
                             </div>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Success Ticket Modal */}
+            {showSuccessModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-lg shadow-xl max-w-sm w-full p-6 text-center">
+                        <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <span className="text-green-600 text-2xl font-bold">✓</span>
+                        </div>
+                        <h3 className="text-xl font-bold text-gray-900 mb-2">Chamado Registrado!</h3>
+                        <p className="text-sm text-gray-600 mb-4">
+                            Seu chamado foi registrado com sucesso.
+                        </p>
+                        <div className="bg-gray-100 rounded-lg p-3 mb-6 font-mono font-bold text-lg text-primary-700 tracking-wider">
+                            {successTicketId}
+                        </div>
+                        <p className="text-xs text-gray-500 mb-6 font-medium">
+                            Guarde seu ID para acompanhamento do problema.
+                        </p>
+                        <button
+                            onClick={() => {
+                                setShowSuccessModal(false)
+                                setSuccessTicketId('')
+                            }}
+                            className="w-full py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-semibold"
+                        >
+                            Fechar
+                        </button>
                     </div>
                 </div>
             )}

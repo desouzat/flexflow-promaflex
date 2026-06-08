@@ -29,7 +29,7 @@ def require_admin_or_master_role(current_user: UserInfo = Depends(get_current_us
     Dependency para verificar se o usuário tem role admin ou master.
     Apenas usuários admin ou master podem acessar endpoints de custos.
     """
-    if current_user.role not in ["admin", "master"]:
+    if current_user.role.lower() not in ["admin", "master"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Acesso negado. Apenas usuários admin ou master podem gerenciar custos."

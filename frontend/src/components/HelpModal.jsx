@@ -6,8 +6,11 @@
 import React, { useEffect } from 'react';
 import { X, HelpCircle, CheckCircle, ArrowRight } from 'lucide-react';
 import { getHelpForStatus } from '../config/helpConfig';
+import { useAuth } from '../context/AuthContext';
 
 const HelpModal = ({ isOpen, onClose, status }) => {
+    const { user } = useAuth();
+    
     // Add escape key handler
     useEffect(() => {
         if (!isOpen) return;
@@ -25,11 +28,42 @@ const HelpModal = ({ isOpen, onClose, status }) => {
     if (!isOpen) return null;
 
     const helpConfig = getHelpForStatus(status);
+    const isPrivileged = ['admin', 'master'].includes((user?.role || '').toLowerCase());
 
     const handleBackdropClick = (e) => {
         if (e.target === e.currentTarget) {
             onClose();
         }
+    };
+
+    // Filter rules and required fields for non-privileged users (operators/regular users)
+    const filterItems = (items) => {
+        if (!items) return [];
+        if (isPrivileged) return items;
+        
+        // Remove items with margin/cost sensitive keywords
+        const forbiddenKeywords = [
+            'margem', 'margens', 'custo', 'custos', 'comissão', 'comissões',
+            'crédito', 'financeiro', 'financeira', 'financial', 'vp', 'valor presente'
+        ];
+        
+        return items.filter(item => {
+            const lowerItem = item.toLowerCase();
+            return !forbiddenKeywords.some(keyword => lowerItem.includes(keyword));
+        });
+    };
+
+    const rules = filterItems(helpConfig.rules);
+    const requiredFields = filterItems(helpConfig.requiredFields);
+    const nextSteps = filterItems(helpConfig.nextSteps);
+
+    // Parse bold markdown syntax: **text** -> <strong>text</strong>
+    const renderRuleText = (text) => {
+        if (text.includes('**')) {
+            const parts = text.split('**');
+            return parts.map((part, i) => i % 2 === 1 ? <strong key={i}>{part}</strong> : part);
+        }
+        return text;
     };
 
     return (
@@ -70,16 +104,16 @@ const HelpModal = ({ isOpen, onClose, status }) => {
                     </div>
 
                     {/* Rules */}
-                    {helpConfig.rules && helpConfig.rules.length > 0 && (
+                    {rules && rules.length > 0 && (
                         <div>
                             <h3 className="text-lg font-semibold text-gray-900 mb-3">
                                 📋 Regras e Diretrizes
                             </h3>
                             <ul className="space-y-2">
-                                {helpConfig.rules.map((rule, index) => (
+                                {rules.map((rule, index) => (
                                     <li key={index} className="flex items-start gap-3">
                                         <CheckCircle className="text-green-500 flex-shrink-0 mt-0.5" size={20} />
-                                        <span className="text-gray-700">{rule}</span>
+                                        <span className="text-gray-700">{renderRuleText(rule)}</span>
                                     </li>
                                 ))}
                             </ul>
@@ -87,16 +121,16 @@ const HelpModal = ({ isOpen, onClose, status }) => {
                     )}
 
                     {/* Required Fields */}
-                    {helpConfig.requiredFields && helpConfig.requiredFields.length > 0 && (
+                    {requiredFields && requiredFields.length > 0 && (
                         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
                             <h3 className="text-lg font-semibold text-yellow-900 mb-3 flex items-center gap-2">
                                 <span>⚠️</span>
                                 Campos Obrigatórios
                             </h3>
                             <ul className="space-y-1">
-                                {helpConfig.requiredFields.map((field, index) => (
+                                {requiredFields.map((field, index) => (
                                     <li key={index} className="text-yellow-800 ml-6">
-                                        • {field}
+                                        • {renderRuleText(field)}
                                     </li>
                                 ))}
                             </ul>
@@ -104,46 +138,48 @@ const HelpModal = ({ isOpen, onClose, status }) => {
                     )}
 
                     {/* Next Steps */}
-                    {helpConfig.nextSteps && helpConfig.nextSteps.length > 0 && (
+                    {nextSteps && nextSteps.length > 0 && (
                         <div>
                             <h3 className="text-lg font-semibold text-gray-900 mb-3">
                                 🎯 Próximos Passos
                             </h3>
                             <ul className="space-y-2">
-                                {helpConfig.nextSteps.map((step, index) => (
+                                {nextSteps.map((step, index) => (
                                     <li key={index} className="flex items-start gap-3">
                                         <ArrowRight className="text-blue-500 flex-shrink-0 mt-0.5" size={20} />
-                                        <span className="text-gray-700">{step}</span>
+                                        <span className="text-gray-700">{renderRuleText(step)}</span>
                                     </li>
                                 ))}
                             </ul>
                         </div>
                     )}
 
-                    {/* Glossário / Dicionário de Termos */}
-                    <div className="border-t border-gray-150 pt-6">
-                        <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                            <span>📚</span> Dicionário de Conceitos & Margem
-                        </h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="bg-sky-50 border border-sky-200 rounded-lg p-4">
-                                <h4 className="font-semibold text-sky-950 mb-1 flex items-center gap-1.5">
-                                    <span className="text-sky-600">🔍</span> PENDENTE PCP
-                                </h4>
-                                <p className="text-sm text-sky-850 leading-relaxed">
-                                    Indica que o custo industrial do SKU ainda não foi validado pelo PCP; a margem será calculada após o vínculo técnico.
-                                </p>
-                            </div>
-                            <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
-                                <h4 className="font-semibold text-indigo-950 mb-1 flex items-center gap-1.5">
-                                    <span className="text-indigo-600">📊</span> Manual de Margem
-                                </h4>
-                                <p className="text-sm text-indigo-850 leading-relaxed">
-                                    Frete e Custos Adicionais informados no cabeçalho (Header Freight/Costs) são rateados proporcionalmente entre todos os itens do pedido com base no seu valor relativo, impactando diretamente a composição de suas margens individuais.
-                                </p>
+                    {/* Glossário / Dicionário de Termos - ONLY VISIBLE TO MASTER/ADMIN */}
+                    {isPrivileged && (
+                        <div className="border-t border-gray-150 pt-6">
+                            <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                                <span>📚</span> Dicionário de Conceitos & Margem
+                            </h3>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="bg-sky-50 border border-sky-200 rounded-lg p-4">
+                                    <h4 className="font-semibold text-sky-950 mb-1 flex items-center gap-1.5">
+                                        <span className="text-sky-600">🔍</span> PENDENTE PCP
+                                    </h4>
+                                    <p className="text-sm text-sky-850 leading-relaxed">
+                                        Indica que o custo industrial do SKU ainda não foi validado pelo PCP; a margem será calculada após o vínculo técnico.
+                                    </p>
+                                </div>
+                                <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
+                                    <h4 className="font-semibold text-indigo-950 mb-1 flex items-center gap-1.5">
+                                        <span className="text-indigo-600">📊</span> Manual de Margem
+                                    </h4>
+                                    <p className="text-sm text-indigo-850 leading-relaxed">
+                                        Frete e Custos Adicionais informados no cabeçalho (Header Freight/Costs) são rateados proporcionalmente entre todos os itens do pedido com base no seu valor relativo, impactando diretamente a composição de suas margens individuais.
+                                    </p>
+                                </div>
                             </div>
                         </div>
-                    </div>
+                    )}
                 </div>
 
                 {/* Footer */}

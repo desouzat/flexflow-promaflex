@@ -1126,11 +1126,11 @@ async def move_po_status(
     if to_status_db not in valid_transitions.get(from_status, []):
         # Check if user can skip validation
         if request.skip_validation:
-            # Verify user has LEADER or MASTER role
-            if current_user.role not in ["LEADER", "MASTER"]:
+            # Verify user has LEADER, MASTER or ADMIN role
+            if current_user.role.lower() not in ["leader", "master", "admin"]:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Apenas usuários LEADER ou MASTER podem realizar salto de etapa"
+                    detail="Apenas usuários LEADER, MASTER ou ADMIN podem realizar salto de etapa"
                 )
             
             # Justification is validated by Pydantic validator
@@ -1364,7 +1364,7 @@ async def update_manual_commission(
     """
     
     # Check authorization
-    if current_user.role not in ["MASTER", "ADMIN"]:
+    if current_user.role.lower() not in ["master", "admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Apenas usuários MASTER ou ADMIN podem alterar a comissão manualmente"

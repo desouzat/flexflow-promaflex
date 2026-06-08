@@ -10,7 +10,7 @@ from fastapi.exceptions import RequestValidationError
 from contextlib import asynccontextmanager
 import time
 
-from backend.routers import auth, import_router, kanban, dashboard, costs, workshop, partition, users, support, dashboard_router
+from backend.routers import auth, import_router, kanban, dashboard, costs, workshop, partition, users, support, dashboard_router, settings
 from backend.database import engine, Base
 from backend.middleware import AuthenticationMiddleware, TenantIsolationMiddleware
 
@@ -80,6 +80,64 @@ async def lifespan(app: FastAPI):
             print("Successfully initialized client_preferences table.")
     except Exception as e:
         print(f"Initializing client_preferences table skipped/failed: {e}")
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS "SupportTickets" (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    ticket_id VARCHAR(50) UNIQUE NOT NULL,
+                    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    description TEXT NOT NULL,
+                    attachment_path VARCHAR(500),
+                    status VARCHAR(50) DEFAULT 'OPEN' NOT NULL,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    resolved_at TIMESTAMP WITH TIME ZONE,
+                    CONSTRAINT ck_support_ticket_status CHECK (status IN ('OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'))
+                );
+            """))
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_support_ticket_ticket_id ON "SupportTickets"(ticket_id);
+            """))
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_support_ticket_user_id ON "SupportTickets"(user_id);
+            """))
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_support_ticket_status ON "SupportTickets"(status);
+            """))
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_support_ticket_created_at ON "SupportTickets"(created_at);
+            """))
+            print("Successfully initialized SupportTickets table.")
+    except Exception as e:
+        print(f"Initializing SupportTickets table skipped/failed: {e}")
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS "GlobalConfig" (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                    config_key VARCHAR(100) NOT NULL,
+                    config_value VARCHAR(500) NOT NULL,
+                    config_type VARCHAR(50) DEFAULT 'str' NOT NULL,
+                    description TEXT,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                    CONSTRAINT unique_tenant_config UNIQUE (tenant_id, config_key)
+                );
+            """))
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_global_config_tenant_id ON "GlobalConfig"(tenant_id);
+            """))
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_global_config_key ON "GlobalConfig"(config_key);
+            """))
+            print("Successfully initialized GlobalConfig table.")
+    except Exception as e:
+        print(f"Initializing GlobalConfig table skipped/failed: {e}")
 
     
     # Start background worker for S3 sync (non-blocking)
@@ -279,6 +337,7 @@ app.include_router(costs.router)
 app.include_router(partition.router)
 app.include_router(users.router)
 app.include_router(support.router)
+app.include_router(settings.router)
 
 
 # ============================================================================

@@ -1,6 +1,6 @@
-# Regras de Negócio - Engenharia de Margem (Fórmula Celso)
+# Regras de Negócio - Engenharia de Margem (Fórmula Celso) e Governança FlexFlow
 
-Este documento descreve as especificações e fórmulas do **Motor de Margem Dinâmica** (ou "Fórmula Celso") e o **Gate Financeiro Refinado** implementados no FlexFlow.
+Este documento descreve as especificações e fórmulas do **Motor de Margem Dinâmica** (ou "Fórmula Celso"), o **Gate Financeiro Refinado** e as regras de governança das etapas do fluxo de trabalho no FlexFlow.
 
 ---
 
@@ -81,3 +81,30 @@ Para itens marcados com o status de crédito `BLOQUEADO` na mesa de conferência
   - A interface exibe a badge azul/ciano: **`CRÉDITO PRÉ-APROVADO (TROCA)`**.
   - O fluxo de liberação financeira é dispensado, pois a reposição é tratada como crédito de relacionamento pré-aprovado.
   - O prazo de SLA do pedido é reduzido automaticamente em **$50\%$**.
+
+---
+
+## 5. Regras Oficiais do Fluxo de Trabalho (Go-Live)
+
+### 5.1. Mesa de Conferência (Staging)
+* **Unidade de Negócio:** A seleção da 'Unidade de Negócio' ('Indústria', 'Construção Civil' ou 'Varejo') é estritamente obrigatória na Mesa de Conferência antes de confirmar o pedido. Esta escolha alimenta a inteligência de memória do cliente (preenchimento automático no próximo import) e os indicadores de performance do Dashboard.
+* **Validação Fotográfica e NFe:** Esta etapa não exige fotos ou NF-e, cuja obrigatoriedade se restringe ao fechamento do pedido na etapa de Expedição.
+
+### 5.2. Comercial
+* **Ingestão via S3:** O canal primário e contínuo de importação de pedidos é a **Integração S3 (Automática)**. A planilha Excel é mantida estritamente como um fallback/contingência de emergência caso haja indisponibilidade do S3.
+* **Flag Primeiro Pedido:** A antiga flag "Primeira Ordem" foi renomeada para **"Primeiro Pedido"** para melhor representar o início do relacionamento do cliente com a fábrica, recebendo prioridade de auditoria.
+
+### 5.3. Produção/Embalagem
+* **SLA de Produção:** O cronômetro de SLA é de execução contínua. **O SLA não para durante a espera de insumos (Transparência Total)**, garantindo a visualização precisa e sem desvios dos gargalos industriais.
+
+### 5.4. PCP (Planejamento e Controle de Produção)
+* **Vínculo de SKU / Nome Amigável:** O mapeamento técnico entre SKUs similares e códigos legados é denominado **Vínculo de SKU / Nome Amigável** (substituindo o termo Alias), facilitando a reutilização de custos de matéria-prima e rendimentos técnicos.
+
+### 5.5. Faturamento/Expedição
+* **Número da NF-e:** O preenchimento do campo "Número da NF-e" refere-se exclusivamente ao **número sequencial da nota fiscal (Invoice Number)**, e não à chave de acesso XML de 44 dígitos da nota.
+
+### 5.6. Financeiro
+* **Escopo:** O departamento financeiro atua no Kanban de forma **exclusiva para análise e liberação de bloqueios de crédito**, eliminando a responsabilidade de 'Auditoria de NF'.
+
+### 5.7. Concluídos (Completed)
+* **Repositório Histórico:** Esta coluna serve como **repositório histórico para consulta de pedidos finalizados e auditoria de Timeline**, encerrando o monitoramento ativo de SLA.

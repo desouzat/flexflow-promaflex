@@ -124,10 +124,10 @@ async def suggest_partition(
     """
     
     # Validate user role
-    if current_user.role not in ["PCP", "MASTER", "LEADER"]:
+    if current_user.role.lower() not in ["pcp", "master", "leader", "admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Apenas usuários PCP, LEADER ou MASTER podem sugerir partições"
+            detail="Apenas usuários PCP, LEADER, MASTER ou ADMIN podem sugerir partições"
         )
     
     try:
@@ -188,10 +188,10 @@ async def execute_partition(
     """
     
     # Validate user role
-    if current_user.role not in ["COMERCIAL", "MASTER", "LEADER"]:
+    if current_user.role.lower() not in ["comercial", "master", "leader", "admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Apenas usuários COMERCIAL, LEADER ou MASTER podem executar partições"
+            detail="Apenas usuários COMERCIAL, LEADER, MASTER ou ADMIN podem executar partições"
         )
     
     try:
@@ -261,10 +261,10 @@ async def get_pending_partitions(
     """
     
     # Validate user role
-    if current_user.role not in ["COMERCIAL", "MASTER", "LEADER"]:
+    if current_user.role.lower() not in ["comercial", "master", "leader", "admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Apenas usuários COMERCIAL, LEADER ou MASTER podem visualizar partições pendentes"
+            detail="Apenas usuários COMERCIAL, LEADER, MASTER ou ADMIN podem visualizar partições pendentes"
         )
     
     try:
