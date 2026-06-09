@@ -2805,26 +2805,29 @@ async def upload_cargo_photo(
             detail=f"Pedido {po_id} não encontrado"
         )
     
-    # Save file using FileService
-    from backend.services.file_service import FileService
-    file_service = FileService()
-    file_path, _ = await file_service.save_file(file, str(current_user.tenant_id))
+    # Save file using GCSService
+    from backend.services.gcs_service import GCSService
+    gcs_service = GCSService()
+    file_path, _ = await gcs_service.upload_file(file, po_id)
     
     # Force a print log
-    print(f"DEBUG: Saving file to {file_path}")
+    print(f"DEBUG: Saving GCS file to {file_path}")
     
     # Use a hard-assignment for the metadata
     new_metadata = dict(po.partition_metadata or {})
     new_metadata['foto_carga_path'] = file_path
     
-    # Also update nested logistics checklist for compatibility
-    logistics = dict(new_metadata.get("logistics_checklist") or {
-        "endereco_conferido": False,
-        "peso_validado": False,
-        "etiquetas_impressas": False,
-        "foto_carga_path": None,
-        "foto_canhoto_path": None
-    })
+    # Check if logistics_checklist is None or missing, and initialize it
+    if new_metadata.get("logistics_checklist") is None:
+        new_metadata["logistics_checklist"] = {
+            "endereco_conferido": False,
+            "peso_validado": False,
+            "etiquetas_impressas": False,
+            "foto_carga_path": None,
+            "foto_canhoto_path": None
+        }
+        
+    logistics = dict(new_metadata["logistics_checklist"])
     logistics['foto_carga_path'] = file_path
     logistics['updated_by'] = str(current_user.id)
     logistics['updated_at'] = datetime.utcnow().isoformat()
@@ -2862,26 +2865,29 @@ async def upload_receipt_photo(
             detail=f"Pedido {po_id} não encontrado"
         )
     
-    # Save file using FileService
-    from backend.services.file_service import FileService
-    file_service = FileService()
-    file_path, _ = await file_service.save_file(file, str(current_user.tenant_id))
+    # Save file using GCSService
+    from backend.services.gcs_service import GCSService
+    gcs_service = GCSService()
+    file_path, _ = await gcs_service.upload_file(file, po_id)
     
     # Force a print log
-    print(f"DEBUG: Saving file to {file_path}")
+    print(f"DEBUG: Saving GCS file to {file_path}")
     
     # Use a hard-assignment for the metadata
     new_metadata = dict(po.partition_metadata or {})
     new_metadata['foto_canhoto_path'] = file_path
     
-    # Also update nested logistics checklist for compatibility
-    logistics = dict(new_metadata.get("logistics_checklist") or {
-        "endereco_conferido": False,
-        "peso_validado": False,
-        "etiquetas_impressas": False,
-        "foto_carga_path": None,
-        "foto_canhoto_path": None
-    })
+    # Check if logistics_checklist is None or missing, and initialize it
+    if new_metadata.get("logistics_checklist") is None:
+        new_metadata["logistics_checklist"] = {
+            "endereco_conferido": False,
+            "peso_validado": False,
+            "etiquetas_impressas": False,
+            "foto_carga_path": None,
+            "foto_canhoto_path": None
+        }
+        
+    logistics = dict(new_metadata["logistics_checklist"])
     logistics['foto_canhoto_path'] = file_path
     logistics['updated_by'] = str(current_user.id)
     logistics['updated_at'] = datetime.utcnow().isoformat()

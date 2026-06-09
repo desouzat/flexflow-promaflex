@@ -497,10 +497,11 @@ async def upload_attachment(
     - File path and original filename
     """
     
-    file_service = FileService()
+    from backend.services.gcs_service import GCSService
+    gcs_service = GCSService()
     
     try:
-        file_path, original_filename = await file_service.save_file(
+        file_path, original_filename = await gcs_service.upload_file(
             file,
             str(current_user.tenant_id)
         )

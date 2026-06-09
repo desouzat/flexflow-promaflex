@@ -97,7 +97,20 @@ class FileService:
         self._assert_valid_tenant_id(tenant_id)
 
         try:
-            candidate = Path(file_path_str).resolve()
+            # Normalize and clean incoming path slashes
+            clean_path_str = file_path_str.replace('\\', '/').lstrip('/')
+            
+            # Extract the subdirectory path relative to the uploads root directory
+            if clean_path_str.startswith("backend/uploads/"):
+                subpath = clean_path_str[len("backend/uploads/"):]
+            elif clean_path_str.startswith("uploads/"):
+                subpath = clean_path_str[len("uploads/"):]
+            else:
+                subpath = clean_path_str
+                
+            # Dynamically prepend the configured upload directory (e.g. backend/uploads)
+            # This ensures cross-platform and Linux/Docker container path compatibility
+            candidate = (self.upload_dir / subpath).resolve()
         except (TypeError, ValueError):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -203,15 +216,9 @@ class FileService:
         with open(file_path, 'wb') as f:
             f.write(content)
         
-        # Return relative path from project root with proper Windows path handling
-        # Use os.path.normpath and convert to forward slashes for consistency
-        try:
-            relative_path = os.path.relpath(file_path, Path.cwd())
-            # Normalize path and convert backslashes to forward slashes for cross-platform compatibility
-            relative_path = relative_path.replace('\\', '/')
-        except ValueError:
-            # If paths are on different drives on Windows, use absolute path
-            relative_path = str(file_path).replace('\\', '/')
+        # Force relative path format starting strictly with uploads/tenant_id/filename
+        # for database normalization and Linux/Docker compatibility
+        relative_path = f"uploads/{tenant_id}/{uuid_filename}"
         
         # Return safe filename (basename only) to avoid exposing client paths
         return relative_path, safe_filename

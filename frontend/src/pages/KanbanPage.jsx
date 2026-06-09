@@ -25,7 +25,11 @@ const KanbanPage = () => {
     };
 
     const getDownloadUrl = (path) => {
-        const cleanPath = (path || '').replace(/^\//, '');
+        if (!path) return '';
+        if (path.startsWith('http://') || path.startsWith('https://')) {
+            return path;
+        }
+        const cleanPath = path.replace(/^\//, '');
         const baseUrl = (import.meta.env.VITE_API_URL || 'http://localhost:8000/api').replace(/\/api$/, '');
         const generated = `${baseUrl}/api/uploads/download?path=${encodeURIComponent(cleanPath)}`;
         console.log("[FlexFlow Download Link] Generated path for download:", generated);

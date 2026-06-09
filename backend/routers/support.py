@@ -160,10 +160,10 @@ async def create_support_ticket(
     attachment_path = None
     attachment_filename = None
     if attachment:
-        from backend.services.file_service import FileService
-        file_service = FileService()
-        # Save file securely
-        saved_path, attachment_filename = await file_service.save_file(attachment, current_user.tenant_id)
+        from backend.services.gcs_service import GCSService
+        gcs_service = GCSService()
+        # Save file securely to GCS using ticket_id as the folder/identifier
+        saved_path, attachment_filename = await gcs_service.upload_file(attachment, ticket_id)
         attachment_path = saved_path
 
     # 3. Create ticket model using the dictionary reassignment technique

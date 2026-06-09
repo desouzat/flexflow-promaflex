@@ -14,4 +14,4 @@ echo '4. Starting Nginx...'
 nginx &
 
 echo '5. Starting FastAPI...'
-exec uvicorn backend.main:app --host 0.0.0.0 --port 8000
+exec uvicorn backend.main:app --host 127.0.0.1 --port 8000 --workers 2 --log-level info
