@@ -24,6 +24,8 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
 
 # Install Python backend dependencies
 COPY backend/requirements.txt ./backend/
@@ -41,7 +43,8 @@ COPY nginx.conf /etc/nginx/nginx.conf
 # Copy startup boot script
 COPY start.sh ./
 # Fix Windows CRLF line endings in start.sh and make it executable
-RUN sed -i 's/\r$//' start.sh && chmod +x start.sh
+RUN sed -i 's/\r$//' start.sh
+RUN chmod +x /app/start.sh
 
 # Expose port 8080 for Cloud Run compatibility
 EXPOSE 8080

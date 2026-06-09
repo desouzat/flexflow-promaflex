@@ -119,6 +119,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         "/api/auth/login",  # Login endpoint must be public
         "/api/auth/me",     # Me endpoint must be public to avoid redirect loops
         "/api/ping",        # Public connectivity test endpoint
+        "/api/health-check", # Public health check bypass endpoint
     ]
     
     def __init__(self, app: ASGIApp, exclude_paths: Optional[list[str]] = None):

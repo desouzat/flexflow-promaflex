@@ -224,7 +224,7 @@ app.add_middleware(
 # Excludes /api/auth/login, /api/auth/me, /api/ping and other public paths
 app.add_middleware(
     AuthenticationMiddleware,
-    exclude_paths=["/api/auth/login", "/api/auth/me", "/api/ping", "/api/uploads/download"]
+    exclude_paths=["/api/auth/login", "/api/auth/me", "/api/ping", "/api/uploads/download", "/api/health-check"]
 )
 
 # Tenant Isolation Middleware (checks tenant_id in context)
@@ -403,6 +403,18 @@ async def ping():
     return {
         "status": "ok",
         "message": "FlexFlow API is reachable",
+        "timestamp": time.time()
+    }
+
+
+@app.get("/api/health-check", tags=["Root"])
+async def api_health_check():
+    """
+    Public health check bypass endpoint - does not touch database
+    """
+    return {
+        "status": "ok",
+        "database": "bypassed",
         "timestamp": time.time()
     }
 

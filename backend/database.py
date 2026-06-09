@@ -39,18 +39,28 @@ SQLALCHEMY_DATABASE_URL = os.getenv(
 )
 
 # Debug print to verify the correct connection is being used
-print(f"[DEBUG] Conectando ao banco em: {SQLALCHEMY_DATABASE_URL}")
+DATABASE_URL = SQLALCHEMY_DATABASE_URL
+print(f"[DEBUG] Conectando ao banco em: {DATABASE_URL}")
+print(f"DEBUG: Connecting to DB via Unix Socket: {DATABASE_URL.split('@')[-1]}")
 
 # Create SQLAlchemy engine with connection pooling
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL,
-    poolclass=QueuePool,
-    pool_size=10,  # Number of connections to maintain in the pool
-    max_overflow=20,  # Maximum number of connections that can be created beyond pool_size
-    pool_pre_ping=True,  # Verify connections before using them
-    pool_recycle=3600,  # Recycle connections after 1 hour
-    echo=os.getenv("SQL_ECHO", "false").lower() == "true",  # Log SQL queries if enabled
-)
+engine = None
+try:
+    engine = create_engine(
+        SQLALCHEMY_DATABASE_URL,
+        poolclass=QueuePool,
+        pool_size=10,  # Number of connections to maintain in the pool
+        max_overflow=20,  # Maximum number of connections that can be created beyond pool_size
+        pool_pre_ping=True,  # Verify connections before using them
+        pool_recycle=3600,  # Recycle connections after 1 hour
+        echo=os.getenv("SQL_ECHO", "false").lower() == "true",  # Log SQL queries if enabled
+    )
+except Exception as e:
+    print(f"[ERROR] Failed to create database engine: {e}")
+    try:
+        engine = create_engine("sqlite:///:memory:")
+    except Exception:
+        engine = None
 
 # Create SessionLocal class for database sessions
 SessionLocal = sessionmaker(

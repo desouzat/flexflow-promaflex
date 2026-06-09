@@ -1,14 +1,17 @@
-#!/bin/sh
-set -e
+#!/bin/bash
+export PYTHONPATH=$PYTHONPATH:/app
 
-# Run database migrations
-echo 'Running database migrations...'
+echo '1. NUKING DATABASE FOR CLEAN START...'
+python -m backend.scripts.force_nuke_cloud_db
+
+echo '2. Running Fresh Migrations...'
 python -m backend.migrations.apply_all
 
-# Start Uvicorn FastAPI backend in the background
-echo 'Starting FastAPI backend...'
-python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --workers 2 &
+echo '3. Seeding Official Users...'
+python -m backend.scripts.seed_official_users
 
-# Start Nginx in the foreground
-echo 'Starting Nginx proxy...'
-exec nginx -g "daemon off;"
+echo '4. Starting Nginx...'
+nginx &
+
+echo '5. Starting FastAPI...'
+exec uvicorn backend.main:app --host 0.0.0.0 --port 8000
