@@ -1700,11 +1700,9 @@ async def advance_po_status(
                 if not all([
                     checklist.get("endereco_conferido"),
                     checklist.get("peso_validado"),
-                    checklist.get("etiquetas_impressas"),
-                    checklist.get("foto_carga_path"),
-                    checklist.get("foto_canhoto_path")
+                    checklist.get("etiquetas_impressas")
                 ]):
-                    validation_errors.append("Checklist de logística deve estar completo (Endereço, Peso, Etiquetas, Foto da Carga e Nota Fiscal com Canhoto Assinado)")
+                    validation_errors.append("Checklist de logística deve estar completo (Endereço, Peso e Etiquetas)")
             else:
                 validation_errors.append("Checklist de logística não encontrado")
             
@@ -1715,11 +1713,9 @@ async def advance_po_status(
             if not all([
                 checklist.get("endereco_conferido"),
                 checklist.get("peso_validado"),
-                checklist.get("etiquetas_impressas"),
-                checklist.get("foto_carga_path"),
-                checklist.get("foto_canhoto_path")
+                checklist.get("etiquetas_impressas")
             ]):
-                validation_errors.append("Checklist de logística deve estar completo")
+                validation_errors.append("Checklist de logística deve estar completo (Endereço, Peso e Etiquetas)")
         else:
             validation_errors.append("Checklist de logística não encontrado")
     

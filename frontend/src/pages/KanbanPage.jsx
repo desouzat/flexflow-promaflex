@@ -1011,7 +1011,12 @@ const KanbanPage = () => {
 
         if (selectedPO.status === 'Faturamento/Expedição') {
             const numeroNfe = selectedPO.extra_metadata?.numero_nfe || localFields.numero_nfe || '';
-            return !!selectedPO.partition_metadata?.foto_carga_path && !!selectedPO.partition_metadata?.foto_canhoto_path && !!numeroNfe;
+            const transportadora = selectedPO.extra_metadata?.transportadora || localFields.transportadora || '';
+            const endConferido = !!(logisticsChecklist.endereco_conferido || selectedPO.partition_metadata?.logistics_checklist?.endereco_conferido);
+            const pesoValidado = !!(logisticsChecklist.peso_validado || selectedPO.partition_metadata?.logistics_checklist?.peso_validado);
+            const etiqImpressas = !!(logisticsChecklist.etiquetas_impressas || selectedPO.partition_metadata?.logistics_checklist?.etiquetas_impressas);
+            
+            return !!numeroNfe && !!transportadora && endConferido && pesoValidado && etiqImpressas;
         }
 
         if (selectedPO.status === 'Financeiro') {
@@ -1048,12 +1053,17 @@ const KanbanPage = () => {
         }
 
         if (selectedPO.status === 'Faturamento/Expedição') {
-            const pMeta = selectedPO.partition_metadata || {}
-            const fotoCarga = pMeta.foto_carga_path
-            const fotoCanhoto = pMeta.foto_canhoto_path
+            const numeroNfe = selectedPO.extra_metadata?.numero_nfe || localFields.numero_nfe || '';
+            const transportadora = selectedPO.extra_metadata?.transportadora || localFields.transportadora || '';
+            const endConferido = !!(logisticsChecklist.endereco_conferido || selectedPO.partition_metadata?.logistics_checklist?.endereco_conferido);
+            const pesoValidado = !!(logisticsChecklist.peso_validado || selectedPO.partition_metadata?.logistics_checklist?.peso_validado);
+            const etiqImpressas = !!(logisticsChecklist.etiquetas_impressas || selectedPO.partition_metadata?.logistics_checklist?.etiquetas_impressas);
             
-            if (!fotoCarga) missing.push('Foto da Carga');
-            if (!fotoCanhoto) missing.push('Nota Fiscal com Canhoto Assinado');
+            if (!numeroNfe) missing.push('Número NF-e');
+            if (!transportadora) missing.push('Transportadora');
+            if (!endConferido) missing.push('Endereço Conferido');
+            if (!pesoValidado) missing.push('Peso Validado');
+            if (!etiqImpressas) missing.push('Etiquetas Impressas');
         }
 
         if (selectedPO.status === 'Financeiro') {
@@ -2184,22 +2194,47 @@ const KanbanPage = () => {
                                                                              <input
                                                                                  type="file"
                                                                                  accept=".pdf,.jpg,.jpeg,.png"
+                                                                                 onClick={(e) => { e.stopPropagation(); e.target.value = null; }}
                                                                                  onChange={(e) => handleEvidenceUpload('foto_carga_path', e.target.files[0])}
-                                                                                 className="w-full text-sm text-gray-550 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100 cursor-pointer border border-gray-300 rounded-lg p-1"
+                                                                                 className="hidden"
+                                                                                 id="foto-carga-reupload"
                                                                              />
+                                                                             <button
+                                                                                 type="button"
+                                                                                 onClick={(e) => {
+                                                                                     e.stopPropagation();
+                                                                                     document.getElementById('foto-carga-reupload').click();
+                                                                                 }}
+                                                                                 className="inline-flex items-center gap-1 text-[10px] text-gray-550 bg-gray-100 hover:bg-gray-200 border border-gray-305 rounded px-2 py-0.5 cursor-pointer transition-colors"
+                                                                             >
+                                                                                 Substituir Arquivo
+                                                                             </button>
                                                                          </div>
                                                                      )}
                                                                 </div>
                                                             ) : (
-                                                                 <div>
-                                                                     <input
-                                                                         type="file"
-                                                                         accept=".pdf,.jpg,.jpeg,.png"
-                                                                         onChange={(e) => handleEvidenceUpload('foto_carga_path', e.target.files[0])}
-                                                                         disabled={isPhaseADisabled}
-                                                                         className="w-full text-sm text-gray-550 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100 cursor-pointer border border-gray-300 rounded-lg p-1"
-                                                                     />
-                                                                 </div>
+                                                                  <div>
+                                                                      <input
+                                                                          type="file"
+                                                                          accept=".pdf,.jpg,.jpeg,.png"
+                                                                          onClick={(e) => { e.stopPropagation(); e.target.value = null; }}
+                                                                          onChange={(e) => handleEvidenceUpload('foto_carga_path', e.target.files[0])}
+                                                                          className="hidden"
+                                                                          id="foto-carga-upload"
+                                                                          disabled={isPhaseADisabled}
+                                                                      />
+                                                                      <button
+                                                                          type="button"
+                                                                          onClick={(e) => {
+                                                                              e.stopPropagation();
+                                                                              document.getElementById('foto-carga-upload').click();
+                                                                          }}
+                                                                          disabled={isPhaseADisabled}
+                                                                          className={`flex items-center justify-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg transition-colors text-xs font-semibold shadow-xs ${isPhaseADisabled ? 'cursor-not-allowed opacity-50 bg-orange-400' : 'hover:bg-orange-700 cursor-pointer'}`}
+                                                                      >
+                                                                          Enviar Foto
+                                                                      </button>
+                                                                  </div>
                                                                                             )}
                                                                                         </div>
 
@@ -2222,27 +2257,52 @@ const KanbanPage = () => {
                                                                                                     >
                                                                                                         Abrir Nota Fiscal com Canhoto Assinado
                                                                                                     </a>
-                                                                      {!isPhaseADisabled && (
-                                                                          <div className="pt-1">
-                                                                              <input
-                                                                                  type="file"
-                                                                                  accept=".pdf,.jpg,.jpeg,.png"
-                                                                                  onChange={(e) => handleEvidenceUpload('foto_canhoto_path', e.target.files[0])}
-                                                                                  className="w-full text-sm text-gray-550 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100 cursor-pointer border border-gray-300 rounded-lg p-1"
-                                                                              />
-                                                                          </div>
-                                                                      )}
+                                                                       {!isPhaseADisabled && (
+                                                                           <div className="pt-1">
+                                                                               <input
+                                                                                   type="file"
+                                                                                   accept=".pdf,.jpg,.jpeg,.png"
+                                                                                   onClick={(e) => { e.stopPropagation(); e.target.value = null; }}
+                                                                                   onChange={(e) => handleEvidenceUpload('foto_canhoto_path', e.target.files[0])}
+                                                                                   className="hidden"
+                                                                                   id="foto-canhoto-reupload"
+                                                                               />
+                                                                               <button
+                                                                                   type="button"
+                                                                                   onClick={(e) => {
+                                                                                       e.stopPropagation();
+                                                                                       document.getElementById('foto-canhoto-reupload').click();
+                                                                                   }}
+                                                                                   className="inline-flex items-center gap-1 text-[10px] text-gray-550 bg-gray-100 hover:bg-gray-200 border border-gray-305 rounded px-2 py-0.5 cursor-pointer transition-colors"
+                                                                               >
+                                                                                   Substituir Arquivo
+                                                                               </button>
+                                                                           </div>
+                                                                       )}
                                                                                                 </div>
                                                                                             ) : (
-                                                                  <div>
-                                                                      <input
-                                                                          type="file"
-                                                                          accept=".pdf,.jpg,.jpeg,.png"
-                                                                          onChange={(e) => handleEvidenceUpload('foto_canhoto_path', e.target.files[0])}
-                                                                          disabled={isPhaseADisabled}
-                                                                          className="w-full text-sm text-gray-550 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100 cursor-pointer border border-gray-300 rounded-lg p-1"
-                                                                      />
-                                                                  </div>
+                                                                   <div>
+                                                                       <input
+                                                                           type="file"
+                                                                           accept=".pdf,.jpg,.jpeg,.png"
+                                                                           onClick={(e) => { e.stopPropagation(); e.target.value = null; }}
+                                                                           onChange={(e) => handleEvidenceUpload('foto_canhoto_path', e.target.files[0])}
+                                                                           className="hidden"
+                                                                           id="foto-canhoto-upload"
+                                                                           disabled={isPhaseADisabled}
+                                                                       />
+                                                                       <button
+                                                                           type="button"
+                                                                           onClick={(e) => {
+                                                                               e.stopPropagation();
+                                                                               document.getElementById('foto-canhoto-upload').click();
+                                                                           }}
+                                                                           disabled={isPhaseADisabled}
+                                                                           className={`flex items-center justify-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg transition-colors text-xs font-semibold shadow-xs ${isPhaseADisabled ? 'cursor-not-allowed opacity-50 bg-orange-400' : 'hover:bg-orange-700 cursor-pointer'}`}
+                                                                       >
+                                                                           Enviar Foto
+                                                                       </button>
+                                                                   </div>
                                                                                             )}
                                                                                         </div>
                                                                                     </div>
