@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional, Any
 from decimal import Decimal
 from datetime import datetime
+import uuid
 
 from backend.schemas.kanban_schema import (
     KanbanBoardResponse,
@@ -2099,6 +2100,10 @@ async def suggest_partition(
     from sqlalchemy.orm.attributes import flag_modified
     flag_modified(po, "partition_metadata")
     
+    # Commit parent PO status change
+    db.commit()
+    db.refresh(po)
+    
     # Extract expected delivery date of the parent PO
     parent_delivery_date = po.expected_delivery_date
     parent_delivery_date_str = parent_delivery_date.isoformat() if parent_delivery_date else None
@@ -2138,56 +2143,8 @@ async def suggest_partition(
         parent_packaging_type = next((p for p in packagings if p), None)
     
     import math
-    # Create Child 1 and Child 2 immediately
-    child1 = PurchaseOrder(
-        tenant_id=po.tenant_id,
-        po_number=f"{po.po_number}-C1",
-        status_macro="WAITING_COMMERCIAL_PARTITION",
-        parent_po_id=po.id,
-        shipping_cost=0.0000, # 4-decimal precision internally!
-        is_partitioned=False,
-        partition_reason=resolved_reason,
-        partition_metadata={
-            "client_name": po.client_name,
-            "expected_delivery_date": parent_delivery_date_str,
-            "parent_po_number": po.po_number,
-            "partition_type": "CHILD_1",
-            "is_personalized": parent_is_personalized,
-            "is_export": parent_is_export,
-            "is_new_client": parent_is_new_client,
-            "is_replacement": parent_is_replacement,
-            "customization_notes": parent_customization_notes,
-            "attachment_path": parent_attachment_path,
-            "packaging_type": parent_packaging_type
-        }
-    )
-    child2 = PurchaseOrder(
-        tenant_id=po.tenant_id,
-        po_number=f"{po.po_number}-C2",
-        status_macro="WAITING_COMMERCIAL_PARTITION",
-        parent_po_id=po.id,
-        shipping_cost=0.0000, # 4-decimal precision internally!
-        is_partitioned=False,
-        partition_reason=resolved_reason,
-        partition_metadata={
-            "client_name": po.client_name,
-            "expected_delivery_date": new_delivery_date_val,
-            "parent_po_number": po.po_number,
-            "partition_type": "CHILD_2",
-            "is_personalized": parent_is_personalized,
-            "is_export": parent_is_export,
-            "is_new_client": parent_is_new_client,
-            "is_replacement": parent_is_replacement,
-            "customization_notes": parent_customization_notes,
-            "attachment_path": parent_attachment_path,
-            "packaging_type": parent_packaging_type
-        }
-    )
-    db.add(child1)
-    db.add(child2)
-    db.flush() # get child IDs
- 
-    # Copy items with split quantities
+    # Precompute split quantities
+    splits = []
     for idx, item in enumerate(po.items):
         q1, q2 = 0, 0
         if qty_splits and (str(item.id) in qty_splits or item.sku in qty_splits):
@@ -2210,8 +2167,39 @@ async def suggest_partition(
                 else:
                     q1 = 0
                     q2 = 1
-                    
-        # Add to child 1 if quantity > 0
+        splits.append((item, q1, q2))
+
+    # Step 1: Create child1 object.
+    child1 = PurchaseOrder(
+        tenant_id=uuid.UUID(str(po.tenant_id)),
+        po_number=f"{po.po_number}-C1",
+        status_macro="WAITING_COMMERCIAL_PARTITION",
+        parent_po_id=uuid.UUID(str(po.id)),
+        shipping_cost=0.0000, # 4-decimal precision internally!
+        is_partitioned=False,
+        partition_reason=resolved_reason,
+        partition_metadata={
+            "client_name": po.client_name,
+            "expected_delivery_date": parent_delivery_date_str,
+            "parent_po_number": po.po_number,
+            "partition_type": "CHILD_1",
+            "is_personalized": parent_is_personalized,
+            "is_export": parent_is_export,
+            "is_new_client": parent_is_new_client,
+            "is_replacement": parent_is_replacement,
+            "customization_notes": parent_customization_notes,
+            "attachment_path": parent_attachment_path,
+            "packaging_type": parent_packaging_type
+        }
+    )
+    
+    # Step 2: db.add(child1) -> db.commit() -> db.refresh(child1).
+    db.add(child1)
+    db.commit()
+    db.refresh(child1)
+
+    # Step 3: Create items for child1 using the committed child1.id.
+    for item, q1, q2 in splits:
         if q1 > 0:
             c1_item_extra = dict(item.extra_metadata or {})
             if parent_delivery_date_str:
@@ -2219,8 +2207,8 @@ async def suggest_partition(
                 c1_item_extra["expected_delivery_date"] = parent_delivery_date_str
                 
             c1_item = OrderItem(
-                po_id=child1.id,
-                tenant_id=po.tenant_id,
+                po_id=uuid.UUID(str(child1.id)),
+                tenant_id=uuid.UUID(str(po.tenant_id)),
                 sku=item.sku,
                 quantity=q1,
                 price=item.price,
@@ -2234,16 +2222,47 @@ async def suggest_partition(
                 extra_metadata=c1_item_extra
             )
             db.add(c1_item)
-            
-        # Add to child 2 if quantity > 0
+    db.commit()
+
+    # Step 4: Create child2 object.
+    child2 = PurchaseOrder(
+        tenant_id=uuid.UUID(str(po.tenant_id)),
+        po_number=f"{po.po_number}-C2",
+        status_macro="WAITING_COMMERCIAL_PARTITION",
+        parent_po_id=uuid.UUID(str(po.id)),
+        shipping_cost=0.0000, # 4-decimal precision internally!
+        is_partitioned=False,
+        partition_reason=resolved_reason,
+        partition_metadata={
+            "client_name": po.client_name,
+            "expected_delivery_date": new_delivery_date_val,
+            "parent_po_number": po.po_number,
+            "partition_type": "CHILD_2",
+            "is_personalized": parent_is_personalized,
+            "is_export": parent_is_export,
+            "is_new_client": parent_is_new_client,
+            "is_replacement": parent_is_replacement,
+            "customization_notes": parent_customization_notes,
+            "attachment_path": parent_attachment_path,
+            "packaging_type": parent_packaging_type
+        }
+    )
+    
+    # Step 5: db.add(child2) -> db.commit() -> db.refresh(child2).
+    db.add(child2)
+    db.commit()
+    db.refresh(child2)
+
+    # Step 6: Create items for child2 using the committed child2.id.
+    for item, q1, q2 in splits:
         if q2 > 0:
             c2_item_extra = dict(item.extra_metadata or {})
             c2_item_extra["delivery_date"] = new_delivery_date_val
             c2_item_extra["expected_delivery_date"] = new_delivery_date_val
             
             c2_item = OrderItem(
-                po_id=child2.id,
-                tenant_id=po.tenant_id,
+                po_id=uuid.UUID(str(child2.id)),
+                tenant_id=uuid.UUID(str(po.tenant_id)),
                 sku=item.sku,
                 quantity=q2,
                 price=item.price,
@@ -2257,11 +2276,16 @@ async def suggest_partition(
                 extra_metadata=c2_item_extra
             )
             db.add(c2_item)
-            
-    db.flush()
-    # Compute total values
+    db.commit()
+
+    # Compute total values after refresh to ensure items are loaded
+    db.refresh(child1)
+    db.refresh(child2)
     child1.po_total_value = sum(float(it.item_total_value or 0) for it in child1.items)
     child2.po_total_value = sum(float(it.item_total_value or 0) for it in child2.items)
+    db.add(child1)
+    db.add(child2)
+    db.commit()
     
     # Create audit log
     log_po_status_transition(
