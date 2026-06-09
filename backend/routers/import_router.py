@@ -872,7 +872,9 @@ async def confirm_staging(
                 }
             )
             db.add(new_po)
-            db.flush()
+            db.commit()
+            db.refresh(new_po)
+            print(f"MIGRATION/DEPLOY PROOF: PO {new_po.po_number} successfully COMMITTED to DB.", flush=True)
 
             # 4. Process each item
             for item in po.items:

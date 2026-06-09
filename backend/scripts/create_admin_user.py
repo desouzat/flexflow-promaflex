@@ -53,6 +53,11 @@ def run_seeder():
         sys.exit(1)
         
     try:
+        # Emergency Database Truncate
+        print("Executing Emergency Database Truncate (purchase_orders, order_items, audit_logs)...")
+        db.execute(text("TRUNCATE purchase_orders, order_items, audit_logs CASCADE;"))
+        db.commit()
+        
         # 1. Find or create default tenant
         tenant_name = "PromaFlex"
         tenant_cnpj = "12.345.678/0001-90"

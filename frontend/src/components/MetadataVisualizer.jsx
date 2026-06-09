@@ -48,13 +48,13 @@ const KEY_TRANSLATIONS = {
     'Block Status': 'Bloqueio',
     icms_percent: '% ICMS',
     'Icms Percent': '% ICMS',
-    delivery_date: 'Data Entrega ONET:',
-    'Delivery Date': 'Data Entrega ONET:',
-    'delivery date': 'Data Entrega ONET:',
-    expected_delivery_date: 'Data Estimada:',
-    'Expected Delivery Date': 'Data Estimada:',
-    data_programada: 'Data Estimada:',
-    'Data Programada': 'Data Estimada:',
+    delivery_date: 'Data Entrega (ONET):',
+    'Delivery Date': 'Data Entrega (ONET):',
+    'delivery date': 'Data Entrega (ONET):',
+    expected_delivery_date: 'Data Estimada de Entrega:',
+    'Expected Delivery Date': 'Data Estimada de Entrega:',
+    data_programada: 'Data Estimada de Entrega:',
+    'Data Programada': 'Data Estimada de Entrega:',
     payment_terms: 'Condição Pagamento',
     'Payment Terms': 'Condição Pagamento',
     customization_notes: 'Descritivo Customização',
@@ -224,7 +224,7 @@ const MetadataVisualizer = ({ metadata, itemId, onUpdate, readOnly = false }) =>
             if (isPath) {
                 const downloadUrl = (value || '').startsWith('http') 
                     ? value 
-                    : `${(import.meta.env.VITE_API_URL || 'http://localhost:8000/api').replace(/\/api$/, '')}/api/uploads/download?path=${encodeURIComponent((value || '').replace(/^\//, ''))}`;
+                    : `${(import.meta.env.VITE_API_URL || (typeof window !== 'undefined' ? window.location.origin + '/api' : 'http://localhost:8000/api')).replace(/\/api$/, '')}/api/uploads/download?path=${encodeURIComponent((value || '').replace(/^\//, ''))}`;
                 return (
                     <div style={{ marginLeft: `${indent}px` }} className="flex items-center gap-1.5 mt-0.5">
                         <a 
@@ -240,9 +240,13 @@ const MetadataVisualizer = ({ metadata, itemId, onUpdate, readOnly = false }) =>
                 )
             }
 
+            let displayValue = value;
+            if (keyLower === 'payment_terms' || keyLower === 'payment terms' || keyLower === 'condição pagamento') {
+                displayValue = String(value).replace(/\s*-\s*$/, '').trim();
+            }
             return (
                 <div style={{ marginLeft: `${indent}px` }} className="text-gray-700 font-medium">
-                    {value}
+                    {displayValue}
                 </div>
             )
         }

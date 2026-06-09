@@ -50,9 +50,14 @@ class GCSService:
             logger.info(f"Loaded local GCP credentials from {local_key_path}")
             
         try:
-            self.client = storage.Client()
-            self.bucket = self.client.bucket(self.bucket_name)
+            bucket_name = self.bucket_name
+            print(f"DEBUG GCS: Attempting to access bucket {bucket_name}", flush=True)
+            storage_client = storage.Client()
+            self.client = storage_client
+            print(f"DEBUG GCS: Client initialized with project {storage_client.project}", flush=True)
+            self.bucket = storage_client.bucket(bucket_name)
         except Exception as e:
+            print(f"DEBUG GCS ERROR: Failed to initialize/access bucket: {e}", flush=True)
             logger.error(f"Failed to initialize GCS Client: {e}")
             self.client = None
             self.bucket = None

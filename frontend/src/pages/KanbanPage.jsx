@@ -4,6 +4,7 @@ import ErrorBoundary from '../components/ErrorBoundary'
 import MetadataVisualizer from '../components/MetadataVisualizer'
 import { calculatePOMargins } from '../utils/marginCalculator'
 import api from '../utils/api'
+import axios from 'axios'
 import { showSuccess, showError } from '../utils/toast'
 import toast from 'react-hot-toast'
 import { useNotifications } from '../context/NotificationContext'
@@ -30,7 +31,7 @@ const KanbanPage = () => {
             return path;
         }
         const cleanPath = path.replace(/^\//, '');
-        const baseUrl = (import.meta.env.VITE_API_URL || 'http://localhost:8000/api').replace(/\/api$/, '');
+        const baseUrl = (import.meta.env.VITE_API_URL || (typeof window !== 'undefined' ? window.location.origin + '/api' : 'http://localhost:8000/api')).replace(/\/api$/, '');
         const generated = `${baseUrl}/api/uploads/download?path=${encodeURIComponent(cleanPath)}`;
         console.log("[FlexFlow Download Link] Generated path for download:", generated);
         return generated;
@@ -392,17 +393,15 @@ const KanbanPage = () => {
                 ...meta,
                 production_impediment: impediment
             })
-            if (meta.logistics_checklist) {
-                setLogisticsChecklist(meta.logistics_checklist)
-            } else {
-                setLogisticsChecklist({
-                    endereco_conferido: false,
-                    peso_validado: false,
-                    etiquetas_impressas: false,
-                    foto_carga_path: null,
-                    foto_canhoto_path: null
-                })
-            }
+            const pMeta = selectedPO.partition_metadata || {}
+            const checklist = pMeta.logistics_checklist || meta.logistics_checklist || {}
+            setLogisticsChecklist({
+                endereco_conferido: checklist.endereco_conferido || false,
+                peso_validado: checklist.peso_validado || false,
+                etiquetas_impressas: checklist.etiquetas_impressas || false,
+                foto_carga_path: pMeta.foto_carga_path || checklist.foto_carga_path || null,
+                foto_canhoto_path: pMeta.foto_canhoto_path || checklist.foto_canhoto_path || null
+            })
         } else {
             setLocalFields({})
             setLogisticsChecklist({
@@ -642,69 +641,44 @@ const KanbanPage = () => {
     }
 
     const handleEvidenceUpload = async (field, file) => {
-        console.log('STEP 1: File selection detected')
         if (!file) return
 
-        setUploadingEvidence(true)
-        const formData = new FormData()
-        formData.append('file', file)
-        console.log('STEP 2: FormData created')
-
-        const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
-        const endpoint = field === 'foto_carga_path'
-            ? `${API_BASE_URL}/kanban/pos/${selectedPO.id}/upload-cargo-photo`
-            : `${API_BASE_URL}/kanban/pos/${selectedPO.id}/upload-receipt-photo`
-
-        console.log('STEP 3: Attempting API POST to /api/kanban/pos/...')
+        const toastId = showLoading('Enviando arquivo...')
 
         try {
-            const token = localStorage.getItem('token')
-            const headers = {}
-            if (token) {
-                headers['Authorization'] = `Bearer ${token}`
-            }
+            const formData = new FormData()
+            formData.append('file', file)
 
-            // Using standard fetch with standard FormData to bypass library eval() triggers
-            const response = await fetch(endpoint, {
-                method: 'POST',
-                headers: headers,
-                body: formData
+            const poId = selectedPO.id
+            const suffix = field === 'foto_carga_path' ? '/upload-cargo-photo' : '/upload-receipt-photo'
+            const endpoint = window.location.origin + '/api/kanban/pos/' + poId + suffix
+
+            const response = await api.post(endpoint, formData, {
+                headers: {
+                    'Content-Type': 'multipart/form-data'
+                }
             })
 
-            if (!response.ok) {
-                const errData = await response.json().catch(() => ({}))
-                throw new Error(errData.detail || 'Falha ao enviar evidência')
+            dismissToast(toastId)
+            
+            setSelectedPO(response.data.po)
+            const poData = response.data.po
+            if (poData) {
+                const pMeta = poData.partition_metadata || {}
+                const checklist = pMeta.logistics_checklist || {}
+                setLogisticsChecklist({
+                    endereco_conferido: checklist.endereco_conferido || false,
+                    peso_validado: checklist.peso_validado || false,
+                    etiquetas_impressas: checklist.etiquetas_impressas || false,
+                    foto_carga_path: pMeta.foto_carga_path || checklist.foto_carga_path || null,
+                    foto_canhoto_path: pMeta.foto_canhoto_path || checklist.foto_canhoto_path || null
+                })
             }
-
-            const updatedPO = await response.json()
-            if (updatedPO) {
-                setSelectedPO(updatedPO)
-                if (updatedPO.partition_metadata?.logistics_checklist) {
-                    setLogisticsChecklist(updatedPO.partition_metadata.logistics_checklist)
-                }
-            }
-
             showSuccess(`${field === 'foto_carga_path' ? 'Foto da Carga' : 'Nota Fiscal com Canhoto Assinado'} enviada com sucesso`)
-
-            const currentChecklist = updatedPO?.partition_metadata?.logistics_checklist || {}
-            const checklistComplete = (
-                currentChecklist.endereco_conferido &&
-                currentChecklist.peso_validado &&
-                currentChecklist.etiquetas_impressas
-            )
-            const evidenceComplete = (
-                currentChecklist.foto_carga_path &&
-                currentChecklist.foto_canhoto_path
-            )
-            if (checklistComplete && evidenceComplete) {
-                showSuccess('✅ Todas as evidências enviadas! Pronto para despacho.')
-            }
-        } catch (err) {
-            const errorMsg = err.message || 'Falha ao enviar evidência'
-            showError(errorMsg)
-            console.error('Error uploading evidence:', err)
-        } finally {
-            setUploadingEvidence(false)
+        } catch (error) {
+            dismissToast(toastId)
+            console.error('Failed to upload evidence:', error)
+            showError(error.response?.data?.detail || 'Erro ao enviar evidência')
         }
     }
 
@@ -985,12 +959,24 @@ const KanbanPage = () => {
     }
 
     const isDispatchReady = () => {
+        const hasFotoCarga = logisticsChecklist.foto_carga_path && (
+            typeof logisticsChecklist.foto_carga_path === 'string' && (
+                logisticsChecklist.foto_carga_path.startsWith('http') || 
+                logisticsChecklist.foto_carga_path.trim().length > 0
+            )
+        )
+        const hasFotoCanhoto = logisticsChecklist.foto_canhoto_path && (
+            typeof logisticsChecklist.foto_canhoto_path === 'string' && (
+                logisticsChecklist.foto_canhoto_path.startsWith('http') || 
+                logisticsChecklist.foto_canhoto_path.trim().length > 0
+            )
+        )
         return (
             logisticsChecklist.endereco_conferido &&
             logisticsChecklist.peso_validado &&
             logisticsChecklist.etiquetas_impressas &&
-            logisticsChecklist.foto_carga_path &&
-            logisticsChecklist.foto_canhoto_path
+            hasFotoCarga &&
+            hasFotoCanhoto
         )
     }
 
@@ -1024,18 +1010,8 @@ const KanbanPage = () => {
         }
 
         if (selectedPO.status === 'Faturamento/Expedição') {
-            const nfe = meta.numero_nfe || ''
-            const carrier = meta.transportadora || ''
-            
-            const currentChecklist = selectedPO.partition_metadata?.logistics_checklist || {}
-            const checklistDone = 
-                currentChecklist.endereco_conferido &&
-                currentChecklist.peso_validado &&
-                currentChecklist.etiquetas_impressas &&
-                currentChecklist.foto_carga_path &&
-                currentChecklist.foto_canhoto_path
-
-            return nfe !== '' && carrier !== '' && checklistDone
+            const numeroNfe = selectedPO.extra_metadata?.numero_nfe || localFields.numero_nfe || '';
+            return !!selectedPO.partition_metadata?.foto_carga_path && !!selectedPO.partition_metadata?.foto_canhoto_path && !!numeroNfe;
         }
 
         if (selectedPO.status === 'Financeiro') {
@@ -1072,23 +1048,12 @@ const KanbanPage = () => {
         }
 
         if (selectedPO.status === 'Faturamento/Expedição') {
-            const nfe = meta.numero_nfe || '';
-            const carrier = meta.transportadora || '';
+            const pMeta = selectedPO.partition_metadata || {}
+            const fotoCarga = pMeta.foto_carga_path
+            const fotoCanhoto = pMeta.foto_canhoto_path
             
-            if (nfe === '') missing.push('Número NF-e');
-            if (carrier === '') missing.push('Transportadora');
-            
-            const currentChecklist = selectedPO.partition_metadata?.logistics_checklist || {}
-            const checklistMissing = [];
-            if (!currentChecklist.endereco_conferido) checklistMissing.push('Endereço');
-            if (!currentChecklist.peso_validado) checklistMissing.push('Peso');
-            if (!currentChecklist.etiquetas_impressas) checklistMissing.push('Etiquetas');
-            if (!currentChecklist.foto_carga_path) checklistMissing.push('Foto da Carga');
-            if (!currentChecklist.foto_canhoto_path) checklistMissing.push('Nota Fiscal com Canhoto Assinado');
-            
-            if (checklistMissing.length > 0) {
-                missing.push(`Checklist pendente: ${checklistMissing.join(', ')}`);
-            }
+            if (!fotoCarga) missing.push('Foto da Carga');
+            if (!fotoCanhoto) missing.push('Nota Fiscal com Canhoto Assinado');
         }
 
         if (selectedPO.status === 'Financeiro') {
@@ -1600,7 +1565,7 @@ const KanbanPage = () => {
 
                                                                             <div>
                                                                                 <span className="text-xs text-gray-500 font-semibold uppercase block">Condição de Pagamento</span>
-                                                                                <span className="font-medium text-gray-700">{String(selectedPO.payment_terms || selectedPO.extra_metadata?.payment_terms || 'À vista').replace(/\s*-\s*$/, '')}</span>
+                                                                                <span className="font-medium text-gray-700">{String(selectedPO.payment_terms || selectedPO.extra_metadata?.payment_terms || 'À vista').replace(/\s*-\s*$/, '').trim()}</span>
                                                                             </div>
                                                                             <div>
                                                                                 <span className="text-xs text-gray-500 font-semibold uppercase block">Data Entrega (ONET)</span>
@@ -2214,45 +2179,27 @@ const KanbanPage = () => {
                                                                                                     >
                                                                                                         Abrir Foto da Carga
                                                                                                     </a>
-                                                                                                    {!isPhaseADisabled && (
-                                                                                                        <div className="pt-1">
-                                                                                                            <input
-                                                                                                                type="file"
-                                                                                                                accept="image/*"
-                                                                                                                onChange={(e) => handleEvidenceUpload('foto_carga_path', e.target.files[0])}
-                                                                                                                className="hidden"
-                                                                                                                id="foto-carga-reupload"
-                                                                                                                disabled={uploadingEvidence}
-                                                                                                            />
-                                                                                                            <button
-                                                                                                                type="button"
-                                                                                                                onClick={() => document.getElementById('foto-carga-reupload').click()}
-                                                                                                                className="inline-flex items-center gap-1 text-[10px] text-gray-500 bg-gray-100 hover:bg-gray-200 border border-gray-305 rounded px-2 py-0.5 cursor-pointer transition-colors"
-                                                                                                            >
-                                                                                                                Substituir Arquivo
-                                                                                                            </button>
-                                                                                                        </div>
-                                                                                                    )}
-                                                                                                </div>
-                                                                                            ) : (
-                                                                                                <div>
-                                                                                                    <input
-                                                                                                        type="file"
-                                                                                                        accept="image/*"
-                                                                                                        onChange={(e) => handleEvidenceUpload('foto_carga_path', e.target.files[0])}
-                                                                                                        className="hidden"
-                                                                                                        id="foto-carga-upload"
-                                                                                                        disabled={uploadingEvidence || isPhaseADisabled}
-                                                                                                    />
-                                                                                                    <button
-                                                                                                        type="button"
-                                                                                                        onClick={() => document.getElementById('foto-carga-upload').click()}
-                                                                                                        className={`flex items-center justify-center gap-2 px-4 py-2 bg-cyan-600 text-white rounded-lg transition-colors text-xs font-semibold shadow-xs ${isPhaseADisabled ? 'cursor-not-allowed opacity-50 bg-cyan-400' : 'hover:bg-cyan-700 cursor-pointer'}`}
-                                                                                                    >
-                                                                                                        <Upload className="w-4 h-4" />
-                                                                                                        {uploadingEvidence ? 'Enviando...' : 'Enviar Foto da Carga'}
-                                                                                                    </button>
-                                                                                                </div>
+                                                                        {!isPhaseADisabled && (
+                                                                         <div className="pt-1">
+                                                                             <input
+                                                                                 type="file"
+                                                                                 accept=".pdf,.jpg,.jpeg,.png"
+                                                                                 onChange={(e) => handleEvidenceUpload('foto_carga_path', e.target.files[0])}
+                                                                                 className="w-full text-sm text-gray-550 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100 cursor-pointer border border-gray-300 rounded-lg p-1"
+                                                                             />
+                                                                         </div>
+                                                                     )}
+                                                                </div>
+                                                            ) : (
+                                                                 <div>
+                                                                     <input
+                                                                         type="file"
+                                                                         accept=".pdf,.jpg,.jpeg,.png"
+                                                                         onChange={(e) => handleEvidenceUpload('foto_carga_path', e.target.files[0])}
+                                                                         disabled={isPhaseADisabled}
+                                                                         className="w-full text-sm text-gray-550 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100 cursor-pointer border border-gray-300 rounded-lg p-1"
+                                                                     />
+                                                                 </div>
                                                                                             )}
                                                                                         </div>
 
@@ -2275,45 +2222,27 @@ const KanbanPage = () => {
                                                                                                     >
                                                                                                         Abrir Nota Fiscal com Canhoto Assinado
                                                                                                     </a>
-                                                                                                    {!isPhaseADisabled && (
-                                                                                                        <div className="pt-1">
-                                                                                                            <input
-                                                                                                                type="file"
-                                                                                                                accept="image/*"
-                                                                                                                onChange={(e) => handleEvidenceUpload('foto_canhoto_path', e.target.files[0])}
-                                                                                                                className="hidden"
-                                                                                                                id="foto-canhoto-reupload"
-                                                                                                                disabled={uploadingEvidence}
-                                                                                                            />
-                                                                                                            <button
-                                                                                                                type="button"
-                                                                                                                onClick={() => document.getElementById('foto-canhoto-reupload').click()}
-                                                                                                                className="inline-flex items-center gap-1 text-[10px] text-gray-500 bg-gray-100 hover:bg-gray-200 border border-gray-305 rounded px-2 py-0.5 cursor-pointer transition-colors"
-                                                                                                            >
-                                                                                                                Substituir Arquivo
-                                                                                                            </button>
-                                                                                                        </div>
-                                                                                                    )}
+                                                                      {!isPhaseADisabled && (
+                                                                          <div className="pt-1">
+                                                                              <input
+                                                                                  type="file"
+                                                                                  accept=".pdf,.jpg,.jpeg,.png"
+                                                                                  onChange={(e) => handleEvidenceUpload('foto_canhoto_path', e.target.files[0])}
+                                                                                  className="w-full text-sm text-gray-550 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100 cursor-pointer border border-gray-300 rounded-lg p-1"
+                                                                              />
+                                                                          </div>
+                                                                      )}
                                                                                                 </div>
                                                                                             ) : (
-                                                                                                <div>
-                                                                                                    <input
-                                                                                                        type="file"
-                                                                                                        accept="image/*"
-                                                                                                        onChange={(e) => handleEvidenceUpload('foto_canhoto_path', e.target.files[0])}
-                                                                                                        className="hidden"
-                                                                                                        id="foto-canhoto-upload"
-                                                                                                        disabled={uploadingEvidence || isPhaseADisabled}
-                                                                                                    />
-                                                                                                    <button
-                                                                                                        type="button"
-                                                                                                        onClick={() => document.getElementById('foto-canhoto-upload').click()}
-                                                                                                        className={`flex items-center justify-center gap-2 px-4 py-2 bg-cyan-600 text-white rounded-lg transition-colors text-xs font-semibold shadow-xs ${isPhaseADisabled ? 'cursor-not-allowed opacity-50 bg-cyan-400' : 'hover:bg-cyan-700 cursor-pointer'}`}
-                                                                                                    >
-                                                                                                        <Upload className="w-4 h-4" />
-                                                                                                        {uploadingEvidence ? 'Enviando...' : 'Enviar Nota Fiscal com Canhoto Assinado'}
-                                                                                                    </button>
-                                                                                                </div>
+                                                                  <div>
+                                                                      <input
+                                                                          type="file"
+                                                                          accept=".pdf,.jpg,.jpeg,.png"
+                                                                          onChange={(e) => handleEvidenceUpload('foto_canhoto_path', e.target.files[0])}
+                                                                          disabled={isPhaseADisabled}
+                                                                          className="w-full text-sm text-gray-550 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100 cursor-pointer border border-gray-300 rounded-lg p-1"
+                                                                      />
+                                                                  </div>
                                                                                             )}
                                                                                         </div>
                                                                                     </div>
@@ -2678,7 +2607,7 @@ const KanbanPage = () => {
                                                                 )}
                                                             </h4>
                                                             <p className="text-sm text-gray-600 font-medium">
-                                                                Quantidade: {item.quantity} | Preço Unitário: {formatCurrency(item.price_unit || item.price || item.unit_value)}
+                                                                Quantidade: {item.quantity} | Preço Unitário: {formatCurrency(item.price_unit || item.price || item.unit_value)} | Total Item: {formatCurrency(item.item_total_value || (item.quantity * (item.price_unit || item.price || item.unit_value)))}
                                                             </p>
                                                         </div>
                                                         <span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-xs font-semibold rounded-full border border-blue-150 uppercase">
@@ -2705,7 +2634,10 @@ const KanbanPage = () => {
                                                                 {isOpen && (
                                                                     <div className="p-3 bg-white border-t border-gray-150">
                                                                         <MetadataVisualizer
-                                                                            metadata={item.extra_metadata}
+                                                                            metadata={{
+                                                                                additional_costs: selectedPO.partition_metadata?.additional_costs || selectedPO.extra_metadata?.additional_costs || 0,
+                                                                                ...item.extra_metadata
+                                                                            }}
                                                                             itemId={item.id}
                                                                             onUpdate={handleMetadataUpdate}
                                                                             readOnly={true}

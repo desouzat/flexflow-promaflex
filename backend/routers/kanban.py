@@ -1508,6 +1508,11 @@ async def update_logistics_checklist(
     # Reassign the metadata dictionary to trigger SQLAlchemy's observer
     meta = dict(po.partition_metadata or {})
     meta["logistics_checklist"] = logistics_checklist
+    # Flatten root keys
+    if request.foto_carga_path:
+        meta["foto_carga_path"] = request.foto_carga_path
+    if request.foto_canhoto_path:
+        meta["foto_canhoto_path"] = request.foto_canhoto_path
     po.partition_metadata = meta
     po.updated_at = datetime.utcnow()
     
@@ -1582,7 +1587,7 @@ async def get_logistics_checklist(
     # Get logistics checklist from metadata
     logistics_checklist = {}
     if po.partition_metadata and "logistics_checklist" in po.partition_metadata:
-        logistics_checklist = po.partition_metadata["logistics_checklist"]
+        logistics_checklist = dict(po.partition_metadata["logistics_checklist"])
     else:
         # Return default empty checklist
         logistics_checklist = {
@@ -1592,6 +1597,13 @@ async def get_logistics_checklist(
             "foto_carga_path": None,
             "foto_canhoto_path": None
         }
+    
+    # Fall back to root partition_metadata keys if present
+    if po.partition_metadata:
+        if "foto_carga_path" in po.partition_metadata:
+            logistics_checklist["foto_carga_path"] = po.partition_metadata["foto_carga_path"]
+        if "foto_canhoto_path" in po.partition_metadata:
+            logistics_checklist["foto_canhoto_path"] = po.partition_metadata["foto_canhoto_path"]
     
     # Check completion status
     checklist_complete = (
@@ -2786,13 +2798,16 @@ async def resume_material(
     }
 
 
-@router.post("/pos/{po_id}/upload-cargo-photo", response_model=POResponse)
+@router.post("/pos/{po_id}/upload-cargo-photo")
 async def upload_cargo_photo(
     po_id: str,
     file: UploadFile = File(..., description="Cargo photo (JPG, PNG)"),
     current_user: UserInfo = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    print("STEP 1: Request received at backend", flush=True)
+    print(f"STEP 2: File name received: {file.filename}", flush=True)
+
     # Query PO
     po = db.query(PurchaseOrder).filter(
         PurchaseOrder.id == po_id,
@@ -2808,18 +2823,20 @@ async def upload_cargo_photo(
     # Save file using GCSService
     from backend.services.gcs_service import GCSService
     gcs_service = GCSService()
-    file_path, _ = await gcs_service.upload_file(file, po_id)
+    print("STEP 3: Calling GCS Service...", flush=True)
+    saved_path, attachment_filename = await gcs_service.upload_file(file, po_id)
+    file_path = saved_path
     
     # Force a print log
     print(f"DEBUG: Saving GCS file to {file_path}")
     
     # Use a hard-assignment for the metadata
-    new_metadata = dict(po.partition_metadata or {})
-    new_metadata['foto_carga_path'] = file_path
+    meta = dict(po.partition_metadata or {})
+    meta['foto_carga_path'] = file_path
     
     # Check if logistics_checklist is None or missing, and initialize it
-    if new_metadata.get("logistics_checklist") is None:
-        new_metadata["logistics_checklist"] = {
+    if meta.get("logistics_checklist") is None:
+        meta["logistics_checklist"] = {
             "endereco_conferido": False,
             "peso_validado": False,
             "etiquetas_impressas": False,
@@ -2827,13 +2844,13 @@ async def upload_cargo_photo(
             "foto_canhoto_path": None
         }
         
-    logistics = dict(new_metadata["logistics_checklist"])
+    logistics = dict(meta["logistics_checklist"])
     logistics['foto_carga_path'] = file_path
     logistics['updated_by'] = str(current_user.id)
     logistics['updated_at'] = datetime.utcnow().isoformat()
-    new_metadata['logistics_checklist'] = logistics
+    meta['logistics_checklist'] = logistics
     
-    po.partition_metadata = new_metadata
+    po.partition_metadata = meta
     po.updated_at = datetime.utcnow()
     
     db.add(po)
@@ -2843,10 +2860,11 @@ async def upload_cargo_photo(
     db.refresh(po)
     
     is_privileged = current_user.role.lower() in ["admin", "master"]
-    return _map_single_po(po, db, is_privileged)
+    mapped_po = _map_single_po(po, db, is_privileged)
+    return {"success": True, "po": mapped_po}
 
 
-@router.post("/pos/{po_id}/upload-receipt-photo", response_model=POResponse)
+@router.post("/pos/{po_id}/upload-receipt-photo")
 async def upload_receipt_photo(
     po_id: str,
     file: UploadFile = File(..., description="Receipt/canhoto photo (JPG, PNG)"),
@@ -2868,18 +2886,19 @@ async def upload_receipt_photo(
     # Save file using GCSService
     from backend.services.gcs_service import GCSService
     gcs_service = GCSService()
-    file_path, _ = await gcs_service.upload_file(file, po_id)
+    saved_path, attachment_filename = await gcs_service.upload_file(file, po_id)
+    file_path = saved_path
     
     # Force a print log
     print(f"DEBUG: Saving GCS file to {file_path}")
     
     # Use a hard-assignment for the metadata
-    new_metadata = dict(po.partition_metadata or {})
-    new_metadata['foto_canhoto_path'] = file_path
+    meta = dict(po.partition_metadata or {})
+    meta['foto_canhoto_path'] = file_path
     
     # Check if logistics_checklist is None or missing, and initialize it
-    if new_metadata.get("logistics_checklist") is None:
-        new_metadata["logistics_checklist"] = {
+    if meta.get("logistics_checklist") is None:
+        meta["logistics_checklist"] = {
             "endereco_conferido": False,
             "peso_validado": False,
             "etiquetas_impressas": False,
@@ -2887,13 +2906,13 @@ async def upload_receipt_photo(
             "foto_canhoto_path": None
         }
         
-    logistics = dict(new_metadata["logistics_checklist"])
+    logistics = dict(meta["logistics_checklist"])
     logistics['foto_canhoto_path'] = file_path
     logistics['updated_by'] = str(current_user.id)
     logistics['updated_at'] = datetime.utcnow().isoformat()
-    new_metadata['logistics_checklist'] = logistics
+    meta['logistics_checklist'] = logistics
     
-    po.partition_metadata = new_metadata
+    po.partition_metadata = meta
     po.updated_at = datetime.utcnow()
     
     db.add(po)
@@ -2903,4 +2922,5 @@ async def upload_receipt_photo(
     db.refresh(po)
     
     is_privileged = current_user.role.lower() in ["admin", "master"]
-    return _map_single_po(po, db, is_privileged)
+    mapped_po = _map_single_po(po, db, is_privileged)
+    return {"success": True, "po": mapped_po}
