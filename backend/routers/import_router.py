@@ -830,6 +830,25 @@ async def confirm_staging(
             if original_freight == 0 and po.items:
                 original_freight = sum(float(item.freight or 0.0) for item in po.items)
 
+            # Upsert client preference memory
+            from backend.models import ClientPreference
+            from sqlalchemy import select
+            pref_stmt = select(ClientPreference).where(
+                ClientPreference.tenant_id == tenant_uuid,
+                ClientPreference.client_name == po.client_name
+            )
+            existing_pref = db.execute(pref_stmt).scalar_one_or_none()
+            if existing_pref:
+                existing_pref.business_unit = po.business_unit
+            else:
+                new_pref = ClientPreference(
+                    tenant_id=tenant_uuid,
+                    client_name=po.client_name,
+                    business_unit=po.business_unit
+                )
+                db.add(new_pref)
+            db.flush()
+
             new_po = PurchaseOrder(
                 id=uuid.uuid4(),
                 tenant_id=tenant_uuid,
@@ -853,25 +872,6 @@ async def confirm_staging(
                 }
             )
             db.add(new_po)
-            db.flush()
-
-            # Upsert client preference memory
-            from backend.models import ClientPreference
-            from sqlalchemy import select
-            pref_stmt = select(ClientPreference).where(
-                ClientPreference.tenant_id == tenant_uuid,
-                ClientPreference.client_name == po.client_name
-            )
-            existing_pref = db.execute(pref_stmt).scalar_one_or_none()
-            if existing_pref:
-                existing_pref.business_unit = po.business_unit
-            else:
-                new_pref = ClientPreference(
-                    tenant_id=tenant_uuid,
-                    client_name=po.client_name,
-                    business_unit=po.business_unit
-                )
-                db.add(new_pref)
             db.flush()
 
             # 4. Process each item

@@ -68,8 +68,9 @@ class BackgroundWorker:
                         logger.info("Running scheduled S3 sync...")
                         
                         try:
-                            # Check for new files (wrapped to prevent blocking)
-                            result = s3_service.check_for_new_files(
+                            # Check for new files (wrapped in a thread to prevent blocking the event loop)
+                            result = await asyncio.to_thread(
+                                s3_service.check_for_new_files,
                                 tenant_id=self.system_tenant_id,
                                 user_id=self.system_user_id
                             )

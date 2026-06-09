@@ -51,95 +51,104 @@ async def lifespan(app: FastAPI):
     timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
     print(f"{timestamp} Starting FlexFlow API...")
     
-    # Create database tables (in production, use Alembic migrations)
-    # Base.metadata.create_all(bind=engine)
-    from sqlalchemy import text
-    try:
-        with engine.begin() as conn:
-            conn.execute(text("ALTER TABLE users ADD COLUMN area VARCHAR(100)"))
-            print("Successfully added 'area' column to users table.")
-    except Exception as e:
-        print(f"Adding 'area' column to users table skipped/failed (likely already exists): {e}")
+    # Define background schema initialization to prevent blocking startup
+    def run_db_init_sync():
+        from sqlalchemy import text
+        print("[DEBUG] Starting background DB schema initialization...")
+        try:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE users ADD COLUMN area VARCHAR(100)"))
+                print("Successfully added 'area' column to users table.")
+        except Exception as e:
+            print(f"Adding 'area' column to users table skipped/failed (likely already exists): {e}")
 
-    try:
-        with engine.begin() as conn:
-            conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS client_preferences (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-                    client_name VARCHAR(255) NOT NULL,
-                    business_unit VARCHAR(100) NOT NULL,
-                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                    CONSTRAINT unique_tenant_client UNIQUE (tenant_id, client_name)
-                );
-            """))
-            conn.execute(text("""
-                CREATE INDEX IF NOT EXISTS idx_client_preference_tenant_id ON client_preferences(tenant_id);
-            """))
-            print("Successfully initialized client_preferences table.")
-    except Exception as e:
-        print(f"Initializing client_preferences table skipped/failed: {e}")
+        try:
+            with engine.begin() as conn:
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS client_preferences (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                        client_name VARCHAR(255) NOT NULL,
+                        business_unit VARCHAR(100) NOT NULL,
+                        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                        CONSTRAINT unique_tenant_client UNIQUE (tenant_id, client_name)
+                    );
+                """))
+                conn.execute(text("""
+                    CREATE INDEX IF NOT EXISTS idx_client_preference_tenant_id ON client_preferences(tenant_id);
+                """))
+                print("Successfully initialized client_preferences table.")
+        except Exception as e:
+            print(f"Initializing client_preferences table skipped/failed: {e}")
 
-    try:
-        with engine.begin() as conn:
-            conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS "SupportTickets" (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    ticket_id VARCHAR(50) UNIQUE NOT NULL,
-                    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                    description TEXT NOT NULL,
-                    attachment_path VARCHAR(500),
-                    status VARCHAR(50) DEFAULT 'OPEN' NOT NULL,
-                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                    resolved_at TIMESTAMP WITH TIME ZONE,
-                    CONSTRAINT ck_support_ticket_status CHECK (status IN ('OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'))
-                );
-            """))
-            conn.execute(text("""
-                CREATE INDEX IF NOT EXISTS idx_support_ticket_ticket_id ON "SupportTickets"(ticket_id);
-            """))
-            conn.execute(text("""
-                CREATE INDEX IF NOT EXISTS idx_support_ticket_user_id ON "SupportTickets"(user_id);
-            """))
-            conn.execute(text("""
-                CREATE INDEX IF NOT EXISTS idx_support_ticket_status ON "SupportTickets"(status);
-            """))
-            conn.execute(text("""
-                CREATE INDEX IF NOT EXISTS idx_support_ticket_created_at ON "SupportTickets"(created_at);
-            """))
-            print("Successfully initialized SupportTickets table.")
-    except Exception as e:
-        print(f"Initializing SupportTickets table skipped/failed: {e}")
+        try:
+            with engine.begin() as conn:
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS "SupportTickets" (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        ticket_id VARCHAR(50) UNIQUE NOT NULL,
+                        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        description TEXT NOT NULL,
+                        attachment_path VARCHAR(500),
+                        status VARCHAR(50) DEFAULT 'OPEN' NOT NULL,
+                        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                        resolved_at TIMESTAMP WITH TIME ZONE,
+                        CONSTRAINT ck_support_ticket_status CHECK (status IN ('OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'))
+                    );
+                """))
+                conn.execute(text("""
+                    CREATE INDEX IF NOT EXISTS idx_support_ticket_ticket_id ON "SupportTickets"(ticket_id);
+                """))
+                conn.execute(text("""
+                    CREATE INDEX IF NOT EXISTS idx_support_ticket_user_id ON "SupportTickets"(user_id);
+                """))
+                conn.execute(text("""
+                    CREATE INDEX IF NOT EXISTS idx_support_ticket_status ON "SupportTickets"(status);
+                """))
+                conn.execute(text("""
+                    CREATE INDEX IF NOT EXISTS idx_support_ticket_created_at ON "SupportTickets"(created_at);
+                """))
+                print("Successfully initialized SupportTickets table.")
+        except Exception as e:
+            print(f"Initializing SupportTickets table skipped/failed: {e}")
 
-    try:
-        with engine.begin() as conn:
-            conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS "GlobalConfig" (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-                    config_key VARCHAR(100) NOT NULL,
-                    config_value VARCHAR(500) NOT NULL,
-                    config_type VARCHAR(50) DEFAULT 'str' NOT NULL,
-                    description TEXT,
-                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                    updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
-                    CONSTRAINT unique_tenant_config UNIQUE (tenant_id, config_key)
-                );
-            """))
-            conn.execute(text("""
-                CREATE INDEX IF NOT EXISTS idx_global_config_tenant_id ON "GlobalConfig"(tenant_id);
-            """))
-            conn.execute(text("""
-                CREATE INDEX IF NOT EXISTS idx_global_config_key ON "GlobalConfig"(config_key);
-            """))
-            print("Successfully initialized GlobalConfig table.")
-    except Exception as e:
-        print(f"Initializing GlobalConfig table skipped/failed: {e}")
+        try:
+            with engine.begin() as conn:
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS "GlobalConfig" (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                        config_key VARCHAR(100) NOT NULL,
+                        config_value VARCHAR(500) NOT NULL,
+                        config_type VARCHAR(50) DEFAULT 'str' NOT NULL,
+                        description TEXT,
+                        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                        updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                        CONSTRAINT unique_tenant_config UNIQUE (tenant_id, config_key)
+                    );
+                """))
+                conn.execute(text("""
+                    CREATE INDEX IF NOT EXISTS idx_global_config_tenant_id ON "GlobalConfig"(tenant_id);
+                """))
+                conn.execute(text("""
+                    CREATE INDEX IF NOT EXISTS idx_global_config_key ON "GlobalConfig"(config_key);
+                """))
+                print("Successfully initialized GlobalConfig table.")
+        except Exception as e:
+            print(f"Initializing GlobalConfig table skipped/failed: {e}")
+        print("[DEBUG] Background DB schema initialization completed.")
 
-    
+    async def init_db_background():
+        import asyncio
+        await asyncio.sleep(2)  # Allow port binding to succeed first
+        await asyncio.to_thread(run_db_init_sync)
+
+    import asyncio
+    asyncio.create_task(init_db_background())
+
     # Start background worker for S3 sync (non-blocking)
     from backend.services.background_worker import start_background_worker, stop_background_worker
     try:

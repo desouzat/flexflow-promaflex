@@ -10,9 +10,15 @@ import logging
 from pathlib import Path
 from typing import Tuple, Optional
 from fastapi import UploadFile, HTTPException, status
-from google.cloud import storage
 
 logger = logging.getLogger(__name__)
+
+try:
+    from google.cloud import storage
+    GCS_AVAILABLE = True
+except Exception as e:
+    logger.error(f"Failed to import google-cloud-storage: {e}")
+    GCS_AVAILABLE = False
 
 
 class GCSService:
@@ -30,6 +36,12 @@ class GCSService:
     def __init__(self):
         """Initialize Google Cloud Storage Client"""
         self.bucket_name = os.getenv("GCP_BUCKET_NAME", "flexflow-attachments-224292950652")
+        self.client = None
+        self.bucket = None
+        
+        if not GCS_AVAILABLE:
+            logger.error("GCS_AVAILABLE is False. Google Cloud Storage will not be functional.")
+            return
         
         # Local development credentials detection
         local_key_path = "backend/gcp-key.json"

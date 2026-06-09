@@ -1,17 +1,10 @@
 #!/bin/bash
 export PYTHONPATH=$PYTHONPATH:/app
+export PYTHONUNBUFFERED=1
 
-echo '1. NUKING DATABASE FOR CLEAN START...'
-python -m backend.scripts.force_nuke_cloud_db
-
-echo '2. Running Fresh Migrations...'
-python -m backend.migrations.apply_all
-
-echo '3. Seeding Official Users...'
-python -m backend.scripts.seed_official_users
-
-echo '4. Starting Nginx...'
+echo '1. Starting Nginx...'
 nginx &
 
-echo '5. Starting FastAPI...'
-exec uvicorn backend.main:app --host 127.0.0.1 --port 8000 --workers 2 --log-level info
+echo '2. Starting FastAPI with Gunicorn (BYPASSING SEEDING)...'
+# No more migrations, no more seeding. Just start the server.
+exec gunicorn backend.main:app --workers 1 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --timeout 90

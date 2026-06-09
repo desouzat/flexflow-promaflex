@@ -40,35 +40,77 @@ SQLALCHEMY_DATABASE_URL = os.getenv(
 
 # Debug print to verify the correct connection is being used
 DATABASE_URL = SQLALCHEMY_DATABASE_URL
-print(f"[DEBUG] Conectando ao banco em: {DATABASE_URL}")
-print(f"DEBUG: Connecting to DB via Unix Socket: {DATABASE_URL.split('@')[-1]}")
 
-# Create SQLAlchemy engine with connection pooling
-engine = None
-try:
-    engine = create_engine(
-        SQLALCHEMY_DATABASE_URL,
-        poolclass=QueuePool,
-        pool_size=10,  # Number of connections to maintain in the pool
-        max_overflow=20,  # Maximum number of connections that can be created beyond pool_size
-        pool_pre_ping=True,  # Verify connections before using them
-        pool_recycle=3600,  # Recycle connections after 1 hour
-        echo=os.getenv("SQL_ECHO", "false").lower() == "true",  # Log SQL queries if enabled
-    )
-except Exception as e:
-    print(f"[ERROR] Failed to create database engine: {e}")
+def get_engine():
+    print(f"[DEBUG] Lazy database engine initialization...")
+    print(f"[DEBUG] Conectando ao banco em: {DATABASE_URL}")
     try:
-        engine = create_engine("sqlite:///:memory:")
+        # Check if Unix socket fallback is needed
+        socket_info = DATABASE_URL.split('@')[-1]
+        print(f"DEBUG: Connecting to DB via Unix Socket: {socket_info}")
     except Exception:
-        engine = None
+        pass
+        
+    try:
+        return create_engine(
+            SQLALCHEMY_DATABASE_URL,
+            poolclass=QueuePool,
+            pool_size=10,  # Number of connections to maintain in the pool
+            max_overflow=20,  # Maximum number of connections that can be created beyond pool_size
+            pool_pre_ping=True,  # Verify connections before using them
+            pool_recycle=3600,  # Recycle connections after 1 hour
+            echo=os.getenv("SQL_ECHO", "false").lower() == "true",  # Log SQL queries if enabled
+        )
+    except Exception as e:
+        print(f"[ERROR] Failed to create database engine: {e}")
+        try:
+            return create_engine("sqlite:///:memory:")
+        except Exception:
+            return None
 
-# Create SessionLocal class for database sessions
-SessionLocal = sessionmaker(
-    autocommit=False,
-    autoflush=False,
-    bind=engine,
-    expire_on_commit=False,  # Prevent lazy loading issues after commit
-)
+class LazyEngine:
+    def __init__(self):
+        self._real_engine = None
+
+    def _get_real_engine(self):
+        if self._real_engine is None:
+            self._real_engine = get_engine()
+        return self._real_engine
+
+    def __getattr__(self, name):
+        return getattr(self._get_real_engine(), name)
+
+    def __repr__(self):
+        return repr(self._get_real_engine())
+
+    def __str__(self):
+        return str(self._get_real_engine())
+
+# Instantiate the lazy engine
+engine = LazyEngine()
+
+class LazySessionLocal:
+    def __init__(self):
+        self._real_sessionmaker = None
+
+    def _get_real_sessionmaker(self):
+        if self._real_sessionmaker is None:
+            self._real_sessionmaker = sessionmaker(
+                autocommit=False,
+                autoflush=False,
+                bind=engine,
+                expire_on_commit=False,  # Prevent lazy loading issues after commit
+            )
+        return self._real_sessionmaker
+
+    def __call__(self, *args, **kwargs):
+        return self._get_real_sessionmaker()(*args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._get_real_sessionmaker(), name)
+
+# Instantiate the lazy sessionmaker
+SessionLocal = LazySessionLocal()
 
 
 def get_db() -> Generator[Session, None, None]:
