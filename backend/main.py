@@ -55,90 +55,123 @@ async def lifespan(app: FastAPI):
     def run_db_init_sync():
         from sqlalchemy import text
         print("[DEBUG] Starting background DB schema initialization...")
-        try:
-            with engine.begin() as conn:
-                conn.execute(text("ALTER TABLE users ADD COLUMN area VARCHAR(100)"))
-                print("Successfully added 'area' column to users table.")
-        except Exception as e:
-            print(f"Adding 'area' column to users table skipped/failed (likely already exists): {e}")
 
-        try:
-            with engine.begin() as conn:
-                conn.execute(text("""
-                    CREATE TABLE IF NOT EXISTS client_preferences (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-                        client_name VARCHAR(255) NOT NULL,
-                        business_unit VARCHAR(100) NOT NULL,
-                        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                        CONSTRAINT unique_tenant_client UNIQUE (tenant_id, client_name)
-                    );
-                """))
-                conn.execute(text("""
-                    CREATE INDEX IF NOT EXISTS idx_client_preference_tenant_id ON client_preferences(tenant_id);
-                """))
-                print("Successfully initialized client_preferences table.")
-        except Exception as e:
-            print(f"Initializing client_preferences table skipped/failed: {e}")
+        # ── _run_ddl_step ────────────────────────────────────────────────────
+        # Each DDL step acquires a raw DBAPI connection via engine.connect(),
+        # executes its SQL, then unconditionally calls conn.rollback() on any
+        # error and conn.close() in the finally block.
+        #
+        # WHY NOT engine.begin()? engine.begin() is a context manager whose
+        # __exit__ calls rollback() internally — but if that internal rollback
+        # raises (which psycopg2 does when the connection is in an aborted
+        # transaction state after a DuplicateColumn DDL error), the exception
+        # is silently swallowed and the connection is returned to the pool in
+        # a dirty "idle in transaction (aborted)" state. pool_pre_ping only
+        # sends SELECT 1, which succeeds even on aborted connections, so the
+        # dirty slot is never detected and permanently occupies the pool.
+        #
+        # The explicit try/except/finally below guarantees:
+        #   1. conn.rollback() is called in the except branch (resets state)
+        #   2. conn.close() is called in the finally branch (returns to pool)
+        #   3. If rollback() itself raises, the error is logged but close()
+        #      still executes because it is in the finally block, not nested
+        #      inside except.
+        # ────────────────────────────────────────────────────────────────────
+        def _run_ddl_step(step_name: str, statements: list):
+            conn = None
+            try:
+                conn = engine.connect()
+                for sql in statements:
+                    conn.execute(text(sql))
+                conn.commit()
+                print(f"Successfully {step_name}.")
+            except Exception as e:
+                print(f"{step_name} skipped/failed (likely already exists): {e}")
+                if conn is not None:
+                    try:
+                        conn.rollback()
+                    except Exception as rb_err:
+                        print(f"[WARN] rollback failed during '{step_name}': {rb_err}")
+            finally:
+                if conn is not None:
+                    try:
+                        conn.close()
+                    except Exception as cl_err:
+                        print(f"[WARN] conn.close() failed during '{step_name}': {cl_err}")
 
-        try:
-            with engine.begin() as conn:
-                conn.execute(text("""
-                    CREATE TABLE IF NOT EXISTS "SupportTickets" (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        ticket_id VARCHAR(50) UNIQUE NOT NULL,
-                        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                        description TEXT NOT NULL,
-                        attachment_path VARCHAR(500),
-                        status VARCHAR(50) DEFAULT 'OPEN' NOT NULL,
-                        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                        resolved_at TIMESTAMP WITH TIME ZONE,
-                        CONSTRAINT ck_support_ticket_status CHECK (status IN ('OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'))
-                    );
-                """))
-                conn.execute(text("""
-                    CREATE INDEX IF NOT EXISTS idx_support_ticket_ticket_id ON "SupportTickets"(ticket_id);
-                """))
-                conn.execute(text("""
-                    CREATE INDEX IF NOT EXISTS idx_support_ticket_user_id ON "SupportTickets"(user_id);
-                """))
-                conn.execute(text("""
-                    CREATE INDEX IF NOT EXISTS idx_support_ticket_status ON "SupportTickets"(status);
-                """))
-                conn.execute(text("""
-                    CREATE INDEX IF NOT EXISTS idx_support_ticket_created_at ON "SupportTickets"(created_at);
-                """))
-                print("Successfully initialized SupportTickets table.")
-        except Exception as e:
-            print(f"Initializing SupportTickets table skipped/failed: {e}")
+        # Step 1 — DDL column migration (expected to fail gracefully on re-deploy)
+        _run_ddl_step(
+            "added 'area' column to users table",
+            ["ALTER TABLE users ADD COLUMN area VARCHAR(100)"]
+        )
 
-        try:
-            with engine.begin() as conn:
-                conn.execute(text("""
-                    CREATE TABLE IF NOT EXISTS "GlobalConfig" (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-                        config_key VARCHAR(100) NOT NULL,
-                        config_value VARCHAR(500) NOT NULL,
-                        config_type VARCHAR(50) DEFAULT 'str' NOT NULL,
-                        description TEXT,
-                        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                        updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
-                        CONSTRAINT unique_tenant_config UNIQUE (tenant_id, config_key)
-                    );
-                """))
-                conn.execute(text("""
-                    CREATE INDEX IF NOT EXISTS idx_global_config_tenant_id ON "GlobalConfig"(tenant_id);
-                """))
-                conn.execute(text("""
-                    CREATE INDEX IF NOT EXISTS idx_global_config_key ON "GlobalConfig"(config_key);
-                """))
-                print("Successfully initialized GlobalConfig table.")
-        except Exception as e:
-            print(f"Initializing GlobalConfig table skipped/failed: {e}")
+        # Step 2 — client_preferences table + index
+        _run_ddl_step(
+            "initialized client_preferences table",
+            [
+                """
+                CREATE TABLE IF NOT EXISTS client_preferences (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                    client_name VARCHAR(255) NOT NULL,
+                    business_unit VARCHAR(100) NOT NULL,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT unique_tenant_client UNIQUE (tenant_id, client_name)
+                );
+                """,
+                "CREATE INDEX IF NOT EXISTS idx_client_preference_tenant_id ON client_preferences(tenant_id);"
+            ]
+        )
+
+        # Step 3 — SupportTickets table + indexes
+        _run_ddl_step(
+            "initialized SupportTickets table",
+            [
+                """
+                CREATE TABLE IF NOT EXISTS "SupportTickets" (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    ticket_id VARCHAR(50) UNIQUE NOT NULL,
+                    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    description TEXT NOT NULL,
+                    attachment_path VARCHAR(500),
+                    status VARCHAR(50) DEFAULT 'OPEN' NOT NULL,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    resolved_at TIMESTAMP WITH TIME ZONE,
+                    CONSTRAINT ck_support_ticket_status CHECK (status IN ('OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'))
+                );
+                """,
+                "CREATE INDEX IF NOT EXISTS idx_support_ticket_ticket_id ON \"SupportTickets\"(ticket_id);",
+                "CREATE INDEX IF NOT EXISTS idx_support_ticket_user_id ON \"SupportTickets\"(user_id);",
+                "CREATE INDEX IF NOT EXISTS idx_support_ticket_status ON \"SupportTickets\"(status);",
+                "CREATE INDEX IF NOT EXISTS idx_support_ticket_created_at ON \"SupportTickets\"(created_at);"
+            ]
+        )
+
+        # Step 4 — GlobalConfig table + indexes
+        _run_ddl_step(
+            "initialized GlobalConfig table",
+            [
+                """
+                CREATE TABLE IF NOT EXISTS "GlobalConfig" (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                    config_key VARCHAR(100) NOT NULL,
+                    config_value VARCHAR(500) NOT NULL,
+                    config_type VARCHAR(50) DEFAULT 'str' NOT NULL,
+                    description TEXT,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                    CONSTRAINT unique_tenant_config UNIQUE (tenant_id, config_key)
+                );
+                """,
+                "CREATE INDEX IF NOT EXISTS idx_global_config_tenant_id ON \"GlobalConfig\"(tenant_id);",
+                "CREATE INDEX IF NOT EXISTS idx_global_config_key ON \"GlobalConfig\"(config_key);"
+            ]
+        )
+
         print("[DEBUG] Background DB schema initialization completed.")
 
     async def init_db_background():
