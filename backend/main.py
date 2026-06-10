@@ -3,6 +3,27 @@ FlexFlow Main Application
 FastAPI application with all routers and middleware.
 """
 
+# ── openpyxl 'biltinId' typo patch ───────────────────────────────────────────
+# Some Excel files produced by older versions of Excel or third-party tools
+# use the misspelled attribute 'biltinId' instead of the correct 'builtinId'.
+# openpyxl raises a TypeError when it encounters this typo during parsing.
+# This patch intercepts the _NamedCellStyle constructor and silently corrects
+# the spelling before openpyxl processes it.
+# Must be applied BEFORE any router or service imports that load openpyxl.
+try:
+    from openpyxl.styles.named_styles import _NamedCellStyle
+    _original_named_cell_style_init = _NamedCellStyle.__init__
+
+    def _patched_named_cell_style_init(self, *args, **kwargs):
+        if 'biltinId' in kwargs:
+            kwargs['builtinId'] = kwargs.pop('biltinId')
+        _original_named_cell_style_init(self, *args, **kwargs)
+
+    _NamedCellStyle.__init__ = _patched_named_cell_style_init
+except ImportError:
+    pass  # openpyxl not installed — patch not needed
+# ─────────────────────────────────────────────────────────────────────────────
+
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
