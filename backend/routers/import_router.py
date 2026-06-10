@@ -872,9 +872,14 @@ async def confirm_staging(
                 }
             )
             db.add(new_po)
-            db.commit()
-            db.refresh(new_po)
-            print(f"MIGRATION/DEPLOY PROOF: PO {new_po.po_number} successfully COMMITTED to DB.", flush=True)
+            # ── flush() assigns the DB-generated id to new_po WITHOUT committing the
+            # transaction. This means the connection is NOT released back to the pool
+            # here — it stays in the same transaction through all item processing below.
+            # The previous pattern (commit here + commit again after items) was the
+            # root cause of connection exhaustion: two commits per PO doubled the
+            # number of connection acquisition cycles under concurrent load.
+            db.flush()
+            print(f"MIGRATION/DEPLOY PROOF: PO {new_po.po_number} staged (flushed, not yet committed).", flush=True)
 
             # 4. Process each item
             for item in po.items:
@@ -973,8 +978,13 @@ async def confirm_staging(
                     )
                     db.add(audit_log)
                     db.flush()
-            # Commit each PO in its own transaction to guarantee batch persistence stability
+            # ── Single commit per PO: PurchaseOrder + all its OrderItems + all
+            # AuditLogs are committed atomically in ONE round-trip to PostgreSQL.
+            # The connection is held for the shortest possible duration and released
+            # immediately after this commit. If this raises, the outer except block
+            # calls db.rollback() to return the connection in a clean state.
             db.commit()
+            db.refresh(new_po)
             success_msg = f"SUCCESS: PO {po.po_number} saved to database"
             print(success_msg, flush=True)
             try:
