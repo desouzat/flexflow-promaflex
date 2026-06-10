@@ -7,7 +7,7 @@ import os
 import io
 import time
 import logging
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Tuple, Optional
 from fastapi import UploadFile, HTTPException, status
 
@@ -19,6 +19,23 @@ try:
 except Exception as e:
     logger.error(f"Failed to import google-cloud-storage: {e}")
     GCS_AVAILABLE = False
+
+
+def get_safe_filename(filename: str) -> str:
+    """
+    Safely extracts the file base name, handling both POSIX and Windows paths correctly.
+
+    On Linux, os.path.basename does NOT split backslashes, so a Windows path like
+    'C:\\Users\\John\\file.jpg' would be returned verbatim. PureWindowsPath correctly
+    extracts the last path component on any operating system.
+
+    Args:
+        filename: Raw filename string from the UploadFile (may contain Windows full path).
+
+    Returns:
+        The sanitized base filename only (e.g. 'file.jpg').
+    """
+    return PureWindowsPath(filename).name
 
 
 class GCSService:
@@ -64,18 +81,20 @@ class GCSService:
 
     def validate_file(self, file: UploadFile) -> Tuple[bool, Optional[str]]:
         """
-        Validate file extension and size
+        Validate file extension and size.
+        Uses get_safe_filename() (PureWindowsPath) to correctly handle Windows paths
+        sent from Windows browsers, where os.path.basename would fail on Linux.
         """
         if not file.filename:
             return False, "No filename provided"
-            
-        safe_filename = os.path.basename(file.filename)
+
+        safe_filename = get_safe_filename(file.filename)
         file_ext = Path(safe_filename).suffix.lower()
-        
+
         if file_ext not in self.ALLOWED_EXTENSIONS:
             allowed = ', '.join(self.ALLOWED_EXTENSIONS.keys())
             return False, f"Invalid file type. Allowed types: {allowed}"
-            
+
         return True, None
 
     async def upload_file(self, file: UploadFile, identifier: str) -> Tuple[str, str]:
@@ -106,8 +125,9 @@ class GCSService:
                 detail="GCS storage service is not initialized"
             )
             
-        # Unique Naming Strategy
-        safe_filename = os.path.basename(file.filename) if file.filename else "unknown"
+        # Unique Naming Strategy — use PureWindowsPath to handle Windows-browser uploads
+        # where the filename may contain full Windows paths (e.g. C:\Users\John\file.jpg).
+        safe_filename = get_safe_filename(file.filename) if file.filename else "unknown"
         timestamp = int(time.time())
         blob_name = f"attachments/{identifier}/{timestamp}_{safe_filename}"
         

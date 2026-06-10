@@ -2833,27 +2833,32 @@ async def upload_cargo_photo(
         PurchaseOrder.id == po_id,
         PurchaseOrder.tenant_id == current_user.tenant_id
     ).first()
-    
+
     if not po:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Pedido {po_id} não encontrado"
         )
-    
+
     # Save file using GCSService
-    from backend.services.gcs_service import GCSService
+    from backend.services.gcs_service import GCSService, get_safe_filename
+    from sqlalchemy.orm.attributes import flag_modified
     gcs_service = GCSService()
     print("STEP 3: Calling GCS Service...", flush=True)
     saved_path, attachment_filename = await gcs_service.upload_file(file, po_id)
     file_path = saved_path
-    
+
+    # Sanitize the filename using PureWindowsPath-backed helper to guard against
+    # Windows browsers sending full paths like C:\Users\John\file.jpg
+    safe_filename = get_safe_filename(file.filename) if file.filename else attachment_filename
+
     # Force a print log
     print(f"DEBUG: Saving GCS file to {file_path}")
-    
-    # Use a hard-assignment for the metadata
+
+    # ── PurchaseOrder.partition_metadata update ──────────────────────────────
     meta = dict(po.partition_metadata or {})
     meta['foto_carga_path'] = file_path
-    
+
     # Check if logistics_checklist is None or missing, and initialize it
     if meta.get("logistics_checklist") is None:
         meta["logistics_checklist"] = {
@@ -2863,22 +2868,44 @@ async def upload_cargo_photo(
             "foto_carga_path": None,
             "foto_canhoto_path": None
         }
-        
+
     logistics = dict(meta["logistics_checklist"])
     logistics['foto_carga_path'] = file_path
     logistics['updated_by'] = str(current_user.id)
     logistics['updated_at'] = datetime.utcnow().isoformat()
     meta['logistics_checklist'] = logistics
-    
+
     po.partition_metadata = meta
     po.updated_at = datetime.utcnow()
-    
+
     db.add(po)
-    from sqlalchemy.orm.attributes import flag_modified
     flag_modified(po, "partition_metadata")
+
+    # ── OrderItem.extra_metadata["attachments"] persistence (FF-HARDENING-001) ─
+    # SQLAlchemy does NOT auto-detect in-place JSONB mutations; flag_modified is
+    # mandatory to ensure the appended attachment entry is committed to PostgreSQL.
+    item = db.query(OrderItem).filter(OrderItem.po_id == po_id).first()
+    if item is not None:
+        if not item.extra_metadata:
+            item.extra_metadata = {}
+
+        if "attachments" not in item.extra_metadata:
+            item.extra_metadata["attachments"] = []
+
+        item.extra_metadata["attachments"].append({
+            "filename": safe_filename,
+            "url": file_path,
+            "type": "cargo_photo",
+            "timestamp": datetime.utcnow().isoformat()
+        })
+
+        # Explicitly mark the JSONB field as modified so SQLAlchemy flushes it
+        flag_modified(item, "extra_metadata")
+        db.add(item)
+
     db.commit()
     db.refresh(po)
-    
+
     is_privileged = current_user.role.lower() in ["admin", "master"]
     mapped_po = _map_single_po(po, db, is_privileged)
     return {"success": True, "po": mapped_po}
@@ -2896,26 +2923,31 @@ async def upload_receipt_photo(
         PurchaseOrder.id == po_id,
         PurchaseOrder.tenant_id == current_user.tenant_id
     ).first()
-    
+
     if not po:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Pedido {po_id} não encontrado"
         )
-    
+
     # Save file using GCSService
-    from backend.services.gcs_service import GCSService
+    from backend.services.gcs_service import GCSService, get_safe_filename
+    from sqlalchemy.orm.attributes import flag_modified
     gcs_service = GCSService()
     saved_path, attachment_filename = await gcs_service.upload_file(file, po_id)
     file_path = saved_path
-    
+
+    # Sanitize the filename using PureWindowsPath-backed helper to guard against
+    # Windows browsers sending full paths like C:\Users\John\file.jpg
+    safe_filename = get_safe_filename(file.filename) if file.filename else attachment_filename
+
     # Force a print log
     print(f"DEBUG: Saving GCS file to {file_path}")
-    
-    # Use a hard-assignment for the metadata
+
+    # ── PurchaseOrder.partition_metadata update ──────────────────────────────
     meta = dict(po.partition_metadata or {})
     meta['foto_canhoto_path'] = file_path
-    
+
     # Check if logistics_checklist is None or missing, and initialize it
     if meta.get("logistics_checklist") is None:
         meta["logistics_checklist"] = {
@@ -2925,22 +2957,44 @@ async def upload_receipt_photo(
             "foto_carga_path": None,
             "foto_canhoto_path": None
         }
-        
+
     logistics = dict(meta["logistics_checklist"])
     logistics['foto_canhoto_path'] = file_path
     logistics['updated_by'] = str(current_user.id)
     logistics['updated_at'] = datetime.utcnow().isoformat()
     meta['logistics_checklist'] = logistics
-    
+
     po.partition_metadata = meta
     po.updated_at = datetime.utcnow()
-    
+
     db.add(po)
-    from sqlalchemy.orm.attributes import flag_modified
     flag_modified(po, "partition_metadata")
+
+    # ── OrderItem.extra_metadata["attachments"] persistence (FF-HARDENING-001) ─
+    # SQLAlchemy does NOT auto-detect in-place JSONB mutations; flag_modified is
+    # mandatory to ensure the appended attachment entry is committed to PostgreSQL.
+    item = db.query(OrderItem).filter(OrderItem.po_id == po_id).first()
+    if item is not None:
+        if not item.extra_metadata:
+            item.extra_metadata = {}
+
+        if "attachments" not in item.extra_metadata:
+            item.extra_metadata["attachments"] = []
+
+        item.extra_metadata["attachments"].append({
+            "filename": safe_filename,
+            "url": file_path,
+            "type": "receipt_photo",
+            "timestamp": datetime.utcnow().isoformat()
+        })
+
+        # Explicitly mark the JSONB field as modified so SQLAlchemy flushes it
+        flag_modified(item, "extra_metadata")
+        db.add(item)
+
     db.commit()
     db.refresh(po)
-    
+
     is_privileged = current_user.role.lower() in ["admin", "master"]
     mapped_po = _map_single_po(po, db, is_privileged)
     return {"success": True, "po": mapped_po}
