@@ -25,7 +25,7 @@ print(f"[DEBUG] DATABASE_URL carregada: {os.getenv('DATABASE_URL', 'NAO ENCONTRA
 from typing import Generator
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session, declarative_base
-from sqlalchemy.pool import QueuePool
+from sqlalchemy.pool import NullPool
 
 # Create declarative base for models
 Base = declarative_base()
@@ -51,36 +51,35 @@ def get_engine():
     except Exception:
         pass
 
-    # ─── Connection Pool Sizing — db-f1-micro + Cloud SQL Proxy ──────────────
-    # The Cloud SQL instance is a 'db-f1-micro', which has a physical default
-    # of 25 connections. GCP max_connections flag is being raised to 100.
+    # ─── NullPool — Serverless-native connection strategy ───────────────────
+    # NullPool opens a fresh TCP connection for every request and closes it
+    # immediately when the session is released. There is no persistent pool,
+    # so there are no pooled slots to exhaust.
     #
-    # Safe formula per Cloud Run container:
-    #   pool_size=8, max_overflow=7  →  max 15 connections per container
+    # WHY NullPool for Cloud Run?
+    #   - Cloud Run is stateless and scales horizontally. A persistent QueuePool
+    #     per instance requires careful per-instance sizing to stay under Cloud
+    #     SQL's max_connections limit, and is vulnerable to:
+    #       * FastAPI BaseHTTPMiddleware task-cancellation bugs that prevent
+    #         the get_db() generator finally-block from running, stranding slots.
+    #       * GCP silently terminating idle connections after ~600s, causing
+    #         'server closed the connection unexpectedly' on recycled sockets.
+    #       * Pool exhaustion under horizontal scale-out (N instances x pool_size).
+    #   - NullPool eliminates all of these failure modes: every connection is
+    #     brand-new and closed within a single request lifecycle.
     #
-    # With 100 max_connections on the DB:
-    #   15 × 6 containers = 90 connections — safe headroom of 10 for superuser/
-    #   admin slots reserved by pg_use_reserved_connections.
-    #
-    # DO NOT raise pool_size + max_overflow above 15/container without also
-    # verifying the Cloud SQL max_connections flag has been increased.
+    # TRADE-OFF: Each request pays the TCP + TLS + auth handshake cost (~2-5ms
+    # via Cloud SQL Auth Proxy on localhost). Acceptable for Cloud Run workloads
+    # where request latency is dominated by business logic, not connection setup.
+    # If connection overhead becomes measurable, migrate to Cloud SQL Connector
+    # with its own internal pool rather than returning to QueuePool.
     # ─────────────────────────────────────────────────────────────────────────
     try:
         return create_engine(
             SQLALCHEMY_DATABASE_URL,
-            poolclass=QueuePool,
-            pool_size=8,           # Persistent connections per container (8 + 7 = 15 max)
-            max_overflow=7,        # Burst connections beyond pool_size (total: 15/container)
-            pool_timeout=30,       # Raise after 30s if no connection is available
-                                   # (prevents requests hanging indefinitely under load)
-            pool_pre_ping=True,    # Verify connections are alive before use (catches stale sockets)
-            pool_recycle=300,      # Recycle idle connections after 5 min (300s).
-                                   # Cloud SQL silently terminates idle connections at ~600s
-                                   # (GCP firewall / wait_timeout). Recycling at 300s ensures
-                                   # SQLAlchemy never hands a dead socket to a new request,
-                                   # preventing "server closed the connection unexpectedly".
+            poolclass=NullPool,        # One connection per request, closed on release
             connect_args={
-                "connect_timeout": 10,  # Socket-level TCP timeout in seconds
+                "connect_timeout": 10, # Socket-level TCP timeout in seconds
             },
             echo=os.getenv("SQL_ECHO", "false").lower() == "true",
         )
