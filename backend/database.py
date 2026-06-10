@@ -74,7 +74,11 @@ def get_engine():
             pool_timeout=30,       # Raise after 30s if no connection is available
                                    # (prevents requests hanging indefinitely under load)
             pool_pre_ping=True,    # Verify connections are alive before use (catches stale sockets)
-            pool_recycle=1800,     # Recycle connections after 30 min (tighter for Cloud SQL)
+            pool_recycle=300,      # Recycle idle connections after 5 min (300s).
+                                   # Cloud SQL silently terminates idle connections at ~600s
+                                   # (GCP firewall / wait_timeout). Recycling at 300s ensures
+                                   # SQLAlchemy never hands a dead socket to a new request,
+                                   # preventing "server closed the connection unexpectedly".
             connect_args={
                 "connect_timeout": 10,  # Socket-level TCP timeout in seconds
             },
