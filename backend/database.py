@@ -51,31 +51,26 @@ def get_engine():
     except Exception:
         pass
 
-    # ─── Connection Pool Sizing for Cloud Run + Cloud SQL Proxy ──────────────
-    # Cloud Run scales horizontally (multiple instances). Each instance must
-    # hold a pool sized for its actual concurrent workload while keeping the
-    # total across all instances below Cloud SQL's max_connections limit.
+    # ─── Connection Pool Sizing — db-f1-micro + Cloud SQL Proxy ──────────────
+    # The Cloud SQL instance is a 'db-f1-micro', which has a physical default
+    # of 25 connections. GCP max_connections flag is being raised to 100.
     #
-    # Current sizing (as of 2026-06-10):
-    #   pool_size=15, max_overflow=15  →  up to 30 connections per container
+    # Safe formula per Cloud Run container:
+    #   pool_size=8, max_overflow=7  →  max 15 connections per container
     #
-    # Formula:  (pool_size + max_overflow) × max_concurrent_instances < max_connections
-    # E.g.:     30 × 3 instances = 90 < 100 Cloud SQL limit — safe at low scale.
+    # With 100 max_connections on the DB:
+    #   15 × 6 containers = 90 connections — safe headroom of 10 for superuser/
+    #   admin slots reserved by pg_use_reserved_connections.
     #
-    # "Mesa de Conferência" issues multiple concurrent DB requests per page
-    # load (kanban board + dashboard + user context). A pool of 5 caused
-    # pool_timeout errors under normal UAT traffic. Raised to 15/15 to give
-    # each container headroom for those burst requests.
-    #
-    # If horizontal scaling increases beyond 3 simultaneous containers,
-    # revisit this value or configure pgBouncer on the Cloud SQL side.
+    # DO NOT raise pool_size + max_overflow above 15/container without also
+    # verifying the Cloud SQL max_connections flag has been increased.
     # ─────────────────────────────────────────────────────────────────────────
     try:
         return create_engine(
             SQLALCHEMY_DATABASE_URL,
             poolclass=QueuePool,
-            pool_size=15,          # Max persistent connections per process instance
-            max_overflow=15,       # Max burst connections beyond pool_size (total: 30/instance)
+            pool_size=8,           # Persistent connections per container (8 + 7 = 15 max)
+            max_overflow=7,        # Burst connections beyond pool_size (total: 15/container)
             pool_timeout=30,       # Raise after 30s if no connection is available
                                    # (prevents requests hanging indefinitely under load)
             pool_pre_ping=True,    # Verify connections are alive before use (catches stale sockets)

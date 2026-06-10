@@ -18,22 +18,24 @@ from backend.routers.auth import get_password_hash
 
 # List of official users to seed
 OFFICIAL_USERS = [
-    {"area": "Comercial", "email": "mairla@promaflex.com.br", "role": "operator", "name": "Mairla"},
-    {"area": "Comercial", "email": "jader@promaflex.com.br", "role": "operator", "name": "Jader"},
-    {"area": "Comercial", "email": "mvelletri_promaflex@grupovelletri.com.br", "role": "operator", "name": "Mvelletri Promaflex"},
-    {"area": "Comercial", "email": "barbara@bardge.com.br", "role": "operator", "name": "Barbara"},
-    {"area": "Financeiro", "email": "anderson.moreno@promaflex.com.br", "role": "master", "name": "Anderson Moreno"},
-    {"area": "Financeiro", "email": "alex@promaflex.com.br", "role": "master", "name": "Alex"},
-    {"area": "Financeiro", "email": "cristiane.oliveira@promaflex.com.br", "role": "master", "name": "Cristiane Oliveira"},
-    {"area": "Expedição", "email": "fabio_promaflex@grupovelletri.com.br", "role": "operator", "name": "Fabio Promaflex"},
-    {"area": "Expedição", "email": "gabriel_promaflex@grupovelletri.com.br", "role": "operator", "name": "Gabriel Promaflex"},
-    {"area": "Expedição", "email": "expedicao@promaflex.com.br", "role": "operator", "name": "Expedicao"},
-    {"area": "PCP", "email": "jonata_promaflex@grupovelletri.com.br", "role": "operator", "name": "Jonata Promaflex"},
-    {"area": "PCP", "email": "cristiano_promaflex@grupovelletri.com.br", "role": "operator", "name": "Cristiano Promaflex"},
-    {"area": "PCP", "email": "rogerio_promaflex@grupovelletri.com.br", "role": "operator", "name": "Rogerio Promaflex"},
-    {"area": "PCP", "email": "claudio.xavier@grupovelletri.com.br", "role": "operator", "name": "Claudio Xavier"},
-    {"area": "Embalagem", "email": "embalagem_promaflex@grupovelletri.com.br", "role": "operator", "name": "Embalagem Promaflex"},
-    {"area": "Management", "email": "andrea@grupovelletri.com.br", "role": "master", "name": "Andrea"}
+    {"area": "Comercial",   "email": "mairla@promaflex.com.br",                    "role": "operator", "name": "Mairla"},
+    {"area": "Comercial",   "email": "jader@promaflex.com.br",                     "role": "operator", "name": "Jader"},
+    {"area": "Comercial",   "email": "mvelletri_promaflex@grupovelletri.com.br",   "role": "operator", "name": "Mvelletri Promaflex"},
+    {"area": "Comercial",   "email": "barbara@bardge.com.br",                     "role": "operator", "name": "Barbara"},
+    {"area": "Financeiro",  "email": "anderson.moreno@promaflex.com.br",           "role": "master",   "name": "Anderson Moreno"},
+    {"area": "Financeiro",  "email": "alex@promaflex.com.br",                      "role": "master",   "name": "Alex"},
+    {"area": "Financeiro",  "email": "cristiane.oliveira@promaflex.com.br",        "role": "master",   "name": "Cristiane Oliveira"},
+    {"area": "Expedicao",   "email": "fabio_promaflex@grupovelletri.com.br",       "role": "operator", "name": "Fabio Promaflex"},
+    {"area": "Expedicao",   "email": "gabriel_promaflex@grupovelletri.com.br",     "role": "operator", "name": "Gabriel Promaflex"},
+    {"area": "Expedicao",   "email": "expedicao@promaflex.com.br",                 "role": "operator", "name": "Expedicao"},
+    {"area": "PCP",         "email": "jonata_promaflex@grupovelletri.com.br",      "role": "operator", "name": "Jonata Promaflex"},
+    {"area": "PCP",         "email": "cristiano_promaflex@grupovelletri.com.br",   "role": "operator", "name": "Cristiano Promaflex"},
+    {"area": "PCP",         "email": "rogerio_promaflex@grupovelletri.com.br",     "role": "operator", "name": "Rogerio Promaflex"},
+    {"area": "PCP",         "email": "claudio.xavier@grupovelletri.com.br",        "role": "operator", "name": "Claudio Xavier"},
+    {"area": "Embalagem",   "email": "embalagem_promaflex@grupovelletri.com.br",   "role": "operator", "name": "Embalagem Promaflex"},
+    {"area": "Management",  "email": "andrea@grupovelletri.com.br",               "role": "master",   "name": "Andrea"},
+    # CRITICAL: Primary admin account — must always be present
+    {"area": "Management",  "email": "admin@botcase.com.br",                      "role": "admin",    "name": "Admin BotCase"},
 ]
 
 DEFAULT_PASSWORD = "Proma@2026"
@@ -108,7 +110,7 @@ def seed_users():
                 status_str = "CREATED"
                 
             processed_count += 1
-            print(f"  [{processed_count:02d}/16] {email} -> {status_str}")
+            print(f"  [{processed_count:02d}/17] {email} -> {status_str}")
             
         db.commit()
         print("=" * 60)
