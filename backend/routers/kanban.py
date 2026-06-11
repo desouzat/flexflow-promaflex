@@ -2394,31 +2394,49 @@ async def archive_purchase_order(
 
 
 @router.post("/admin/nuke-tenant-data")
-async def nuke_tenant_data(
+def nuke_tenant_data(
     current_user: UserInfo = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
-    Emergency clean slate: Deletes all AuditLog, OrderItem, and PurchaseOrder records 
+    Emergency clean slate: Deletes all AuditLog, OrderItem, and PurchaseOrder records
     associated with the logged-in user's tenant.
+
+    RBAC: Requires 'admin' or 'master' role (case-insensitive).
+    Runs as a synchronous def so blocking ORM DELETE queries run in the
+    thread pool and do not block the event loop.
     """
     import uuid
-    # Security: Ensure only users with role 'admin' can execute this
-    if current_user.role != "admin":
+    from datetime import datetime
+
+    timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
+
+    # ── RBAC check — case-insensitive, accepts 'admin' and 'master' ──────────
+    # The role value stored in the DB and minted into the JWT is lowercase
+    # (e.g., 'admin'). We normalise to lowercase before comparison so that
+    # a JWT issued with any casing variant ('Admin', 'ADMIN') still passes.
+    # 'master' users are the tenant super-admins and must also be allowed.
+    allowed_roles = {"admin", "master"}
+    if current_user.role.lower() not in allowed_roles:
+        print(
+            f"{timestamp} [RBAC] nuke-tenant-data denied: "
+            f"user={current_user.id} role={current_user.role!r}",
+            flush=True
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Apenas administradores podem higienizar dados de testes."
         )
 
     tenant_uuid = uuid.UUID(str(current_user.tenant_id))
-    print(f"ADMIN NUKE: Starting data cleaning for tenant_id {tenant_uuid}", flush=True)
+    print(f"{timestamp} ADMIN NUKE: Starting data cleaning for tenant_id {tenant_uuid}", flush=True)
 
     try:
-        # PROTECTION: We EXPLICITLY EXCLUDE the ClientPreference table from deletion
-        # to ensure client preferences/memory survive tests and nuke operations.
+        # PROTECTION: ClientPreference table is EXCLUDED from deletion
+        # to ensure client preferences/memory survive nuke operations.
         from backend.models import AuditLog, OrderItem, PurchaseOrder
 
-        # 1. Delete all AuditLogs associated with OrderItems of this tenant
+        # 1. Delete all AuditLogs for OrderItems of this tenant
         deleted_logs = db.query(AuditLog).filter(
             AuditLog.item_id.in_(
                 db.query(OrderItem.id).filter(OrderItem.tenant_id == tenant_uuid)
@@ -2426,16 +2444,21 @@ async def nuke_tenant_data(
         ).delete(synchronize_session=False)
 
         # 2. Delete all OrderItems belonging to this tenant
-        deleted_items = db.query(OrderItem).filter(OrderItem.tenant_id == tenant_uuid).delete(synchronize_session=False)
+        deleted_items = db.query(OrderItem).filter(
+            OrderItem.tenant_id == tenant_uuid
+        ).delete(synchronize_session=False)
 
         # 3. Delete all PurchaseOrders belonging to this tenant
-        deleted_pos = db.query(PurchaseOrder).filter(PurchaseOrder.tenant_id == tenant_uuid).delete(synchronize_session=False)
+        deleted_pos = db.query(PurchaseOrder).filter(
+            PurchaseOrder.tenant_id == tenant_uuid
+        ).delete(synchronize_session=False)
 
         db.commit()
 
         success_msg = (
-            f"ADMIN NUKE SUCCESS: Cleared {deleted_logs} AuditLogs, "
-            f"{deleted_items} OrderItems, and {deleted_pos} PurchaseOrders for tenant {tenant_uuid}"
+            f"{timestamp} ADMIN NUKE SUCCESS: Cleared {deleted_logs} AuditLogs, "
+            f"{deleted_items} OrderItems, and {deleted_pos} PurchaseOrders "
+            f"for tenant {tenant_uuid} by user {current_user.id} ({current_user.role})"
         )
         print(success_msg, flush=True)
         return {
@@ -2449,12 +2472,13 @@ async def nuke_tenant_data(
         }
     except Exception as exc:
         db.rollback()
-        error_msg = f"ADMIN NUKE ERROR: Failed to nuke data for tenant {tenant_uuid}: {str(exc)}"
+        error_msg = f"{timestamp} ADMIN NUKE ERROR: Failed for tenant {tenant_uuid}: {str(exc)}"
         print(error_msg, flush=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erro ao higienizar banco: {str(exc)}"
         )
+
 
 
 class ApprovePartitionBody(BaseModel):
