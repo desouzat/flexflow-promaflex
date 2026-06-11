@@ -203,16 +203,28 @@ async def lifespan(app: FastAPI):
     import asyncio
     asyncio.create_task(init_db_background())
 
-    # Start background worker for S3 sync (non-blocking)
-    from backend.services.background_worker import start_background_worker, stop_background_worker
-    try:
-        await start_background_worker()
-        timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-        print(f"{timestamp} Background worker started successfully")
-    except Exception as e:
-        timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-        print(f"{timestamp} [WARNING] Background worker failed to start: {e}")
-        print(f"{timestamp} [WARNING] S3 sync will not be available, but API will continue to work")
+    # ── Automatic S3 background sync DISABLED ────────────────────────────────
+    # The BackgroundWorker previously ran S3 sync every 10 minutes on startup.
+    # This caused the server to block on financial validation errors during the
+    # sync loop, making the API unavailable after boot.
+    #
+    # S3 synchronization is now STRICTLY MANUAL:
+    #   → Users trigger it via the "Sincronizar com ONET (Nuvem)" button
+    #   → Endpoint: POST /api/import/sync-s3
+    #
+    # To re-enable automatic sync in the future, uncomment the block below
+    # and ensure the S3 service handles financial validation errors gracefully
+    # without propagating exceptions that crash the background loop.
+    # ─────────────────────────────────────────────────────────────────────────
+    # from backend.services.background_worker import start_background_worker, stop_background_worker
+    # try:
+    #     await start_background_worker()
+    #     timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
+    #     print(f"{timestamp} Background worker started successfully")
+    # except Exception as e:
+    #     timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
+    #     print(f"{timestamp} [WARNING] Background worker failed to start: {e}")
+    #     print(f"{timestamp} [WARNING] S3 sync will not be available, but API will continue to work")
     
     timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
     print(f"{timestamp} FlexFlow API started successfully")
@@ -223,11 +235,13 @@ async def lifespan(app: FastAPI):
     from datetime import datetime
     timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
     print(f"{timestamp} Shutting down FlexFlow API...")
-    try:
-        await stop_background_worker()
-    except Exception as e:
-        timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-        print(f"{timestamp} [WARNING] Error stopping background worker: {e}")
+    # Background worker shutdown also disabled (worker was not started).
+    # Uncomment if/when start_background_worker() above is re-enabled.
+    # try:
+    #     await stop_background_worker()
+    # except Exception as e:
+    #     timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
+    #     print(f"{timestamp} [WARNING] Error stopping background worker: {e}")
 
 
 # Create FastAPI application
