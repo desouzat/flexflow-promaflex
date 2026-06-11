@@ -882,6 +882,12 @@ def confirm_staging(
             print(f"MIGRATION/DEPLOY PROOF: PO {new_po.po_number} staged (flushed, not yet committed).", flush=True)
 
             # 4. Process each item
+            # ── Batch-add pattern: all db.add() calls are collected in the SQLAlchemy
+            # identity map WITHOUT issuing any SQL. A single db.flush() before the
+            # final db.commit() sends the entire batch in one round-trip.
+            # This minimises the row-lock hold window and eliminates the N per-item
+            # flush() calls that were leaving open transactions when Gunicorn SIGABRT
+            # killed a previous mid-flight worker.
             for item in po.items:
                 is_item_blocked = (
                     item.block_status == "BLOQUEADO"
@@ -905,7 +911,7 @@ def confirm_staging(
                     "apply_sla_reduction": item.extra_metadata.apply_sla_reduction if item.extra_metadata else False,
                     "finance_justification": item.extra_metadata.finance_justification if item.extra_metadata else None,
                     "additional_costs": po.additional_costs,
-                    
+
                     "block_status": item.block_status,
                     "balance": item.balance,
                     "delay": item.delay,
@@ -921,12 +927,15 @@ def confirm_staging(
                     "freight": item.freight,
                     "salesperson": item.salesperson,
                     "ipi": item.ipi,
-                    
+
                     "client_name": po.client_name
                 }
 
+                # Assign a stable UUID now so the AuditLog FK can reference it
+                # before the flush — avoids needing an intermediate flush per item.
+                new_item_id = uuid.uuid4()
                 new_item = OrderItem(
-                    id=uuid.uuid4(),
+                    id=new_item_id,
                     po_id=new_po.id,
                     tenant_id=tenant_uuid,
                     sku=item.sku,
@@ -942,14 +951,14 @@ def confirm_staging(
                     extra_metadata=extra_metadata_dict
                 )
                 db.add(new_item)
-                db.flush()
+                # NO per-item flush() — avoids holding a row lock per item
 
                 # 5. Create chained AuditLog if item is blocked
                 if is_item_blocked:
                     now = datetime.now(timezone.utc)
                     computed_hash = AuditLog.calculate_hash_v2(
                         tenant_id=tenant_uuid,
-                        item_id=new_item.id,
+                        item_id=new_item_id,  # use the pre-assigned UUID
                         from_status=None,
                         to_status="ANALISE_CREDITO",
                         timestamp=now,
@@ -959,7 +968,7 @@ def confirm_staging(
 
                     audit_log = AuditLog(
                         id=uuid.uuid4(),
-                        item_id=new_item.id,
+                        item_id=new_item_id,  # FK to the same pre-assigned UUID
                         from_status=None,
                         to_status="ANALISE_CREDITO",
                         hash=computed_hash,
@@ -977,12 +986,12 @@ def confirm_staging(
                         }
                     )
                     db.add(audit_log)
-                    db.flush()
-            # ── Single commit per PO: PurchaseOrder + all its OrderItems + all
-            # AuditLogs are committed atomically in ONE round-trip to PostgreSQL.
-            # The connection is held for the shortest possible duration and released
-            # immediately after this commit. If this raises, the outer except block
-            # calls db.rollback() to return the connection in a clean state.
+                    # NO per-audit-log flush() — batch write on commit
+
+            # ── Single commit per PO: one flush + one commit for the entire batch.
+            # PurchaseOrder + all OrderItems + all AuditLogs land in ONE round-trip.
+            # Row locks are held for the absolute minimum duration.
+            # If this raises, the outer except block calls db.rollback().
             db.commit()
             db.refresh(new_po)
             success_msg = f"SUCCESS: PO {po.po_number} saved to database"
