@@ -185,7 +185,7 @@ async def get_file_headers(
 
 
 @router.get("/field-types")
-async def get_available_field_types(
+def get_available_field_types(
     current_user: UserInfo = Depends(get_current_user)
 ):
     """
@@ -357,7 +357,7 @@ async def get_available_field_types(
 
 
 @router.post("/configs")
-async def save_import_config(
+def save_import_config(
     config_name: str,
     mapping: ImportMapping,
     current_user: UserInfo = Depends(get_current_user)
@@ -404,7 +404,7 @@ async def save_import_config(
 
 
 @router.get("/configs")
-async def list_import_configs(
+def list_import_configs(
     current_user: UserInfo = Depends(get_current_user)
 ):
     """
@@ -427,7 +427,7 @@ async def list_import_configs(
 
 
 @router.get("/configs/{config_name}")
-async def get_import_config(
+def get_import_config(
     config_name: str,
     current_user: UserInfo = Depends(get_current_user)
 ):
@@ -453,7 +453,7 @@ async def get_import_config(
 
 
 @router.delete("/configs/{config_name}")
-async def delete_import_config(
+def delete_import_config(
     config_name: str,
     current_user: UserInfo = Depends(get_current_user)
 ):
@@ -522,7 +522,7 @@ async def upload_attachment(
 
 
 @router.post("/validate-staging-item")
-async def validate_staging_item(
+def validate_staging_item(
     is_personalized: bool = Form(...),
     is_new_client: bool = Form(...),
     customization_notes: Optional[str] = Form(None),
@@ -626,7 +626,7 @@ async def sync_s3_bucket(
 
 
 @router.post("/finance-decision", response_model=FinanceDecisionResponse)
-async def record_finance_decision(
+def record_finance_decision(
     request: FinanceDecisionRequest,
     current_user: UserInfo = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -752,7 +752,7 @@ async def record_finance_decision(
 
 
 @router.post("/confirm-staging")
-async def confirm_staging(
+def confirm_staging(
     payload: ConfirmStagingPayload,
     current_user: UserInfo = Depends(get_current_user),
     db: Session = Depends(get_db)
