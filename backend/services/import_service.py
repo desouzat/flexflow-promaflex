@@ -939,30 +939,54 @@ class ImportService:
                     validation_result=validation_result
                 )
             
-            # Step 4a: Mesa de Conferência — Final Financial Integrity Gate
+            # Step 4a: Mesa de Conferência — Financial Integrity Check (NON-BLOCKING WARNING)
             # ─────────────────────────────────────────────────────────────────────
-            # For every PO that supplies both po_total_value AND per-item totals,
-            # verify: Σ(item_total_value) ≈ po_total_value (tolerance = R$ 0.01).
-            # If the difference exceeds the tolerance, BLOCK the finalization and
-            # return a clear error to the UI — do NOT silently accept divergent data.
-            integrity_errors = []
+            # DECISION (2026-06-11, Thiago — Solutions Engineer):
+            #   The hard financial block was disabled because it caused operational
+            #   stoppage when source Excel files had rounding or IPI distribution
+            #   differences that do not represent actual data integrity problems.
+            #
+            # Previous behaviour (DISABLED):
+            #   → return ImportResponse(success=False, message="❌ Bloqueio de
+            #     Integridade Financeira...") for any Σ(item_total_value) ≠ po_total_value
+            #
+            # Current behaviour (NON-BLOCKING WARNING):
+            #   → The mismatch is detected and its description is stored in
+            #     po_data.integrity_error_message (already set by ImportPOData validator).
+            #   → A "AVISO DO SISTEMA" prefix is prepended so the Mesa de Conferência
+            #     UI can display the warning badge without blocking the import flow.
+            #   → The PO is imported normally; has_integrity_error=True is forwarded
+            #     to the frontend (lines 984-985 below) for visual flagging.
+            #
+            # To re-enable as a hard block in the future: uncomment the
+            # `if integrity_errors: return ImportResponse(success=False, ...)` below.
+            # ─────────────────────────────────────────────────────────────────────
             for po_data in validation_result.po_data_list or []:
                 if po_data.has_integrity_error and po_data.integrity_error_message:
-                    # The ImportPOData validator already ran this check (import_schema.py).
-                    # Here we convert it from a non-blocking flag to a HARD block.
-                    integrity_errors.append(
-                        f"PO {po_data.po_number}: {po_data.integrity_error_message}"
+                    # Prepend a clear system warning marker so the UI and audit
+                    # trail can distinguish auto-detected mismatches from other notes.
+                    if not po_data.integrity_error_message.startswith("AVISO DO SISTEMA"):
+                        po_data.integrity_error_message = (
+                            "AVISO DO SISTEMA: PO importada com divergência financeira — "
+                            + po_data.integrity_error_message
+                        )
+                    print(
+                        f"[FINANCIAL WARNING] PO {po_data.po_number}: "
+                        f"{po_data.integrity_error_message}",
+                        flush=True
                     )
 
-            if integrity_errors:
-                return ImportResponse(
-                    success=False,
-                    message=(
-                        "❌ Bloqueio de Integridade Financeira (Mesa de Conferência): "
-                        + " | ".join(integrity_errors)
-                    ),
-                    items_imported=0
-                )
+            # ── Hard-block (DISABLED) ─────────────────────────────────────────
+            # if integrity_errors:
+            #     return ImportResponse(
+            #         success=False,
+            #         message=(
+            #             "❌ Bloqueio de Integridade Financeira (Mesa de Conferência): "
+            #             + " | ".join(integrity_errors)
+            #         ),
+            #         items_imported=0
+            #     )
+            # ─────────────────────────────────────────────────────────────────
 
             # Step 4: Prepare response with multi-PO support
             po_data_list = validation_result.po_data_list or []
