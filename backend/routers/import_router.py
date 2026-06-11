@@ -847,10 +847,12 @@ def confirm_staging(
                     business_unit=po.business_unit
                 )
                 db.add(new_pref)
-            db.flush()
+            db.flush()  # sends ClientPreference INSERT on the current connection
 
+            # ── Pre-assign PO UUID in Python so items can reference it before commit
+            new_po_id = uuid.uuid4()
             new_po = PurchaseOrder(
-                id=uuid.uuid4(),
+                id=new_po_id,
                 tenant_id=tenant_uuid,
                 po_number=po.po_number,
                 status_macro=po_status_macro,
@@ -872,22 +874,13 @@ def confirm_staging(
                 }
             )
             db.add(new_po)
-            # ── flush() assigns the DB-generated id to new_po WITHOUT committing the
-            # transaction. This means the connection is NOT released back to the pool
-            # here — it stays in the same transaction through all item processing below.
-            # The previous pattern (commit here + commit again after items) was the
-            # root cause of connection exhaustion: two commits per PO doubled the
-            # number of connection acquisition cycles under concurrent load.
+            # ── flush() serializes the PO INSERT on the current connection so that
+            # subsequent item flushes can satisfy the order_items_po_id_fkey FK
+            # within the same open transaction. All operations share one connection.
             db.flush()
-            print(f"MIGRATION/DEPLOY PROOF: PO {new_po.po_number} staged (flushed, not yet committed).", flush=True)
+            print(f"MIGRATION/DEPLOY PROOF: PO {new_po.po_number} flushed (not yet committed).", flush=True)
 
             # 4. Process each item
-            # ── Batch-add pattern: all db.add() calls are collected in the SQLAlchemy
-            # identity map WITHOUT issuing any SQL. A single db.flush() before the
-            # final db.commit() sends the entire batch in one round-trip.
-            # This minimises the row-lock hold window and eliminates the N per-item
-            # flush() calls that were leaving open transactions when Gunicorn SIGABRT
-            # killed a previous mid-flight worker.
             for item in po.items:
                 is_item_blocked = (
                     item.block_status == "BLOQUEADO"
@@ -931,12 +924,12 @@ def confirm_staging(
                     "client_name": po.client_name
                 }
 
-                # Assign a stable UUID now so the AuditLog FK can reference it
-                # before the flush — avoids needing an intermediate flush per item.
+                # Pre-assign item UUID so AuditLog FK can reference it without
+                # needing an intermediate flush to retrieve a DB-generated PK
                 new_item_id = uuid.uuid4()
                 new_item = OrderItem(
                     id=new_item_id,
-                    po_id=new_po.id,
+                    po_id=new_po_id,
                     tenant_id=tenant_uuid,
                     sku=item.sku,
                     quantity=item.quantity,
@@ -951,14 +944,14 @@ def confirm_staging(
                     extra_metadata=extra_metadata_dict
                 )
                 db.add(new_item)
-                # NO per-item flush() — avoids holding a row lock per item
+                db.flush()  # sends item INSERT; FK satisfied because PO was flushed above
 
                 # 5. Create chained AuditLog if item is blocked
                 if is_item_blocked:
                     now = datetime.now(timezone.utc)
                     computed_hash = AuditLog.calculate_hash_v2(
                         tenant_id=tenant_uuid,
-                        item_id=new_item_id,  # use the pre-assigned UUID
+                        item_id=new_item_id,
                         from_status=None,
                         to_status="ANALISE_CREDITO",
                         timestamp=now,
@@ -968,7 +961,7 @@ def confirm_staging(
 
                     audit_log = AuditLog(
                         id=uuid.uuid4(),
-                        item_id=new_item_id,  # FK to the same pre-assigned UUID
+                        item_id=new_item_id,
                         from_status=None,
                         to_status="ANALISE_CREDITO",
                         hash=computed_hash,
@@ -986,12 +979,11 @@ def confirm_staging(
                         }
                     )
                     db.add(audit_log)
-                    # NO per-audit-log flush() — batch write on commit
+                    db.flush()  # sends audit_log INSERT; item FK satisfied above
 
-            # ── Single commit per PO: one flush + one commit for the entire batch.
-            # PurchaseOrder + all OrderItems + all AuditLogs land in ONE round-trip.
-            # Row locks are held for the absolute minimum duration.
-            # If this raises, the outer except block calls db.rollback().
+            # ── Single commit per PO: atomically commits ClientPreference + PurchaseOrder
+            # + all OrderItems + all AuditLogs in one COMMIT round-trip.
+            # All flushes above shared the same connection; the transaction is closed here.
             db.commit()
             db.refresh(new_po)
             success_msg = f"SUCCESS: PO {po.po_number} saved to database"
