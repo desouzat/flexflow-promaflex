@@ -261,6 +261,12 @@ const ImportPage = () => {
         setShowRestoreModal(false)
     }
 
+    // FF-HARDENING-004: Reset override checkbox whenever the operator navigates to a different PO
+    // Each PO in the batch must start unchecked by default.
+    useEffect(() => {
+        setOverrideAprovado(false)
+    }, [selectedPOIndex])
+
     const handleFileSelect = (e) => {
         const file = e.target.files?.[0]
         if (file) {
@@ -1295,25 +1301,22 @@ const ImportPage = () => {
                                                     {currentPO.integrity_error_message || 'A soma dos itens não confere com o total do pedido.'}
                                                 </p>
                                                 <p className="text-xs text-red-700 mt-2">
-                                                    <strong>Ação necessária:</strong> Verifique os valores ou use a opção abaixo para aprovar com divergência (registra log de auditoria imutável).
+                                                    <strong>Ação necessária:</strong> Marque a opção abaixo para desbloquear a confirmação.
                                                 </p>
                                                 {/* FF-HARDENING-004: Override checkbox — only shown when mismatch exists */}
                                                 <label
                                                     id="override-aprovado-label"
-                                                    className="flex items-center gap-2 mt-3 cursor-pointer select-none"
+                                                    className="flex items-start gap-2 mt-3 cursor-pointer select-none"
                                                 >
                                                     <input
                                                         id="checkbox-override-aprovado"
                                                         type="checkbox"
                                                         checked={overrideAprovado}
                                                         onChange={e => setOverrideAprovado(e.target.checked)}
-                                                        className="w-4 h-4 accent-orange-500 rounded"
+                                                        className="w-4 h-4 mt-0.5 accent-orange-500 rounded flex-shrink-0"
                                                     />
-                                                    <span className="text-sm font-semibold text-orange-800">
-                                                        Aprovar com Divergência
-                                                    </span>
-                                                    <span className="text-xs text-orange-700">
-                                                        (o PO será encaminhado ao setor Financeiro e o evento será registrado no ledger de auditoria)
+                                                    <span className="text-sm font-semibold text-orange-900">
+                                                        Aprovar com Divergência (marcado: envia ao PCP; desmarcado: arquiva em Concluídos. Ambas as opções registram log de auditoria imutável)
                                                     </span>
                                                 </label>
                                             </div>

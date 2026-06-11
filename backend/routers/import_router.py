@@ -801,13 +801,38 @@ def confirm_staging(
                 for item in po.items
             )
 
-            # FF-HARDENING-004: Financial override routes PO to FINANCEIRO
-            if payload.financial_override:
-                po_status_macro = "FINANCEIRO"
-            elif has_blocked_item:
-                po_status_macro = "FINANCE"
+            # FF-HARDENING-004: Detect financial mismatch for this PO
+            # (same arithmetic used in import_schema.py validate_po_integrity)
+            items_with_totals = [it for it in po.items if it.item_total_value is not None]
+            if po.po_total_value is not None and items_with_totals:
+                from decimal import Decimal as _D
+                _calc_sum = sum(
+                    float(it.item_total_value or 0) + float(it.ipi or 0)
+                    for it in items_with_totals
+                )
+                _po_total = float(po.po_total_value)
+                has_financial_mismatch = abs(_calc_sum - _po_total) > 0.01
+                _discrepancy_brl = round(abs(_calc_sum - _po_total), 2)
+                _calculated_sum_brl = round(_calc_sum, 2)
+                _po_total_brl = round(_po_total, 2)
             else:
-                po_status_macro = "APPROVED"
+                has_financial_mismatch = False
+                _discrepancy_brl = 0.0
+                _calculated_sum_brl = 0.0
+                _po_total_brl = 0.0
+
+            # Status routing (FF-HARDENING-004 dual path vs normal path)
+            if has_financial_mismatch:
+                if payload.financial_override:
+                    # CASE A: operator approved mismatch → PCP column (DB value: APPROVED)
+                    po_status_macro = PurchaseOrder.STATUS_APPROVED
+                else:
+                    # CASE B: operator did not approve mismatch → archive to Concluídos (DB: COMPLETED)
+                    po_status_macro = PurchaseOrder.STATUS_COMPLETED
+            elif has_blocked_item:
+                po_status_macro = PurchaseOrder.STATUS_FINANCE
+            else:
+                po_status_macro = PurchaseOrder.STATUS_APPROVED
 
             # 3. Create new PurchaseOrder
             first_item_delivery = None
@@ -887,68 +912,9 @@ def confirm_staging(
             db.flush()
             print(f"MIGRATION/DEPLOY PROOF: PO {new_po.po_number} flushed (not yet committed).", flush=True)
 
-            # FF-HARDENING-004: If financial override was used, create a PO-level immutable audit log entry
-            if payload.financial_override:
-                now_override = datetime.now(timezone.utc)
-
-                # Calculate the discrepancy amount for the audit message
-                calculated_sum = sum(
-                    float(item.item_total_value or 0) + float(item.ipi or 0)
-                    for item in po.items
-                    if item.item_total_value is not None
-                )
-                po_total = float(po.po_total_value) if po.po_total_value is not None else 0.0
-                discrepancy_amount = abs(calculated_sum - po_total)
-
-                approver_name = getattr(current_user, 'name', None) or getattr(current_user, 'email', str(user_uuid))
-                approver_email = getattr(current_user, 'email', str(user_uuid))
-
-                override_hash = AuditLog.calculate_hash_v2(
-                    tenant_id=tenant_uuid,
-                    item_id=new_po_id,  # use PO id as item_id for PO-level events
-                    from_status=None,
-                    to_status="FINANCEIRO",
-                    timestamp=now_override,
-                    previous_hash=None,
-                    changed_by=user_uuid
-                )
-
-                override_audit_log = AuditLog(
-                    id=uuid.uuid4(),
-                    item_id=new_po_id,  # PO-level log (uses po UUID in item_id slot)
-                    from_status=None,
-                    to_status="FINANCEIRO",
-                    hash=override_hash,
-                    previous_hash=None,
-                    hash_version=AuditLog.HASH_VERSION_CURRENT,
-                    is_exception=True,
-                    justification=(
-                        f"Usuário {approver_email} aprovou o PO {po.po_number} com divergência financeira "
-                        f"de R$ {discrepancy_amount:.2f}."
-                    ),
-                    changed_by=user_uuid,
-                    created_at=now_override,
-                    extra_data={
-                        "decision": "FINANCIAL_OVERRIDE_APPROVED",
-                        "po_number": po.po_number,
-                        "approver_id": str(user_uuid),
-                        "approver_name": approver_name,
-                        "approver_email": approver_email,
-                        "discrepancy_amount_brl": round(discrepancy_amount, 2),
-                        "calculated_sum_brl": round(calculated_sum, 2),
-                        "po_total_value_brl": round(po_total, 2),
-                        "routed_to": "FINANCEIRO",
-                        "workflow": "FINANCIAL_MISMATCH_OVERRIDE",
-                        "timestamp": now_override.isoformat()
-                    }
-                )
-                db.add(override_audit_log)
-                db.flush()
-                print(
-                    f"[FF-HARDENING-004] Financial override audit log created for PO {po.po_number} "
-                    f"by {approver_email}. Discrepancy: R$ {discrepancy_amount:.2f}.",
-                    flush=True
-                )
+            # FF-HARDENING-004 audit log: track the mismatch decision for the first item after it is flushed
+            # (The audit log item_id is an FK to order_items, so we must flush the first item first.)
+            _ff004_first_item_id: uuid.UUID | None = None
 
             # 4. Process each item
             for item in po.items:
@@ -1016,8 +982,72 @@ def confirm_staging(
                 db.add(new_item)
                 db.flush()  # sends item INSERT; FK satisfied because PO was flushed above
 
+                # FF-HARDENING-004: Write the mismatch decision audit log using the FIRST item's UUID as anchor
+                # (AuditLog.item_id is a FK to order_items, so the item must be flushed first)
+                if has_financial_mismatch and _ff004_first_item_id is None:
+                    _ff004_first_item_id = new_item_id
+                    _now_ff004 = datetime.now(timezone.utc)
+                    _approver_email = getattr(current_user, 'email', str(user_uuid))
+                    _approver_name = getattr(current_user, 'name', None) or _approver_email
+
+                    if payload.financial_override:
+                        # CASE A: operator approved the mismatch → PCP column
+                        _ff004_justification = "CONFERIDO - APROVADO COM DIVERGENCIA (IPI)"
+                        _ff004_decision = "FINANCIAL_OVERRIDE_APPROVED"
+                        _ff004_routed_to = "APPROVED (PCP)"
+                    else:
+                        # CASE B: operator did not approve → archived to Concluídos
+                        _ff004_justification = "CONFERIDO - NÃO APROVADO DIVERGENCIA (IPI)"
+                        _ff004_decision = "FINANCIAL_MISMATCH_REJECTED"
+                        _ff004_routed_to = "COMPLETED (Concluídos)"
+
+                    _ff004_hash = AuditLog.calculate_hash_v2(
+                        tenant_id=tenant_uuid,
+                        item_id=new_item_id,
+                        from_status=None,
+                        to_status="CONFERIDO",
+                        timestamp=_now_ff004,
+                        previous_hash=None,
+                        changed_by=user_uuid
+                    )
+                    _ff004_audit = AuditLog(
+                        id=uuid.uuid4(),
+                        item_id=new_item_id,
+                        from_status=None,
+                        to_status="CONFERIDO",
+                        hash=_ff004_hash,
+                        previous_hash=None,
+                        hash_version=AuditLog.HASH_VERSION_CURRENT,
+                        is_exception=(not payload.financial_override),
+                        justification=_ff004_justification,
+                        changed_by=user_uuid,
+                        created_at=_now_ff004,
+                        extra_data={
+                            "decision": _ff004_decision,
+                            "po_number": po.po_number,
+                            "approver_id": str(user_uuid),
+                            "approver_name": _approver_name,
+                            "approver_email": _approver_email,
+                            "discrepancy_amount_brl": _discrepancy_brl,
+                            "calculated_sum_brl": _calculated_sum_brl,
+                            "po_total_value_brl": _po_total_brl,
+                            "routed_to": _ff004_routed_to,
+                            "workflow": "FF_HARDENING_004_MISMATCH_DECISION",
+                            "timestamp": _now_ff004.isoformat()
+                        }
+                    )
+                    db.add(_ff004_audit)
+                    db.flush()
+                    print(
+                        f"[FF-HARDENING-004] Mismatch audit log written for PO {po.po_number} | "
+                        f"Decision: {_ff004_decision} | Discrepancy: R$ {_discrepancy_brl:.2f} | "
+                        f"Routed to: {_ff004_routed_to}",
+                        flush=True
+                    )
+
                 # 5. Create chained AuditLog if item is blocked
                 if is_item_blocked:
+
                     now = datetime.now(timezone.utc)
                     computed_hash = AuditLog.calculate_hash_v2(
                         tenant_id=tenant_uuid,

@@ -624,7 +624,7 @@ class TestConfirmStagingEndpoint:
                   "business_unit": "Outros",
                   "freight_cost": 150.0,
                   "additional_costs": 50.0,
-                  "po_total_value": 1200.0,
+                  "po_total_value": 1205.0,
                   "items": [
                     {
                       "sku": "SKU-BLOCKED-999",
@@ -729,7 +729,9 @@ class TestConfirmStagingEndpoint:
             .first()
         )
         assert new_po is not None
-        # Assert macro status is FINANCE because of the blocked item with justification
+        # Assert macro status is FINANCE because of the blocked item with justification.
+        # po_total_value (1205.0) matches items sum (1000+5+200+0=1205), so no financial mismatch—
+        # the blocked-item path (STATUS_FINANCE) takes priority over FF-HARDENING-004.
         assert new_po.status_macro == "FINANCE"
         # Assert client_name dynamic property is correctly populated via partition_metadata
         assert new_po.client_name == "Nova Promaflex SA"
