@@ -800,7 +800,14 @@ def confirm_staging(
                 )
                 for item in po.items
             )
-            po_status_macro = "FINANCE" if has_blocked_item else "APPROVED"
+
+            # FF-HARDENING-004: Financial override routes PO to FINANCEIRO
+            if payload.financial_override:
+                po_status_macro = "FINANCEIRO"
+            elif has_blocked_item:
+                po_status_macro = "FINANCE"
+            else:
+                po_status_macro = "APPROVED"
 
             # 3. Create new PurchaseOrder
             first_item_delivery = None
@@ -879,6 +886,69 @@ def confirm_staging(
             # within the same open transaction. All operations share one connection.
             db.flush()
             print(f"MIGRATION/DEPLOY PROOF: PO {new_po.po_number} flushed (not yet committed).", flush=True)
+
+            # FF-HARDENING-004: If financial override was used, create a PO-level immutable audit log entry
+            if payload.financial_override:
+                now_override = datetime.now(timezone.utc)
+
+                # Calculate the discrepancy amount for the audit message
+                calculated_sum = sum(
+                    float(item.item_total_value or 0) + float(item.ipi or 0)
+                    for item in po.items
+                    if item.item_total_value is not None
+                )
+                po_total = float(po.po_total_value) if po.po_total_value is not None else 0.0
+                discrepancy_amount = abs(calculated_sum - po_total)
+
+                approver_name = getattr(current_user, 'name', None) or getattr(current_user, 'email', str(user_uuid))
+                approver_email = getattr(current_user, 'email', str(user_uuid))
+
+                override_hash = AuditLog.calculate_hash_v2(
+                    tenant_id=tenant_uuid,
+                    item_id=new_po_id,  # use PO id as item_id for PO-level events
+                    from_status=None,
+                    to_status="FINANCEIRO",
+                    timestamp=now_override,
+                    previous_hash=None,
+                    changed_by=user_uuid
+                )
+
+                override_audit_log = AuditLog(
+                    id=uuid.uuid4(),
+                    item_id=new_po_id,  # PO-level log (uses po UUID in item_id slot)
+                    from_status=None,
+                    to_status="FINANCEIRO",
+                    hash=override_hash,
+                    previous_hash=None,
+                    hash_version=AuditLog.HASH_VERSION_CURRENT,
+                    is_exception=True,
+                    justification=(
+                        f"Usuário {approver_email} aprovou o PO {po.po_number} com divergência financeira "
+                        f"de R$ {discrepancy_amount:.2f}."
+                    ),
+                    changed_by=user_uuid,
+                    created_at=now_override,
+                    extra_data={
+                        "decision": "FINANCIAL_OVERRIDE_APPROVED",
+                        "po_number": po.po_number,
+                        "approver_id": str(user_uuid),
+                        "approver_name": approver_name,
+                        "approver_email": approver_email,
+                        "discrepancy_amount_brl": round(discrepancy_amount, 2),
+                        "calculated_sum_brl": round(calculated_sum, 2),
+                        "po_total_value_brl": round(po_total, 2),
+                        "routed_to": "FINANCEIRO",
+                        "workflow": "FINANCIAL_MISMATCH_OVERRIDE",
+                        "timestamp": now_override.isoformat()
+                    }
+                )
+                db.add(override_audit_log)
+                db.flush()
+                print(
+                    f"[FF-HARDENING-004] Financial override audit log created for PO {po.po_number} "
+                    f"by {approver_email}. Discrepancy: R$ {discrepancy_amount:.2f}.",
+                    flush=True
+                )
 
             # 4. Process each item
             for item in po.items:

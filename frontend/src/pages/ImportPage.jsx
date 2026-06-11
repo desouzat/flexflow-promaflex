@@ -107,6 +107,8 @@ const ImportPage = () => {
     const [showFinanceModal, setShowFinanceModal] = useState(false)
     const [selectedFinanceItem, setSelectedFinanceItem] = useState(null)
     const [financeJustification, setFinanceJustification] = useState('')
+    // FF-HARDENING-004: financial override checkbox state
+    const [overrideAprovado, setOverrideAprovado] = useState(false)
     const [financeSubmitting, setFinanceSubmitting] = useState(false)
     const [sessionChecked, setSessionChecked] = useState(false) // Race-condition guard for session restoration
     const fileInputRef = useRef(null)
@@ -831,13 +833,16 @@ const ImportPage = () => {
         // Check if any PO has integrity errors
         const hasIntegrityErrors = stagingData?.po_list?.some(po => po.has_integrity_error) || false
 
+        // FF-HARDENING-004: Allow commit if operator explicitly checked "Aprovar com Divergência"
+        if (hasIntegrityErrors && !overrideAprovado) return false
+
         // Check if all POs have selected packaging type
         const allHavePackaging = stagingData?.po_list?.every(po => po.packaging_type && po.packaging_type.trim() !== '') || false
 
         // Check if all POs have selected business unit
         const allHaveBusinessUnit = stagingData?.po_list?.every(po => po.business_unit && po.business_unit.trim() !== '') || false
 
-        return allChecked && noErrors && !hasIntegrityErrors && allHavePackaging && allHaveBusinessUnit
+        return allChecked && noErrors && allHavePackaging && allHaveBusinessUnit
     }
 
     const handleCommitAll = async () => {
@@ -854,6 +859,7 @@ const ImportPage = () => {
 
             // Prepare payload with all 22 fields + metadata
             const payload = {
+                financial_override: overrideAprovado,  // FF-HARDENING-004
                 pos: validPOs.map(po => ({
                     po_number: po.po_number,
                     client_name: po.client_name,
@@ -1289,8 +1295,27 @@ const ImportPage = () => {
                                                     {currentPO.integrity_error_message || 'A soma dos itens não confere com o total do pedido.'}
                                                 </p>
                                                 <p className="text-xs text-red-700 mt-2">
-                                                    <strong>Ação necessária:</strong> Verifique os valores antes de marcar os itens como conferidos.
+                                                    <strong>Ação necessária:</strong> Verifique os valores ou use a opção abaixo para aprovar com divergência (registra log de auditoria imutável).
                                                 </p>
+                                                {/* FF-HARDENING-004: Override checkbox — only shown when mismatch exists */}
+                                                <label
+                                                    id="override-aprovado-label"
+                                                    className="flex items-center gap-2 mt-3 cursor-pointer select-none"
+                                                >
+                                                    <input
+                                                        id="checkbox-override-aprovado"
+                                                        type="checkbox"
+                                                        checked={overrideAprovado}
+                                                        onChange={e => setOverrideAprovado(e.target.checked)}
+                                                        className="w-4 h-4 accent-orange-500 rounded"
+                                                    />
+                                                    <span className="text-sm font-semibold text-orange-800">
+                                                        Aprovar com Divergência
+                                                    </span>
+                                                    <span className="text-xs text-orange-700">
+                                                        (o PO será encaminhado ao setor Financeiro e o evento será registrado no ledger de auditoria)
+                                                    </span>
+                                                </label>
                                             </div>
                                         </div>
                                     </div>

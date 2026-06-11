@@ -582,5 +582,9 @@ class ConfirmStagingPO(BaseModel):
 
 class ConfirmStagingPayload(BaseModel):
     pos: List[ConfirmStagingPO]
+    financial_override: bool = Field(
+        default=False,
+        description="If True, operator explicitly approved import despite financial mismatch. PO is routed to FINANCEIRO and an immutable audit log is created."
+    )
 
 
