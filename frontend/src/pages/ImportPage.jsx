@@ -836,18 +836,16 @@ const ImportPage = () => {
         const allChecked = allItemsChecked()
         const noErrors = calculateSummary().withErrors === 0
 
-        // Check if any PO has integrity errors
-        const hasIntegrityErrors = stagingData?.po_list?.some(po => po.has_integrity_error) || false
-
-        // FF-HARDENING-004: Allow commit if operator explicitly checked "Aprovar com Divergência"
-        if (hasIntegrityErrors && !overrideAprovado) return false
-
         // Check if all POs have selected packaging type
         const allHavePackaging = stagingData?.po_list?.every(po => po.packaging_type && po.packaging_type.trim() !== '') || false
 
         // Check if all POs have selected business unit
         const allHaveBusinessUnit = stagingData?.po_list?.every(po => po.business_unit && po.business_unit.trim() !== '') || false
 
+        // NOTE (FF-HARDENING-004.1): financial integrity mismatch does NOT block the button.
+        // The "Aprovar com Divergência" checkbox controls routing only (financial_override: true/false).
+        // Case A (checked): routed to PCP. Case B (unchecked): routed to Concluídos.
+        // Both cases write an immutable audit log. The operator always has a path forward.
         return allChecked && noErrors && allHavePackaging && allHaveBusinessUnit
     }
 
@@ -2123,7 +2121,7 @@ const ImportPage = () => {
                                     onClick={handleConfirmPO}
                                     disabled={!canCommit()}
                                     className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
-                                    title={!canCommit() ? 'Confira todos os itens e corrija erros antes de confirmar' : 'Confirmar todos os pedidos'}
+                                    title={!canCommit() ? 'Confira todos os itens, selecione embalagem e unidade de negócio antes de confirmar' : 'Confirmar todos os pedidos'}
                                 >
                                     <CheckCircle className="w-5 h-5 mr-2" />
                                     Confirmar Pedido
