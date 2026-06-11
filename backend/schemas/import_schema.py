@@ -142,7 +142,7 @@ class ImportItemData(BaseModel):
     """
     # Core required fields
     sku: str = Field(..., min_length=1, max_length=100)
-    quantity: int = Field(..., gt=0, description="Quantity must be positive")
+    quantity: float = Field(..., gt=0.0, description="Quantity must be positive")
     
     # Optional ONET fields
     description: Optional[str] = Field(None, max_length=500, description="Product description")
@@ -538,7 +538,7 @@ class ConfirmStagingItemExtra(BaseModel):
 
 class ConfirmStagingItem(BaseModel):
     sku: str
-    quantity: int
+    quantity: float
     price_unit: float
     unit_value: Optional[float] = None
     item_total_value: Optional[float] = None

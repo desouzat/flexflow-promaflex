@@ -8,6 +8,7 @@ import HelpModal from '../components/HelpModal'
 import FinanceApprovalModal from '../components/FinanceApprovalModal'
 import { getHelpForStatus } from '../config/helpConfig'
 import { calculateDynamicMargin, calculatePOMargins, parsePaymentTermsToDays } from '../utils/marginCalculator'
+import { cleanBrazilianNumber } from '../utils/numberUtils'
 
 const ITEMS_PER_PAGE = 10
 
@@ -89,25 +90,8 @@ const formatDate = (dateString) => {
 }
 
 
-// Robust Brazilian/Standard number parser
-const parseBrazilianNumber = (value) => {
-    if (value === null || value === undefined) return 0
-    if (typeof value === 'number') return value
-    
-    let cleaned = String(value).replace(/R\$/gi, '').replace(/\s+/g, '').trim()
-    if (!cleaned) return 0
-
-    const hasComma = cleaned.includes(',')
-    const dotCount = (cleaned.match(/\./g) || []).length
-
-    if (hasComma) {
-        cleaned = cleaned.replace(/\./g, '').replace(',', '.')
-    } else if (dotCount > 1) {
-        cleaned = cleaned.replace(/\./g, '')
-    }
-    
-    return parseFloat(cleaned) || 0
-}
+// Robust Brazilian/Standard number parser delegated to central utility
+const parseBrazilianNumber = (value) => cleanBrazilianNumber(value)
 
 const ImportPage = () => {
     const [selectedFile, setSelectedFile] = useState(null)
@@ -874,9 +858,9 @@ const ImportPage = () => {
                     po_number: po.po_number,
                     client_name: po.client_name,
                     business_unit: po.business_unit,
-                    freight_cost: po.freight_cost || 0,
-                    additional_costs: po.additional_costs || 0,
-                    po_total_value: po.po_total_value !== undefined && po.po_total_value !== null ? parseFloat(po.po_total_value) : null,
+                    freight_cost: cleanBrazilianNumber(po.freight_cost),
+                    additional_costs: cleanBrazilianNumber(po.additional_costs),
+                    po_total_value: po.po_total_value !== undefined && po.po_total_value !== null ? cleanBrazilianNumber(po.po_total_value) : null,
                     packaging_type: po.packaging_type || null,
                     items: po.items.map(item => {
                         const parsedPrice = parseBRL(item.unit_value !== null && item.unit_value !== undefined ? item.unit_value : item.price_unit)
@@ -1463,7 +1447,7 @@ const ImportPage = () => {
                                                     // Proportional rate apportionment
                                                     const poTotalGross = (currentPO.items || []).reduce((sum, it) => {
                                                         const pVal = parseBrazilianNumber(it.unit_value !== null && it.unit_value !== undefined ? it.unit_value : it.price_unit);
-                                                        return sum + (pVal * (parseInt(it.quantity) || 0));
+                                                        return sum + (pVal * (parseFloat(it.quantity) || 0));
                                                     }, 0);
                                                     const itemProportion = poTotalGross > 0 ? (itemGross / poTotalGross) : 0;
 

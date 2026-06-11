@@ -488,7 +488,7 @@ class OrderItem(Base):
         nullable=False
     )
     sku: Mapped[str] = mapped_column(String(100), nullable=False)
-    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    quantity: Mapped[float] = mapped_column(Numeric(14, 6), nullable=False)
     price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     status_item: Mapped[str] = mapped_column(String(50), nullable=False)
     extra_metadata: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)

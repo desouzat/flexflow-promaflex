@@ -460,7 +460,7 @@ class ImportService:
             ))
         else:
             qty_col = field_to_column[ImportFieldType.QUANTITY]
-            quantity, error = self.parse_integer(row[qty_col], "Quantity", row_number)
+            quantity, error = self.parse_decimal(row[qty_col], "Quantity", row_number)
             if error:
                 errors.append(error)
             else:

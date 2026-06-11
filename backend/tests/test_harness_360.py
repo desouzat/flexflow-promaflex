@@ -439,15 +439,15 @@ class TestRegressionStep2:
     """Regression: Step 2 (U-01) still passes after Step 3 changes."""
 
     @pytest.mark.parametrize("raw,expected", [
-        ("R$ 13.335,00", "13335.00"),
-        ("13.335,00", "13335.00"),
-        ("1.335,50", "1335.50"),
-        ("13335.00", "13335.00"),
-        ("13335,00", "13335.00"),
-        ("0,50", "0.50"),
-        ("INVALID", None),
-        (None, None),
-        (float("nan"), None),
+        ("R$ 13.335,00", 13335.0),
+        ("13.335,00", 13335.0),
+        ("1.335,50", 1335.5),
+        ("13335.00", 13335.0),
+        ("13335,00", 13335.0),
+        ("0,50", 0.5),
+        ("INVALID", 0.0),
+        (None, 0.0),
+        (float("nan"), 0.0),
     ])
     def test_r_u01_parametrized(self, raw, expected):
         """Parametrized regression of all SDD U-01 cases."""
@@ -457,14 +457,13 @@ class TestRegressionStep2:
     def test_r_u01_native_float(self):
         """Native float passthrough still works."""
         result = clean_brazilian_number(13335.00)
-        assert result is not None
-        assert abs(float(result) - 13335.0) < 0.001
+        assert result == 13335.0
 
     def test_r_critical_regression(self):
         """Old Strategy-B bug MUST remain fixed: 13.335,50 → 13335.50 (not 13.33550)."""
         result = clean_brazilian_number("13.335,50")
-        assert result == "13335.50", f"REGRESSION: got {result!r}"
-        assert Decimal(result) == Decimal("13335.50")
+        assert result == 13335.5, f"REGRESSION: got {result!r}"
+        assert Decimal(str(result)) == Decimal("13335.5")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -622,6 +621,7 @@ class TestConfirmStagingEndpoint:
                 {
                   "po_number": po_num,
                   "client_name": "Nova Promaflex SA",
+                  "business_unit": "Outros",
                   "freight_cost": 150.0,
                   "additional_costs": 50.0,
                   "po_total_value": 1200.0,
@@ -708,7 +708,7 @@ class TestConfirmStagingEndpoint:
             permissions=[],
             is_active=test_user.is_active
         )
-        res_dict = await confirm_staging(payload=payload_obj, current_user=user_info, db=db)
+        res_dict = confirm_staging(payload=payload_obj, current_user=user_info, db=db)
         assert res_dict["success"] is True
         assert "confirmada com sucesso" in res_dict["message"]
 

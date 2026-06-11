@@ -13,7 +13,7 @@ class POItemResponse(BaseModel):
     """Purchase Order Item response"""
     id: str = Field(..., description="Item ID")
     sku: str = Field(..., description="Product SKU")
-    quantity: int = Field(..., description="Item quantity")
+    quantity: float = Field(..., description="Item quantity")
     price: Decimal = Field(..., description="Unit price")
     status_item: str = Field(..., description="Item status")
     margin_item: Optional[Any] = Field(None, description="Item margin")

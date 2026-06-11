@@ -63,7 +63,7 @@ class PartitionItemResponse(BaseModel):
     """Item information for partition UI"""
     id: str
     sku: str
-    quantity: int
+    quantity: float
     price: Decimal
     total_value: Decimal
     status_item: str

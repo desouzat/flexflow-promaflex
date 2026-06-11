@@ -26,12 +26,12 @@ _CURRENCY_PREFIX_RE = re.compile(r'R\$|\$', re.IGNORECASE)
 _WHITESPACE_RE = re.compile(r'\s+')
 
 
-def clean_brazilian_number(value: Any) -> Optional[str]:
+def clean_brazilian_number(value: Any) -> float:
     """
-    Normalize a Brazilian currency or number string to a standard decimal string.
+    Normalize a Brazilian currency or number string to a standard float.
 
     Decision tree:
-        1. Reject None, NaN, or non-stringifiable inputs → return None
+        1. Reject None, NaN, or non-stringifiable inputs → return 0.0
         2. Strip currency symbols ('R$', '$') and whitespace
         3. If value contains a comma:
                Remove all dots (thousands separators) → replace comma with dot (decimal)
@@ -42,101 +42,83 @@ def clean_brazilian_number(value: Any) -> Optional[str]:
         5. If value has no comma and one dot (or no dot):
                Already in standard format → pass through
                e.g., "13335.00" → "13335.00"
-        6. Validate the resulting string is a finite non-negative number
-        7. Return the cleaned string, or None on any failure
+        6. Validate the resulting string is a finite non-negative float
+        7. Return the cleaned float, or 0.0 on any failure
 
     Args:
         value: Input to clean. Can be str, int, float, or Decimal.
 
     Returns:
-        A standard decimal string (e.g., "13335.00") suitable for Decimal() conversion,
-        or None if the value cannot be parsed (including negative numbers).
+        A float (e.g., 13335.00) representing the value, or 0.0 if not valid.
 
     Examples:
         >>> clean_brazilian_number("R$ 13.335,00")
-        '13335.00'
-        >>> clean_brazilian_number("13.335,00")
-        '13335.00'
-        >>> clean_brazilian_number("1.335,50")
-        '1335.50'
-        >>> clean_brazilian_number("13335.00")
-        '13335.00'
-        >>> clean_brazilian_number("13335,00")
-        '13335.00'
-        >>> clean_brazilian_number("0,50")
-        '0.50'
+        13335.0
+        >>> clean_brazilian_number("108.753,123456")
+        108753.123456
         >>> clean_brazilian_number("INVALID")
-        >>> clean_brazilian_number(None)
-        >>> clean_brazilian_number(float("nan"))
-        >>> clean_brazilian_number(13335.00)
-        '13335.0'
+        0.0
     """
-    # ── Step 1: Handle None / NaN / non-numeric passthrough ──────────────────
     if value is None:
-        return None
+        return 0.0
 
-    # Handle native float NaN / Inf
-    if isinstance(value, float):
+    # Handle native numeric types first
+    if isinstance(value, (int, float)):
         if math.isnan(value) or math.isinf(value):
-            return None
-        # Finite float: convert directly to string — Python's str() gives standard notation
-        cleaned = str(value)
-        # Validate non-negative
+            return 0.0
+        return float(value) if value >= 0.0 else 0.0
+
+    from decimal import Decimal
+    if isinstance(value, Decimal):
         try:
-            f = float(cleaned)
-            return cleaned if f >= 0 else None
-        except ValueError:
-            return None
+            f = float(value)
+            if math.isnan(f) or math.isinf(f):
+                return 0.0
+            return f if f >= 0.0 else 0.0
+        except (ValueError, TypeError):
+            return 0.0
 
-    # Handle int passthrough
-    if isinstance(value, int):
-        return str(value) if value >= 0 else None
-
-    # ── Step 2: Coerce to string ──────────────────────────────────────────────
+    # Coerce to string
     try:
         raw = str(value).strip()
     except Exception:
-        return None
+        return 0.0
 
-    if not raw:
-        return None
+    if not raw or raw.upper() == "N/A":
+        return 0.0
 
-    # ── Step 3: Remove currency symbols and whitespace ────────────────────────
+    # Remove currency symbols and whitespace
     cleaned = _CURRENCY_PREFIX_RE.sub('', raw)
     cleaned = _WHITESPACE_RE.sub('', cleaned)
     cleaned = cleaned.strip()
 
     if not cleaned:
-        return None
+        return 0.0
 
-    # ── Step 4: Remove trailing/leading non-numeric fringe characters (e.g. "-") ─
     # Allow: digits, dot, comma, leading minus
-    # Reject anything else
     if not re.match(r'^-?[\d.,]+$', cleaned):
-        return None
+        return 0.0
 
-    # ── Step 5: Apply Brazilian format conversion ─────────────────────────────
+    # Apply Brazilian format conversion
     has_comma = ',' in cleaned
     dot_count = cleaned.count('.')
 
     if has_comma:
         # Brazilian format: dots are thousands separators, comma is the decimal separator
-        # "13.335,00" → remove dots → "13335,00" → replace comma → "13335.00"
         cleaned = cleaned.replace('.', '').replace(',', '.')
     elif dot_count > 1:
         # Multiple dots and no comma: all dots are thousands separators (no decimal part)
-        # "13.335.000" → "13335000"
         cleaned = cleaned.replace('.', '')
-    # else: single dot or no dot → already standard format ("13335.00" or "13335")
 
-    # ── Step 6: Final validation ──────────────────────────────────────────────
+    # Final validation and float conversion
     try:
         numeric = float(cleaned)
         if math.isnan(numeric) or math.isinf(numeric):
-            return None
+            return 0.0
         # Reject negative numbers
-        if numeric < 0:
-            return None
-        return cleaned
+        if numeric < 0.0:
+            return 0.0
+        return numeric
     except (ValueError, TypeError):
-        return None
+        return 0.0
+
