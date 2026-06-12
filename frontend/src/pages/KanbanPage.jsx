@@ -2425,7 +2425,7 @@ const KanbanPage = () => {
                                                                                                                 console.log('[F12 TRACE 1] Upload button clicked for field: foto_carga_path (Substituir)')
                                                                                                                 e.stopPropagation()
                                                                                                                 setActiveUploadPoId(selectedPO?.id)
-                                                                                                                globalTruckInputRef.current?.click()
+                                                                                                                setTimeout(() => { globalTruckInputRef.current?.click() }, 150)
                                                                                                             }}
                                                                                                             className="inline-flex items-center gap-1 text-[10px] text-gray-600 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded px-2 py-0.5 cursor-pointer transition-colors"
                                                                                                         >
@@ -2440,7 +2440,7 @@ const KanbanPage = () => {
                                                                                                         console.log('[F12 TRACE 1] Upload button clicked for field: foto_carga_path (Enviar Foto)')
                                                                                                         e.stopPropagation()
                                                                                                         setActiveUploadPoId(selectedPO?.id)
-                                                                                                        globalTruckInputRef.current?.click()
+                                                                                                        setTimeout(() => { globalTruckInputRef.current?.click() }, 150)
                                                                                                     }}
                                                                                                     disabled={isPhaseADisabled}
                                                                                                     className={`flex items-center justify-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg transition-colors text-xs font-semibold shadow-xs ${isPhaseADisabled ? 'cursor-not-allowed opacity-50 bg-orange-400' : 'hover:bg-orange-700 cursor-pointer'}`}
@@ -2477,7 +2477,7 @@ const KanbanPage = () => {
                                                                                                                 console.log('[F12 TRACE 1] Upload button clicked for field: foto_canhoto_path (Substituir)')
                                                                                                                 e.stopPropagation()
                                                                                                                 setActiveUploadPoId(selectedPO?.id)
-                                                                                                                globalReceiptInputRef.current?.click()
+                                                                                                                setTimeout(() => { globalReceiptInputRef.current?.click() }, 150)
                                                                                                             }}
                                                                                                             className="inline-flex items-center gap-1 text-[10px] text-gray-600 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded px-2 py-0.5 cursor-pointer transition-colors"
                                                                                                         >
@@ -2492,7 +2492,7 @@ const KanbanPage = () => {
                                                                                                         console.log('[F12 TRACE 1] Upload button clicked for field: foto_canhoto_path (Enviar Foto)')
                                                                                                         e.stopPropagation()
                                                                                                         setActiveUploadPoId(selectedPO?.id)
-                                                                                                        globalReceiptInputRef.current?.click()
+                                                                                                        setTimeout(() => { globalReceiptInputRef.current?.click() }, 150)
                                                                                                     }}
                                                                                                     disabled={isPhaseADisabled}
                                                                                                     className={`flex items-center justify-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg transition-colors text-xs font-semibold shadow-xs ${isPhaseADisabled ? 'cursor-not-allowed opacity-50 bg-orange-400' : 'hover:bg-orange-700 cursor-pointer'}`}

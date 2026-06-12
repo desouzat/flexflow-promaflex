@@ -1,0 +1,107 @@
+INFO:     Started server process [30768]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8001 (Press CTRL+C to quit)
+[DEBUG] Procurando .env em: C:\Documentos\BotCase\FlexFlow\backend\.env
+[DEBUG] Arquivo .env existe: True
+[DEBUG] DATABASE_URL carregada: postgresql://flexflow_app:Souza%40123@127.0.0.1:5434/flexflow_prod
+[DEBUG] Initializing database engine...
+[DEBUG] Conectando ao banco em: postgresql://flexflow_app:Souza%40123@127.0.0.1:5434/flexflow_prod
+DEBUG: Connecting to DB via Unix Socket: 127.0.0.1:5434/flexflow_prod
+[DEBUG] Pepper loaded in users router: True
+[2026-06-12 18:48:18] Starting FlexFlow API...
+[2026-06-12 18:48:18] FlexFlow API started successfully
+[DEBUG] Starting background DB schema initialization...
+added 'area' column to users table skipped/failed (likely already exists): (psycopg2.errors.DuplicateColumn) column "area" of relation "users" already exists
+
+[SQL: ALTER TABLE users ADD COLUMN area VARCHAR(100)]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+Successfully initialized client_preferences table.
+Successfully initialized SupportTickets table.
+Successfully initialized GlobalConfig table.
+[DEBUG] Background DB schema initialization completed.
+[2026-06-12 18:48:27] [REQUEST] POST /api/auth/login
+
+================================================================================
+[AUTH MIDDLEWARE] Request received: POST /api/auth/login
+[HEADERS] All Headers:
+  - host: 127.0.0.1:8001
+  - user-agent: python-requests/2.32.5
+  - accept-encoding: gzip, deflate
+  - accept: */*
+  - connection: keep-alive
+  - content-length: 57
+  - content-type: application/json
+================================================================================
+
+
+================================================================================
+[AUTH LOGIN] Token Payload BEFORE encoding:
+  - sub (user_id): a39e3176-55ac-460e-bcd2-958068737b0b
+  - tenant_id: 23c431b9-da55-4098-9628-c86df8070b7c
+  - email: thiago@botcase.net
+  - name: Thiago BotCase
+  - role: admin
+  - permissions: ['po.create', 'po.read', 'po.update', 'po.approve_comercial', 'po.approve_pcp', 'po.approve_producao', 'po.complete_expedicao', 'po.complete_faturamento', 'po.approve_despacho']
+  - SECRET_KEY (first 20 chars): botcase_flexflow_pro... [loaded from env: YES]
+  - ALGORITHM: HS256
+================================================================================
+
+
+================================================================================
+[AUTH LOGIN] Token GENERATED:
+  - Token (first 50 chars): eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhM...
+  - Token (last 50 chars): ...DkwN30.Q9S-Jrk_rfUo9b-hGtWD25yPVvPvFXw54NbPlimPZD0
+  - Token length: 592 chars
+  - Expires in: 1440 minutes
+================================================================================
+
+[2026-06-12 18:48:27] [RESPONSE] POST /api/auth/login - Status: 200
+INFO:     127.0.0.1:58879 - "POST /api/auth/login HTTP/1.1" 200 OK
+[2026-06-12 18:48:27] [REQUEST] POST /api/kanban/pos/d308a538-e5a3-4a3d-9367-840ded311d94/upload-cargo-photo
+
+================================================================================
+[AUTH MIDDLEWARE] Request received: POST /api/kanban/pos/d308a538-e5a3-4a3d-9367-840ded311d94/upload-cargo-photo
+[HEADERS] All Headers:
+  - host: 127.0.0.1:8001
+  - user-agent: python-requests/2.32.5
+  - accept-encoding: gzip, deflate
+  - accept: */*
+  - connection: keep-alive
+  - authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdW...b-hGtWD25yPVvPvFXw54NbPlimPZD0
+  - content-length: 336
+  - content-type: multipart/form-data; boundary=eba068728353346ad302fea963df1309
+================================================================================
+
+STEP 1: Request received at backend
+STEP 2: File name received: test_cargo_fake.jpg
+C:\Users\Thiago\AppData\Local\Programs\Python\Python310\lib\site-packages\google\api_core\_python_version_support.py:273: FutureWarning: You are using a Python version (3.10.11) which Google will stop supporting in new releases of google.api_core once it reaches its end of life (2026-10-04). Please upgrade to the latest Python version, or at least Python 3.11, to continue receiving updates for google.api_core past that date.
+  warnings.warn(message, FutureWarning)
+DEBUG GCS: Attempting to access bucket flexflow-attachments-224292950652
+DEBUG GCS: Client initialized with project flexflow-promaflex
+STEP 3: Calling GCS Service...
+[GCS] Uploaded to: https://storage.googleapis.com/flexflow-attachments-224292950652/attachments/d308a538-e5a3-4a3d-9367-840ded311d94/1781300912_test_cargo_fake.jpg
+DEBUG: Saving GCS file to https://storage.googleapis.com/flexflow-attachments-224292950652/attachments/d308a538-e5a3-4a3d-9367-840ded311d94/1781300912_test_cargo_fake.jpg
+[2026-06-12 18:48:33] [RESPONSE] POST /api/kanban/pos/d308a538-e5a3-4a3d-9367-840ded311d94/upload-cargo-photo - Status: 200
+INFO:     127.0.0.1:58882 - "POST /api/kanban/pos/d308a538-e5a3-4a3d-9367-840ded311d94/upload-cargo-photo HTTP/1.1" 200 OK
+[2026-06-12 18:48:33] [REQUEST] POST /api/kanban/pos/d308a538-e5a3-4a3d-9367-840ded311d94/upload-receipt-photo
+
+================================================================================
+[AUTH MIDDLEWARE] Request received: POST /api/kanban/pos/d308a538-e5a3-4a3d-9367-840ded311d94/upload-receipt-photo
+[HEADERS] All Headers:
+  - host: 127.0.0.1:8001
+  - user-agent: python-requests/2.32.5
+  - accept-encoding: gzip, deflate
+  - accept: */*
+  - connection: keep-alive
+  - authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdW...b-hGtWD25yPVvPvFXw54NbPlimPZD0
+  - content-length: 338
+  - content-type: multipart/form-data; boundary=b8da926a3152dc41c4313a52401ec6d2
+================================================================================
+
+DEBUG GCS: Attempting to access bucket flexflow-attachments-224292950652
+DEBUG GCS: Client initialized with project flexflow-promaflex
+[GCS] Uploaded to: https://storage.googleapis.com/flexflow-attachments-224292950652/attachments/d308a538-e5a3-4a3d-9367-840ded311d94/1781300913_test_canhoto_fake.jpg
+DEBUG: Saving GCS file to https://storage.googleapis.com/flexflow-attachments-224292950652/attachments/d308a538-e5a3-4a3d-9367-840ded311d94/1781300913_test_canhoto_fake.jpg
+[2026-06-12 18:48:34] [RESPONSE] POST /api/kanban/pos/d308a538-e5a3-4a3d-9367-840ded311d94/upload-receipt-photo - Status: 200
+INFO:     127.0.0.1:64418 - "POST /api/kanban/pos/d308a538-e5a3-4a3d-9367-840ded311d94/upload-receipt-photo HTTP/1.1" 200 OK
