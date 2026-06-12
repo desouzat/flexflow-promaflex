@@ -720,8 +720,10 @@ const KanbanPage = () => {
             formData.append('file', file)
 
             const poId = selectedPO.id
-            const suffix = field === 'foto_carga_path' ? '/upload-cargo-photo' : '/upload-receipt-photo'
-            const endpoint = window.location.origin + '/api/kanban/pos/' + poId + suffix
+            const suffix = field === 'foto_carga_path' ? 'upload-cargo-photo' : 'upload-receipt-photo'
+            // Use the api instance's baseURL (/api) so auth headers + interceptors apply cleanly.
+            // Relative path: api.baseURL + /kanban/pos/{id}/upload-cargo-photo
+            const endpoint = `/kanban/pos/${poId}/${suffix}`
 
             const response = await api.post(endpoint, formData, {
                 headers: {

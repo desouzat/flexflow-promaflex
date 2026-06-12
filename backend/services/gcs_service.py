@@ -1,11 +1,27 @@
 """
-FlexFlow GCS Service
-Handles file uploads to Google Cloud Storage with validation, unique naming, and content-type headers.
+FlexFlow GCS Service — with Local Filesystem Fallback
+Handles file uploads to Google Cloud Storage with validation, unique naming,
+and content-type headers.
+
+Fallback Strategy (FF-HARDENING-008):
+  If GCS write returns 403 (missing storage.objects.create IAM permission) or
+  any other storage error, the service saves the file to backend/uploads/ and
+  returns a local /api/uploads/download?path=... URL instead.  This ensures
+  uploads work immediately in the local-dev / broken-IAM scenario without any
+  code change on the caller side — the caller receives the same (url, filename)
+  tuple regardless of which storage backend was used.
+
+Async-safety fix (FF-HARDENING-008):
+  blob.upload_from_file() is a blocking synchronous GCS call.  Running it
+  directly inside an `async def` FastAPI handler blocks the uvicorn event loop.
+  We now use asyncio.get_event_loop().run_in_executor(None, ...) to offload
+  the blocking I/O to the default thread-pool, keeping the event loop free.
 """
 
 import os
 import io
 import time
+import asyncio
 import logging
 from pathlib import Path, PureWindowsPath
 from typing import Tuple, Optional
@@ -38,41 +54,59 @@ def get_safe_filename(filename: str) -> str:
     return PureWindowsPath(filename).name
 
 
+# ── Local uploads directory (fallback when GCS write is unavailable) ──────────
+# Resolved relative to this file's location: backend/services/ → backend/uploads/
+_LOCAL_UPLOADS_DIR = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "uploads")
+)
+
+
+def _save_locally(content: bytes, blob_name: str) -> str:
+    """
+    Save *content* to the local uploads directory, mirroring the GCS blob path.
+    Returns the local filesystem path (not a URL; the caller constructs the URL).
+    """
+    local_path = os.path.join(_LOCAL_UPLOADS_DIR, blob_name.replace("/", os.sep))
+    os.makedirs(os.path.dirname(local_path), exist_ok=True)
+    with open(local_path, "wb") as fh:
+        fh.write(content)
+    return local_path
+
+
 class GCSService:
-    """Service for handling file uploads directly to Google Cloud Storage"""
-    
+    """Service for handling file uploads — GCS primary, local filesystem fallback."""
+
     ALLOWED_EXTENSIONS = {
         '.pdf': 'application/pdf',
         '.jpg': 'image/jpeg',
         '.jpeg': 'image/jpeg',
         '.png': 'image/png'
     }
-    
-    MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB in bytes
-    
+
+    MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
+
     def __init__(self):
-        """Initialize Google Cloud Storage Client"""
+        """Initialize Google Cloud Storage Client."""
         self.bucket_name = os.getenv("GCP_BUCKET_NAME", "flexflow-attachments-224292950652")
         self.client = None
         self.bucket = None
-        
+
         if not GCS_AVAILABLE:
-            logger.error("GCS_AVAILABLE is False. Google Cloud Storage will not be functional.")
+            logger.warning("google-cloud-storage not importable — uploads will use local fallback.")
             return
-        
+
         # Local development credentials detection
         local_key_path = "backend/gcp-key.json"
         if os.path.exists(local_key_path) and not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
             os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(local_key_path)
             logger.info(f"Loaded local GCP credentials from {local_key_path}")
-            
+
         try:
-            bucket_name = self.bucket_name
-            print(f"DEBUG GCS: Attempting to access bucket {bucket_name}", flush=True)
+            print(f"DEBUG GCS: Attempting to access bucket {self.bucket_name}", flush=True)
             storage_client = storage.Client()
             self.client = storage_client
             print(f"DEBUG GCS: Client initialized with project {storage_client.project}", flush=True)
-            self.bucket = storage_client.bucket(bucket_name)
+            self.bucket = storage_client.bucket(self.bucket_name)
         except Exception as e:
             print(f"DEBUG GCS ERROR: Failed to initialize/access bucket: {e}", flush=True)
             logger.error(f"Failed to initialize GCS Client: {e}")
@@ -99,55 +133,76 @@ class GCSService:
 
     async def upload_file(self, file: UploadFile, identifier: str) -> Tuple[str, str]:
         """
-        Upload file to GCS with unique naming:
-        attachments/{identifier}/{timestamp}_{original_filename}
-        
-        Sets proper Content-Type metadata during upload using upload_from_file.
+        Upload file to GCS (primary) or local filesystem (fallback).
+
+        Returns a tuple (public_url, safe_filename) regardless of which backend
+        was used, so all callers remain identical.
+
+        Async-safety: the blocking GCS I/O is offloaded to a thread-pool executor
+        so the uvicorn event loop is never blocked.
         """
         is_valid, error_msg = self.validate_file(file)
         if not is_valid:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=error_msg
-            )
-            
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
+
         content = await file.read()
         if len(content) > self.MAX_FILE_SIZE:
             size_mb = self.MAX_FILE_SIZE / (1024 * 1024)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"File size exceeds {size_mb}MB limit"
+                detail=f"File size exceeds {size_mb:.0f}MB limit"
             )
-            
-        if not self.bucket:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="GCS storage service is not initialized"
-            )
-            
-        # Unique Naming Strategy — use PureWindowsPath to handle Windows-browser uploads
-        # where the filename may contain full Windows paths (e.g. C:\Users\John\file.jpg).
+
+        # ── Build canonical blob name ─────────────────────────────────────────
         safe_filename = get_safe_filename(file.filename) if file.filename else "unknown"
-        timestamp = int(time.time())
-        blob_name = f"attachments/{identifier}/{timestamp}_{safe_filename}"
-        
-        # Determine content type
-        file_ext = Path(safe_filename).suffix.lower()
+        timestamp     = int(time.time())
+        blob_name     = f"attachments/{identifier}/{timestamp}_{safe_filename}"
+
+        # ── Determine content type ────────────────────────────────────────────
+        file_ext     = Path(safe_filename).suffix.lower()
         content_type = self.ALLOWED_EXTENSIONS.get(file_ext, file.content_type or "application/octet-stream")
-        
+
+        # ── Attempt GCS upload ────────────────────────────────────────────────
+        if self.bucket is not None:
+            try:
+                blob      = self.bucket.blob(blob_name)
+                file_like = io.BytesIO(content)
+
+                # FF-HARDENING-008: run blocking GCS I/O in a thread-pool so the
+                # asyncio event loop is never blocked by synchronous network I/O.
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(
+                    None,
+                    lambda: blob.upload_from_file(file_like, content_type=content_type)
+                )
+
+                public_url = f"https://storage.googleapis.com/{self.bucket_name}/{blob_name}"
+                print(f"[GCS] Uploaded to: {public_url}", flush=True)
+                return public_url, safe_filename
+
+            except Exception as e:
+                # 403 = missing storage.objects.create — fall through to local backup
+                err_str = str(e)
+                print(f"[GCS] Upload failed ({type(e).__name__}): {err_str[:200]}", flush=True)
+                logger.warning(
+                    f"GCS upload failed for {blob_name}: {e}. "
+                    "Falling back to local filesystem storage."
+                )
+                # Fall through to local fallback below
+        else:
+            print("[GCS] Bucket not initialized — using local filesystem fallback.", flush=True)
+
+        # ── Local filesystem fallback ─────────────────────────────────────────
         try:
-            blob = self.bucket.blob(blob_name)
-            
-            # Wrap content in a file-like object to call upload_from_file for Harness H-20
-            file_like = io.BytesIO(content)
-            blob.upload_from_file(file_like, content_type=content_type)
-            
-            # Return the GCS Public URL and original filename
-            public_url = f"https://storage.googleapis.com/{self.bucket_name}/{blob_name}"
-            return public_url, safe_filename
-        except Exception as e:
-            logger.error(f"GCS upload failed for {blob_name}: {e}")
+            local_path = _save_locally(content, blob_name)
+            # Construct a URL the backend's /api/uploads/download endpoint can serve
+            local_url  = f"/api/uploads/download?path={blob_name.replace(os.sep, '/')}"
+            print(f"[LOCAL] Saved to: {local_path}", flush=True)
+            print(f"[LOCAL] Serving via: {local_url}", flush=True)
+            return local_url, safe_filename
+        except Exception as local_err:
+            logger.error(f"Local fallback also failed for {blob_name}: {local_err}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to upload file to storage: {str(e)}"
+                detail=f"Failed to store file (GCS and local fallback both failed): {local_err}"
             )
