@@ -53,6 +53,11 @@ class POResponse(BaseModel):
     created_at: datetime = Field(..., description="Creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
     created_by: Optional[str] = Field(None, description="Creator user ID")
+    # SLA Justification fields (FF-HARDENING-006)
+    sla_justification_category: Optional[str] = Field(None, description="SLA failure mode category")
+    sla_justification_text: Optional[str] = Field(None, description="SLA justification detail text")
+    sla_justification_user: Optional[str] = Field(None, description="Email of user who saved the justification")
+    sla_justification_at: Optional[datetime] = Field(None, description="UTC timestamp when justification was saved")
 
 
 class KanbanColumn(BaseModel):
@@ -152,3 +157,58 @@ class UpdateLogisticsChecklistResponse(BaseModel):
     checklist_complete: bool = Field(..., description="Whether all checklist items are complete")
     can_dispatch: bool = Field(..., description="Whether dispatch can be completed")
     po: POResponse = Field(..., description="The updated Purchase Order object")
+
+
+# ── SLA Justification schemas (FF-HARDENING-006) ──────────────────────────────
+
+SLA_FAILURE_MODES = [
+    "Falta de Energia",
+    "Falta de Água / Falha nos Chillers",
+    "Instabilidade de Ar Comprimido",
+    "Máquina Quebrada (Extrusora/Sopradora/Corte-Solda)",
+    "Manutenção Não Planejada",
+    "Falta de Operador",
+    "Outros",
+]
+
+
+class SlaJustificationRequest(BaseModel):
+    """Request body to save an SLA justification on a Purchase Order."""
+    sla_justification_category: str = Field(
+        ...,
+        description=f"Must be one of: {SLA_FAILURE_MODES}"
+    )
+    sla_justification_text: Optional[str] = Field(
+        None,
+        description="Mandatory when sla_justification_category is 'Outros'. Optional otherwise.",
+        max_length=2000,
+    )
+
+    @validator('sla_justification_category')
+    def validate_category(cls, v):
+        if v not in SLA_FAILURE_MODES:
+            raise ValueError(
+                f"Categoria inválida. Deve ser uma das opções: {SLA_FAILURE_MODES}"
+            )
+        return v
+
+    @validator('sla_justification_text', always=True)
+    def validate_text_required_for_outros(cls, v, values):
+        category = values.get('sla_justification_category', '')
+        if category == 'Outros' and not (v and v.strip()):
+            raise ValueError(
+                "O campo 'Detalhamento da Justificativa' é obrigatório quando a categoria é 'Outros'."
+            )
+        return v
+
+
+class SlaJustificationResponse(BaseModel):
+    """Response after saving an SLA justification."""
+    success: bool
+    message: str
+    po_id: str
+    sla_justification_category: str
+    sla_justification_text: Optional[str]
+    sla_justification_user: str
+    sla_justification_at: datetime
+    audit_hash: str = Field(..., description="SHA-256 hash of the immutable audit log entry")

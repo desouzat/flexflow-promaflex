@@ -21,7 +21,9 @@ from backend.schemas.kanban_schema import (
     UpdateCommissionRequest,
     UpdateCommissionResponse,
     UpdateLogisticsChecklistRequest,
-    UpdateLogisticsChecklistResponse
+    UpdateLogisticsChecklistResponse,
+    SlaJustificationRequest,
+    SlaJustificationResponse,
 )
 from backend.schemas.auth_schema import UserInfo
 from backend.database import get_db
@@ -204,7 +206,12 @@ def _map_single_po(po: PurchaseOrder, db: Session, is_privileged: bool) -> PORes
         parent_po_id=str(po.parent_po_id) if po.parent_po_id else None,
         created_at=po.created_at,
         updated_at=po.updated_at,
-        created_by=str(po.creator.id) if (po.creator and po.creator.id) else (str(po.created_by) if po.created_by else None)
+        created_by=str(po.creator.id) if (po.creator and po.creator.id) else (str(po.created_by) if po.created_by else None),
+        # SLA Justification fields (FF-HARDENING-006)
+        sla_justification_category=po.sla_justification_category,
+        sla_justification_text=po.sla_justification_text,
+        sla_justification_user=po.sla_justification_user,
+        sla_justification_at=po.sla_justification_at,
     )
 
 
@@ -3022,3 +3029,130 @@ async def upload_receipt_photo(
     is_privileged = current_user.role.lower() in ["admin", "master"]
     mapped_po = _map_single_po(po, db, is_privileged)
     return {"success": True, "po": mapped_po}
+
+
+# ============================================================================
+# FF-HARDENING-006: SLA Justification Endpoint
+# ============================================================================
+
+@router.post(
+    "/pos/{po_id}/sla-justification",
+    response_model=SlaJustificationResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def save_sla_justification(
+    po_id: str,
+    payload: SlaJustificationRequest,
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Save an SLA failure-mode justification on any Purchase Order card.
+
+    Business rules (FF-HARDENING-006):
+    - Visible and editable on ALL PO cards regardless of SLA status.
+    - Saving a justification NEVER pauses or modifies the SLA chronometer.
+    - Auto-populates sla_justification_user (email) and sla_justification_at (UTC now).
+    - Writes an immutable SHA-256 audit log entry with action 'SLA_JUSTIFICADO'.
+    """
+    from backend.models import AuditLog, get_last_audit_hash
+
+    # ── 1. Resolve PO ──────────────────────────────────────────────────────────
+    try:
+        po_uuid = uuid.UUID(po_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Purchase Order não encontrado.")
+
+    po = db.query(PurchaseOrder).filter(
+        PurchaseOrder.id == po_uuid,
+        PurchaseOrder.tenant_id == current_user.tenant_id,
+    ).first()
+
+    if not po:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Purchase Order não encontrado.")
+
+    # ── 2. Save justification fields (NEVER touches sla_paused_at / total_hold_time_seconds) ─
+    now_utc = datetime.utcnow()
+    po.sla_justification_category = payload.sla_justification_category
+    po.sla_justification_text     = payload.sla_justification_text or None
+    po.sla_justification_user     = current_user.email
+    po.sla_justification_at       = now_utc
+    po.updated_at                 = now_utc
+
+    # ── 3. Immutable audit log — SHA-256 ledger entry (action: SLA_JUSTIFICADO) ─
+    # AuditLog.item_id is FK→order_items; we use the first item of the PO.
+    # If the PO somehow has no items, we skip the audit log (non-fatal) and note it.
+    audit_hash = "N/A"
+    if po.items:
+        first_item = po.items[0]
+        changed_by_uuid = uuid.UUID(str(current_user.id)) if current_user.id else None
+        previous_hash   = get_last_audit_hash(db, first_item.id)
+
+        audit_hash = AuditLog.calculate_hash_for_version(
+            version=AuditLog.HASH_VERSION_CURRENT,
+            tenant_id=po.tenant_id,
+            item_id=first_item.id,
+            from_status=po.status_macro,     # SLA justification does NOT change status
+            to_status=po.status_macro,        # same value — status is unchanged
+            timestamp=now_utc,
+            previous_hash=previous_hash,
+            changed_by=changed_by_uuid,
+        )
+
+        audit_entry = AuditLog(
+            item_id=first_item.id,
+            from_status=po.status_macro,
+            to_status=po.status_macro,
+            hash=audit_hash,
+            previous_hash=previous_hash,
+            hash_version=AuditLog.HASH_VERSION_CURRENT,
+            is_exception=False,
+            justification=payload.sla_justification_text,
+            changed_by=changed_by_uuid,
+            extra_data={
+                "action":                    "SLA_JUSTIFICADO",
+                "po_id":                     str(po.id),
+                "po_number":                 po.po_number,
+                "sla_justification_category": payload.sla_justification_category,
+                "sla_justification_text":    payload.sla_justification_text or "",
+                "sla_justification_user":    current_user.email,
+                "sla_justification_at":      now_utc.isoformat(),
+                "user_role":                 current_user.role,
+                "sla_chronometer_paused":    False,   # immutable business rule marker
+            },
+        )
+        db.add(audit_entry)
+    else:
+        print(
+            f"[SLA-JUSTIFICATION] WARNING: PO {po_id} has no items — "
+            "skipping audit log entry (justification fields still saved)."
+        )
+
+    # ── 4. Persist ─────────────────────────────────────────────────────────────
+    try:
+        db.commit()
+        db.refresh(po)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Falha ao salvar justificativa SLA: {str(exc)}",
+        ) from exc
+
+    print(
+        f"[SLA-JUSTIFICATION] PO={po.po_number} | "
+        f"Category={po.sla_justification_category} | "
+        f"User={po.sla_justification_user} | "
+        f"AuditHash={audit_hash[:16]}..."
+    )
+
+    return SlaJustificationResponse(
+        success=True,
+        message=f"Justificativa SLA salva com sucesso para o pedido {po.po_number}.",
+        po_id=str(po.id),
+        sla_justification_category=po.sla_justification_category,
+        sla_justification_text=po.sla_justification_text,
+        sla_justification_user=po.sla_justification_user,
+        sla_justification_at=po.sla_justification_at,
+        audit_hash=audit_hash,
+    )

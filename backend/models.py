@@ -298,7 +298,30 @@ class PurchaseOrder(Base):
         nullable=False,
         comment="Accumulated pause time in seconds for SLA freeze"
     )
-    
+
+    # SLA Justification fields (FF-HARDENING-006)
+    # These are ANNOTATION-ONLY. Saving a justification NEVER pauses the SLA chronometer.
+    sla_justification_category: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="Failure mode / justification category (dropdown selection)"
+    )
+    sla_justification_text: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Free-text detail for the SLA justification (mandatory when category='Outros')"
+    )
+    sla_justification_user: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="Email of the user who last saved the SLA justification"
+    )
+    sla_justification_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="UTC timestamp when the SLA justification was last saved"
+    )
+
     # Financial fields (22-field ONET structure)
     po_total_value: Mapped[Optional[float]] = mapped_column(
         Numeric(12, 2),

@@ -82,6 +82,8 @@ def send_ticket_email(
     support_email: str,
     attachment_name: str | None = None,
     attachment_path: str | None = None,
+    user_role: str | None = None,
+    user_area: str | None = None,
 ) -> bool:
     """
     Sends an email notification to the address defined in settings or SUPPORT_EMAIL_DESTINATION.
@@ -116,6 +118,8 @@ def send_ticket_email(
 Ticket ID: {ticket_id}
 Data/Hora: {timestamp}
 Usuário: {username} ({email})
+[Função]: {user_role or 'N/A'}
+[Área]: {user_area or 'N/A'}
 ----------------------------------------
 DESCRIÇÃO DO PROBLEMA:
 {description}
@@ -344,6 +348,8 @@ async def create_support_ticket(
         support_email=support_email,
         attachment_name=attachment_filename,
         attachment_path=attachment_path,
+        user_role=user_record.role if user_record else None,
+        user_area=user_record.area if user_record else None,
     )
 
     return new_ticket
