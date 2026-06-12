@@ -163,10 +163,13 @@ const KanbanPage = () => {
 
     // FF-HARDENING-008 (Global Input Pattern): Two singleton file inputs rendered
     // at the KanbanPage root — never inside modals/maps — so they are always enabled
-    // and always mountd. activeUploadPoId tracks which PO the current upload targets.
+    // and always mounted. activeUploadPoIdRef is a REF (not state) so its .current
+    // value is written synchronously in the button onClick and is immediately readable
+    // by the global input's onChange closure — avoiding the stale-closure bug that
+    // useState causes (async re-render means onChange reads the old null value).
     const globalTruckInputRef   = useRef(null)
     const globalReceiptInputRef = useRef(null)
-    const [activeUploadPoId, setActiveUploadPoId] = useState(null)
+    const activeUploadPoIdRef   = useRef(null)   // SYNC ref — no stale closure
 
     const { refreshNotifications } = useNotifications()
     const { user } = useAuth()
@@ -2424,7 +2427,7 @@ const KanbanPage = () => {
                                                                                                             onClick={(e) => {
                                                                                                                 console.log('[F12 TRACE 1] Upload button clicked for field: foto_carga_path (Substituir)')
                                                                                                                 e.stopPropagation()
-                                                                                                                setActiveUploadPoId(selectedPO?.id)
+                                                                                                                activeUploadPoIdRef.current = selectedPO?.id
                                                                                                                 setTimeout(() => { globalTruckInputRef.current?.click() }, 150)
                                                                                                             }}
                                                                                                             className="inline-flex items-center gap-1 text-[10px] text-gray-600 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded px-2 py-0.5 cursor-pointer transition-colors"
@@ -2439,7 +2442,7 @@ const KanbanPage = () => {
                                                                                                     onClick={(e) => {
                                                                                                         console.log('[F12 TRACE 1] Upload button clicked for field: foto_carga_path (Enviar Foto)')
                                                                                                         e.stopPropagation()
-                                                                                                        setActiveUploadPoId(selectedPO?.id)
+                                                                                                        activeUploadPoIdRef.current = selectedPO?.id
                                                                                                         setTimeout(() => { globalTruckInputRef.current?.click() }, 150)
                                                                                                     }}
                                                                                                     disabled={isPhaseADisabled}
@@ -2476,7 +2479,7 @@ const KanbanPage = () => {
                                                                                                             onClick={(e) => {
                                                                                                                 console.log('[F12 TRACE 1] Upload button clicked for field: foto_canhoto_path (Substituir)')
                                                                                                                 e.stopPropagation()
-                                                                                                                setActiveUploadPoId(selectedPO?.id)
+                                                                                                                activeUploadPoIdRef.current = selectedPO?.id
                                                                                                                 setTimeout(() => { globalReceiptInputRef.current?.click() }, 150)
                                                                                                             }}
                                                                                                             className="inline-flex items-center gap-1 text-[10px] text-gray-600 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded px-2 py-0.5 cursor-pointer transition-colors"
@@ -2491,7 +2494,7 @@ const KanbanPage = () => {
                                                                                                     onClick={(e) => {
                                                                                                         console.log('[F12 TRACE 1] Upload button clicked for field: foto_canhoto_path (Enviar Foto)')
                                                                                                         e.stopPropagation()
-                                                                                                        setActiveUploadPoId(selectedPO?.id)
+                                                                                                        activeUploadPoIdRef.current = selectedPO?.id
                                                                                                         setTimeout(() => { globalReceiptInputRef.current?.click() }, 150)
                                                                                                     }}
                                                                                                     disabled={isPhaseADisabled}
@@ -3575,10 +3578,10 @@ const KanbanPage = () => {
             </div>
 
             {/* ── FF-HARDENING-008: Global singleton file inputs ──────────────────────
-                 These are rendered ONCE at the KanbanPage root, outside all modals
-                 and card maps. They are never disabled, so .click() always opens the
-                 OS file picker. activeUploadPoId carries the target PO ID into the
-                 handler so we don't rely on a selectedPO closure that could be stale.
+                 Rendered ONCE at the KanbanPage root, outside all modals and card maps.
+                 Never disabled — .click() always opens the OS file picker.
+                 activeUploadPoIdRef.current is written SYNCHRONOUSLY in the button onClick
+                 so the onChange closure always reads the correct live PO id.
             ─────────────────────────────────────────────────────────────────────── */}
             <input
                 ref={globalTruckInputRef}
@@ -3587,9 +3590,10 @@ const KanbanPage = () => {
                 style={{ display: 'none' }}
                 onChange={(e) => {
                     const file = e.target.files[0]
-                    console.log('[F12 TRACE 2] Global Truck Input onChange fired. File:', file?.name, '| activeUploadPoId:', activeUploadPoId)
-                    if (file && activeUploadPoId) {
-                        handleEvidenceUpload('foto_carga_path', file, activeUploadPoId, globalTruckInputRef)
+                    const poId = activeUploadPoIdRef.current
+                    console.log('[F12 TRACE 2] Global Truck Input onChange fired. File:', file?.name, '| poId:', poId)
+                    if (file && poId) {
+                        handleEvidenceUpload('foto_carga_path', file, poId, globalTruckInputRef)
                     }
                     e.target.value = ''
                 }}
@@ -3601,9 +3605,10 @@ const KanbanPage = () => {
                 style={{ display: 'none' }}
                 onChange={(e) => {
                     const file = e.target.files[0]
-                    console.log('[F12 TRACE 2] Global Receipt Input onChange fired. File:', file?.name, '| activeUploadPoId:', activeUploadPoId)
-                    if (file && activeUploadPoId) {
-                        handleEvidenceUpload('foto_canhoto_path', file, activeUploadPoId, globalReceiptInputRef)
+                    const poId = activeUploadPoIdRef.current
+                    console.log('[F12 TRACE 2] Global Receipt Input onChange fired. File:', file?.name, '| poId:', poId)
+                    if (file && poId) {
+                        handleEvidenceUpload('foto_canhoto_path', file, poId, globalReceiptInputRef)
                     }
                     e.target.value = ''
                 }}
