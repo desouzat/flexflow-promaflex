@@ -35,7 +35,7 @@ OFFICIAL_USERS = [
     {"area": "Embalagem",   "email": "embalagem_promaflex@grupovelletri.com.br",   "role": "operator", "name": "Embalagem Promaflex"},
     {"area": "Management",  "email": "andrea@grupovelletri.com.br",               "role": "master",   "name": "Andrea"},
     # CRITICAL: Primary admin account — must always be present
-    {"area": "Management",  "email": "admin@botcase.com.br",                      "role": "admin",    "name": "Admin BotCase"},
+    {"area": "Management",  "email": "thiago@botcase.net",                         "role": "admin",    "name": "Thiago BotCase"},
 ]
 
 DEFAULT_PASSWORD = "Proma@2026"

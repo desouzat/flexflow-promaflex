@@ -11,9 +11,10 @@ Usage (from the workspace root):
 The script will:
 1. Load .env from backend/.env (same path used by the application)
 2. Print the resolved SMTP configuration (password masked)
-3. Attempt a real SMTP connection with the configured security mode
-4. Send a test email to admin@botcase.com.br
-5. Exit 0 on success, 1 on failure
+3. Build a test email WITH a mock text file attachment
+4. Attempt a real SMTP connection with the configured security mode
+5. Send the test email+attachment to thiago@botcase.net
+6. Exit 0 on success, 1 on failure
 
 Required .env variables (no defaults will work for a real send):
     SMTP_HOST    e.g. smtp.gmail.com
@@ -30,8 +31,11 @@ import os
 import sys
 import io
 import smtplib
+import mimetypes
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
 from datetime import datetime
 from pathlib import Path
 
@@ -60,7 +64,7 @@ SMTP_PORT_STR = os.getenv("SMTP_PORT", "587")
 SMTP_USER     = os.getenv("SMTP_USER", "")
 SMTP_PASS     = os.getenv("SMTP_PASS", "")
 SMTP_SENDER   = os.getenv("SMTP_SENDER", SMTP_USER)
-TEST_RECIPIENT = "admin@botcase.com.br"
+TEST_RECIPIENT = "thiago@botcase.net"
 TIMEOUT_SECONDS = 10
 
 try:
@@ -119,6 +123,40 @@ msg["From"]    = SMTP_SENDER
 msg["To"]      = TEST_RECIPIENT
 msg["Subject"] = subject
 msg.attach(MIMEText(body, "plain", "utf-8"))
+
+# ── Build mock text attachment ────────────────────────────────────────
+# Builds the attachment in-memory without writing to disk.
+# This mirrors exactly how the production send_ticket_email
+# encodes GCS-downloaded bytes before SMTP transmission.
+MOCK_ATTACHMENT_NAME = "test_attachment.txt"
+MOCK_ATTACHMENT_CONTENT = (
+    f"FlexFlow SMTP Attachment Test\n"
+    f"Generated : {timestamp}\n"
+    f"Recipient : {TEST_RECIPIENT}\n"
+    f"SMTP Host : {SMTP_HOST}:{SMTP_PORT}\n"
+    f"\n"
+    f"If you can read this file, the MIMEBase + encode_base64 pipeline\n"
+    f"is working correctly and physical file attachments will appear\n"
+    f"in real support ticket emails sent by FlexFlow.\n"
+).encode("utf-8")
+
+mime_type, _ = mimetypes.guess_type(MOCK_ATTACHMENT_NAME)
+if mime_type and "/" in mime_type:
+    main_type, sub_type = mime_type.split("/", 1)
+else:
+    main_type, sub_type = "text", "plain"
+
+attach_part = MIMEBase(main_type, sub_type)
+attach_part.set_payload(MOCK_ATTACHMENT_CONTENT)
+encoders.encode_base64(attach_part)
+attach_part.add_header(
+    "Content-Disposition",
+    "attachment",
+    filename=MOCK_ATTACHMENT_NAME,
+)
+msg.attach(attach_part)
+print(f"\n📎 Mock attachment prepared: '{MOCK_ATTACHMENT_NAME}' ({len(MOCK_ATTACHMENT_CONTENT)} bytes, {main_type}/{sub_type})")
+
 
 # ── Attempt real SMTP connection ───────────────────────────────────────────────
 server = None

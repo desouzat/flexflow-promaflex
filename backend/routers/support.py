@@ -10,9 +10,13 @@ from typing import List, Optional
 import uuid
 from datetime import datetime
 import os
+import mimetypes
 import smtplib
+import requests
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
 
 from backend.database import get_db
 from backend.models import SupportTicket, User, GlobalConfig
@@ -70,7 +74,15 @@ def generate_ticket_id(db: Session) -> str:
         
     return ticket_id
 
-def send_ticket_email(ticket_id: str, username: str, email: str, description: str, support_email: str, attachment_name: str | None = None) -> bool:
+def send_ticket_email(
+    ticket_id: str,
+    username: str,
+    email: str,
+    description: str,
+    support_email: str,
+    attachment_name: str | None = None,
+    attachment_path: str | None = None,
+) -> bool:
     """
     Sends an email notification to the address defined in settings or SUPPORT_EMAIL_DESTINATION.
 
@@ -81,6 +93,12 @@ def send_ticket_email(ticket_id: str, username: str, email: str, description: st
         SMTP_PASS         SMTP login password or app-password
         SMTP_SENDER       Display sender address (falls back to SMTP_USER if not set)
         SMTP_SIMULATE     If set to "true" / "1" / "yes", skips real SMTP and logs only (default: false)
+
+    Args:
+        attachment_name:  Original filename displayed in the email body and as the MIME attachment name.
+        attachment_path:  GCS public URL (https://storage.googleapis.com/...) or local filesystem path
+                          to the file bytes to attach. If None or unreachable, the email is still sent
+                          without an attachment (fallback, never crashes).
 
     Returns True if the email was delivered (or simulated), False on delivery failure.
     Falls back gracefully — never raises, never crashes the calling request thread.
@@ -149,6 +167,54 @@ Anexo: {attachment_name or "Nenhum"}
     msg['Subject'] = subject
     msg['Reply-To'] = email  # Route replies to the ticket creator
     msg.attach(MIMEText(body, 'plain', 'utf-8'))
+
+    # ── Physical file attachment (if provided) ────────────────────────────────
+    # Downloads the file bytes from a GCS URL or reads from a local path,
+    # then encodes them as a Base64 MIME attachment.
+    # Failures here are non-fatal: the email is sent without the attachment
+    # rather than blocking the entire notification dispatch.
+    if attachment_path and attachment_name:
+        try:
+            file_bytes: bytes | None = None
+
+            if attachment_path.startswith("http://") or attachment_path.startswith("https://"):
+                # GCS public URL — fetch with a 15-second timeout
+                resp = requests.get(attachment_path, timeout=15)
+                resp.raise_for_status()
+                file_bytes = resp.content
+                print(f"[SMTP] Downloaded attachment from GCS ({len(file_bytes)} bytes): {attachment_path}")
+            else:
+                # Local filesystem path
+                with open(attachment_path, "rb") as fh:
+                    file_bytes = fh.read()
+                print(f"[SMTP] Read attachment from local path ({len(file_bytes)} bytes): {attachment_path}")
+
+            if file_bytes:
+                # Detect MIME type from filename extension; fall back to octet-stream
+                mime_type, _ = mimetypes.guess_type(attachment_name)
+                if mime_type and "/" in mime_type:
+                    main_type, sub_type = mime_type.split("/", 1)
+                else:
+                    main_type, sub_type = "application", "octet-stream"
+
+                part = MIMEBase(main_type, sub_type)
+                part.set_payload(file_bytes)
+                encoders.encode_base64(part)
+                part.add_header(
+                    "Content-Disposition",
+                    "attachment",
+                    filename=attachment_name,
+                )
+                msg.attach(part)
+                print(f"[SMTP] Attachment encoded and added to email: '{attachment_name}' ({main_type}/{sub_type})")
+
+        except Exception as attach_err:
+            # Non-fatal: log and continue — email is still sent without attachment
+            print(
+                f"[SMTP] WARNING: Could not attach file '{attachment_name}': "
+                f"{type(attach_err).__name__}: {attach_err}. "
+                "Sending email without attachment."
+            )
 
     # ── Establish secure SMTP connection with timeout guard ──────────────────
     # timeout=10 ensures the blocking connect()/starttls()/login() calls
@@ -276,7 +342,8 @@ async def create_support_ticket(
         email=email_addr,
         description=description,
         support_email=support_email,
-        attachment_name=attachment_filename
+        attachment_name=attachment_filename,
+        attachment_path=attachment_path,
     )
 
     return new_ticket
