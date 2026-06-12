@@ -17,25 +17,41 @@ import {
     ArrowUpRight, ShieldAlert, ChevronLeft, ChevronRight, Split, Paperclip, Percent
 } from 'lucide-react'
 
-const KanbanPage = () => {
-    const getRobustName = (val) => {
-        if (!val || val === 'null' || val === 'None' || String(val).trim() === '') {
-            return 'Desconhecido';
-        }
-        return val;
-    };
+// ─────────────────────────────────────────────────────────────────────────────
+// Module-level pure helpers & constants
+// Declared OUTSIDE the component to guarantee initialization before any render
+// path references them, preventing Vite/esbuild TDZ crashes.
+// ─────────────────────────────────────────────────────────────────────────────
 
-    const getDownloadUrl = (path) => {
-        if (!path) return '';
-        if (path.startsWith('http://') || path.startsWith('https://')) {
-            return path;
-        }
-        const cleanPath = path.replace(/^\//, '');
-        const baseUrl = (import.meta.env.VITE_API_URL || (typeof window !== 'undefined' ? window.location.origin + '/api' : 'http://localhost:8000/api')).replace(/\/api$/, '');
-        const generated = `${baseUrl}/api/uploads/download?path=${encodeURIComponent(cleanPath)}`;
-        console.log("[FlexFlow Download Link] Generated path for download:", generated);
-        return generated;
-    };
+/** FF-HARDENING-008: Status macros that map to the PCP Kanban column. */
+const PCP_STATUS_MACROS = ['APPROVED', 'approved', 'PCP', 'pcp', 'WAITING_MATERIAL']
+
+/** Returns a safe display name, replacing null / 'None' / empty with 'Desconhecido'. */
+const getRobustName = (val) => {
+    if (!val || val === 'null' || val === 'None' || String(val).trim() === '') {
+        return 'Desconhecido';
+    }
+    return val;
+};
+
+/**
+ * Resolves a raw file path to a fully-qualified download URL.
+ * GCS HTTPS paths are returned verbatim; local relative paths are proxied
+ * through the backend /api/uploads/download endpoint.
+ */
+const getDownloadUrl = (path) => {
+    if (!path) return '';
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+        return path;
+    }
+    const cleanPath = path.replace(/^\//, '');
+    const baseUrl = (import.meta.env.VITE_API_URL || (typeof window !== 'undefined' ? window.location.origin + '/api' : 'http://localhost:8000/api')).replace(/\/api$/, '');
+    const generated = `${baseUrl}/api/uploads/download?path=${encodeURIComponent(cleanPath)}`;
+    console.log('[FlexFlow Download Link] Generated path for download:', generated);
+    return generated;
+};
+
+const KanbanPage = () => {
 
     const [boardData, setBoardData] = useState(null)
     const [openSKUs, setOpenSKUs] = useState({})
@@ -81,8 +97,8 @@ const KanbanPage = () => {
     ) : false;
 
     // FF-HARDENING-008: SLA justification editing is restricted to the PCP stage only.
-    // Admins / masters can always edit. Other roles can only edit when the PO is in PCP.
-    const PCP_STATUS_MACROS = ['APPROVED', 'approved', 'PCP', 'pcp', 'WAITING_MATERIAL']
+    // PCP_STATUS_MACROS is defined at module level (above). The three derived booleans
+    // that depend on runtime state remain here, inside the component.
     const isUserPrivileged = user && ['admin', 'master'].includes((user.role || '').toLowerCase())
     const isPOInPCP = selectedPO ? PCP_STATUS_MACROS.includes(selectedPO.status_macro) || selectedPO.status === 'PCP' : false
     const slaJustificationEditable = isUserPrivileged || isPOInPCP
