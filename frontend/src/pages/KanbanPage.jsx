@@ -1498,107 +1498,107 @@ const KanbanPage = () => {
                                                     </p>
                                                 </div>
                                             </div>
-                                        </div>
 
-                                        {/* ── FF-HARDENING-006: SLA Justification Panel ── */}
-                                        <div className="mt-5 pt-4 border-t border-slate-200">
-                                            <div className="flex items-center gap-2 mb-3">
-                                                <span className="text-xs font-bold tracking-wide uppercase text-slate-700">📋 Modo de Falha / Justificativa</span>
-                                                <span className="text-[9px] bg-amber-100 text-amber-800 border border-amber-300 rounded-full px-2 py-0.5 font-semibold">
-                                                    Registro de Auditoria Imutável
-                                                </span>
-                                            </div>
-
-                                            {/* Previously-saved justification badge */}
-                                            {selectedPO?.sla_justification_category && (
-                                                <div className="mb-3 p-2.5 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-800">
-                                                    <div className="font-semibold mb-0.5">
-                                                        ✅ Último registro: <span className="font-normal">{selectedPO.sla_justification_category}</span>
-                                                    </div>
-                                                    {selectedPO.sla_justification_text && (
-                                                        <div className="text-[11px] text-emerald-700 mb-0.5">
-                                                            {selectedPO.sla_justification_text}
-                                                        </div>
-                                                    )}
-                                                    <div className="text-[10px] text-emerald-600 mt-1">
-                                                        Por <span className="font-semibold">{selectedPO.sla_justification_user}</span>
-                                                        {selectedPO.sla_justification_at && (
-                                                            <span> em {new Date(selectedPO.sla_justification_at).toLocaleString('pt-BR')}</span>
-                                                        )}
-                                                    </div>
+                                            {/* ── FF-HARDENING-006: SLA Justification Panel ── */}
+                                            <div className="mt-5 pt-4 border-t border-slate-200">
+                                                <div className="flex items-center gap-2 mb-3">
+                                                    <span className="text-xs font-bold tracking-wide uppercase text-slate-700">📋 Modo de Falha / Justificativa</span>
+                                                    <span className="text-[9px] bg-amber-100 text-amber-800 border border-amber-300 rounded-full px-2 py-0.5 font-semibold">
+                                                        Registro de Auditoria Imutável
+                                                    </span>
                                                 </div>
-                                            )}
 
-                                            {/* Category dropdown */}
-                                            <div className="mb-2">
-                                                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                                                    Selecione a Categoria *
-                                                </label>
-                                                <select
-                                                    id={`sla-category-${selectedPO.id}`}
-                                                    value={slaJustificationCategory}
-                                                    onChange={(e) => setSlaJustificationCategory(e.target.value)}
-                                                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white focus:ring-2 focus:ring-amber-400 focus:border-amber-400 transition-colors"
-                                                >
-                                                    <option value="">Selecione um modo de falha...</option>
-                                                    <option value="Falta de Energia">Falta de Energia</option>
-                                                    <option value="Falta de Água / Falha nos Chillers">Falta de Água / Falha nos Chillers</option>
-                                                    <option value="Instabilidade de Ar Comprimido">Instabilidade de Ar Comprimido</option>
-                                                    <option value="Máquina Quebrada (Extrusora/Sopradora/Corte-Solda)">Máquina Quebrada (Extrusora/Sopradora/Corte-Solda)</option>
-                                                    <option value="Manutenção Não Planejada">Manutenção Não Planejada</option>
-                                                    <option value="Falta de Operador">Falta de Operador</option>
-                                                    <option value="Outros">Outros</option>
-                                                </select>
-                                            </div>
+                                                {/* Previously-saved justification badge */}
+                                                {selectedPO?.sla_justification_category && (
+                                                    <div className="mb-3 p-2.5 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-800">
+                                                        <div className="font-semibold mb-0.5">
+                                                            ✅ Último registro: <span className="font-normal">{selectedPO.sla_justification_category}</span>
+                                                        </div>
+                                                        {selectedPO.sla_justification_text && (
+                                                            <div className="text-[11px] text-emerald-700 mb-0.5">
+                                                                {selectedPO.sla_justification_text}
+                                                            </div>
+                                                        )}
+                                                        <div className="text-[10px] text-emerald-600 mt-1">
+                                                            Por <span className="font-semibold">{selectedPO.sla_justification_user}</span>
+                                                            {selectedPO.sla_justification_at && (
+                                                                <span> em {new Date(selectedPO.sla_justification_at).toLocaleString('pt-BR')}</span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                )}
 
-                                            {/* Detail textarea — always shown, mandatory when Outros */}
-                                            <div className="mb-3">
-                                                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                                                    Detalhamento da Justificativa
-                                                    {slaJustificationCategory === 'Outros' && (
-                                                        <span className="ml-1 text-rose-600">*obrigatório</span>
-                                                    )}
-                                                </label>
-                                                <textarea
-                                                    id={`sla-text-${selectedPO.id}`}
-                                                    rows={3}
-                                                    value={slaJustificationText}
-                                                    onChange={(e) => setSlaJustificationText(e.target.value)}
-                                                    placeholder="Descreva a causa raiz ou o contexto da falha operacional..."
-                                                    className={`w-full px-3 py-2 border rounded-lg text-xs resize-none focus:ring-2 focus:ring-amber-400 transition-colors ${
-                                                        slaJustificationCategory === 'Outros' && !slaJustificationText.trim()
-                                                            ? 'border-rose-400 bg-rose-50'
-                                                            : 'border-slate-300 bg-white'
-                                                    }`}
-                                                />
-                                            </div>
+                                                {/* Category dropdown */}
+                                                <div className="mb-2">
+                                                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                                                        Selecione a Categoria *
+                                                    </label>
+                                                    <select
+                                                        id={`sla-category-${selectedPO.id}`}
+                                                        value={slaJustificationCategory}
+                                                        onChange={(e) => setSlaJustificationCategory(e.target.value)}
+                                                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white focus:ring-2 focus:ring-amber-400 focus:border-amber-400 transition-colors"
+                                                    >
+                                                        <option value="">Selecione um modo de falha...</option>
+                                                        <option value="Falta de Energia">Falta de Energia</option>
+                                                        <option value="Falta de Água / Falha nos Chillers">Falta de Água / Falha nos Chillers</option>
+                                                        <option value="Instabilidade de Ar Comprimido">Instabilidade de Ar Comprimido</option>
+                                                        <option value="Máquina Quebrada (Extrusora/Sopradora/Corte-Solda)">Máquina Quebrada (Extrusora/Sopradora/Corte-Solda)</option>
+                                                        <option value="Manutenção Não Planejada">Manutenção Não Planejada</option>
+                                                        <option value="Falta de Operador">Falta de Operador</option>
+                                                        <option value="Outros">Outros</option>
+                                                    </select>
+                                                </div>
 
-                                            {/* Save button */}
-                                            <div className="flex items-center justify-between">
-                                                <p className="text-[10px] text-slate-400">
-                                                    ⏱️ Salvar esta justificativa <strong>não pausa</strong> o cronômetro SLA.
-                                                </p>
-                                                <button
-                                                    id={`btn-save-sla-justification-${selectedPO.id}`}
-                                                    onClick={handleSaveSlaJustification}
-                                                    disabled={
-                                                        savingJustification ||
-                                                        !slaJustificationCategory ||
-                                                        (slaJustificationCategory === 'Outros' && !slaJustificationText.trim())
-                                                    }
-                                                    className="px-4 py-1.5 bg-amber-500 hover:bg-amber-600 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5"
-                                                >
-                                                    {savingJustification ? (
-                                                        <><span className="animate-spin">⏳</span> Salvando...</>
-                                                    ) : (
-                                                        <><span>💾</span> Salvar Justificativa</>
-                                                    )}
-                                                </button>
+                                                {/* Detail textarea — always shown, mandatory when Outros */}
+                                                <div className="mb-3">
+                                                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                                                        Detalhamento da Justificativa
+                                                        {slaJustificationCategory === 'Outros' && (
+                                                            <span className="ml-1 text-rose-600">*obrigatório</span>
+                                                        )}
+                                                    </label>
+                                                    <textarea
+                                                        id={`sla-text-${selectedPO.id}`}
+                                                        rows={3}
+                                                        value={slaJustificationText}
+                                                        onChange={(e) => setSlaJustificationText(e.target.value)}
+                                                        placeholder="Descreva a causa raiz ou o contexto da falha operacional..."
+                                                        className={`w-full px-3 py-2 border rounded-lg text-xs resize-none focus:ring-2 focus:ring-amber-400 transition-colors ${
+                                                            slaJustificationCategory === 'Outros' && !slaJustificationText.trim()
+                                                                ? 'border-rose-400 bg-rose-50'
+                                                                : 'border-slate-300 bg-white'
+                                                        }`}
+                                                    />
+                                                </div>
+
+                                                {/* Save button */}
+                                                <div className="flex items-center justify-between">
+                                                    <p className="text-[10px] text-slate-400">
+                                                        ⏱️ Salvar esta justificativa <strong>não pausa</strong> o cronômetro SLA.
+                                                    </p>
+                                                    <button
+                                                        id={`btn-save-sla-justification-${selectedPO.id}`}
+                                                        onClick={handleSaveSlaJustification}
+                                                        disabled={
+                                                            savingJustification ||
+                                                            !slaJustificationCategory ||
+                                                            (slaJustificationCategory === 'Outros' && !slaJustificationText.trim())
+                                                        }
+                                                        className="px-4 py-1.5 bg-amber-500 hover:bg-amber-600 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5"
+                                                    >
+                                                        {savingJustification ? (
+                                                            <><span className="animate-spin">⏳</span> Salvando...</>
+                                                        ) : (
+                                                            <><span>💾</span> Salvar Justificativa</>
+                                                        )}
+                                                    </button>
+                                                </div>
                                             </div>
+                                            {/* ── End SLA Justification Panel ── */}
+
                                         </div>
-                                        {/* ── End SLA Justification Panel ── */}
 
-                                    </div>
                                     );
                                 })()}
 
