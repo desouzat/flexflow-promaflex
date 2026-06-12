@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import KanbanColumn from '../components/kanban/KanbanColumn'
 import ErrorBoundary from '../components/ErrorBoundary'
 import MetadataVisualizer from '../components/MetadataVisualizer'
@@ -160,6 +160,14 @@ const KanbanPage = () => {
 
     const [savingFields, setSavingFields] = useState(false)
     const [localFields, setLocalFields] = useState({})
+
+    // FF-HARDENING-008: Isolated file-input refs — one per upload slot.
+    // Using React refs instead of document.getElementById() eliminates
+    // DOM-id collisions when multiple cards are rendered and prevents stale
+    // closures from re-using a previously unmounted input element.
+    const truckPhotoInputRef = useRef(null)
+    const receiptPhotoInputRef = useRef(null)
+
     const { refreshNotifications } = useNotifications()
     const { user } = useAuth()
 
@@ -710,8 +718,15 @@ const KanbanPage = () => {
         }
     }
 
-    const handleEvidenceUpload = async (field, file) => {
+    // FF-HARDENING-008: inputRef is the React ref of the hidden <input type="file"> element.
+    // We MUST reset inputRef.current.value = "" after every upload attempt (success or failure)
+    // so the browser fires onChange again if the user re-selects the same file after an error.
+    const handleEvidenceUpload = async (field, file, inputRef) => {
         if (!file) return
+
+        // Immediately reset the input value so the browser treats the next pick as a new event,
+        // even if the user selects the same filename (fixes "onChange not firing on retry").
+        if (inputRef?.current) inputRef.current.value = ''
 
         const toastId = showLoading('Enviando arquivo...')
 
@@ -722,29 +737,35 @@ const KanbanPage = () => {
             const poId = selectedPO.id
             const suffix = field === 'foto_carga_path' ? 'upload-cargo-photo' : 'upload-receipt-photo'
             // Use the api instance's baseURL (/api) so auth headers + interceptors apply cleanly.
-            // Relative path: api.baseURL + /kanban/pos/{id}/upload-cargo-photo
             const endpoint = `/kanban/pos/${poId}/${suffix}`
 
             const response = await api.post(endpoint, formData, {
-                headers: {
-                    'Content-Type': 'multipart/form-data'
-                }
+                headers: { 'Content-Type': 'multipart/form-data' }
             })
 
             dismissToast(toastId)
 
             const poData = response.data.po
-            setSelectedPO(poData)
             if (poData) {
+                // Build the resolved photo paths — backend writes to both
+                // partition_metadata root AND logistics_checklist sub-key.
+                // We prefer the root key as the canonical source of truth.
                 const pMeta = poData.partition_metadata || {}
                 const checklist = pMeta.logistics_checklist || {}
-                setLogisticsChecklist({
+
+                const newChecklist = {
                     endereco_conferido: checklist.endereco_conferido || false,
                     peso_validado: checklist.peso_validado || false,
                     etiquetas_impressas: checklist.etiquetas_impressas || false,
                     foto_carga_path: pMeta.foto_carga_path || checklist.foto_carga_path || null,
-                    foto_canhoto_path: pMeta.foto_canhoto_path || checklist.foto_canhoto_path || null
-                })
+                    foto_canhoto_path: pMeta.foto_canhoto_path || checklist.foto_canhoto_path || null,
+                }
+
+                // Enforce React state re-render: update both the checklist state
+                // AND the selectedPO object so conditional JSX (green tick vs orange button)
+                // flips immediately without waiting for a full board refresh.
+                setLogisticsChecklist(newChecklist)
+                setSelectedPO(poData)
 
                 // FF-HARDENING-008: Sync the updated PO back into boardData so re-opening the
                 // modal always reads the persisted GCS links from state instead of the stale card.
@@ -2372,141 +2393,115 @@ const KanbanPage = () => {
                                                                                         Upload de Evidências Logísticas (Obrigatório)
                                                                                     </h5>
                                                                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                                                        {/* Foto da Carga */}
+
+                                                                                        {/* ── Foto da Carga Carregada ─────────────────────────────── */}
                                                                                         <div className="border-2 border-dashed border-cyan-200 bg-cyan-50/10 rounded-lg p-4 transition-colors">
                                                                                             <label className="block text-xs font-bold text-cyan-900 uppercase mb-2">
                                                                                                 Foto da Carga Carregada
                                                                                             </label>
+
+                                                                                            <input
+                                                                                                ref={truckPhotoInputRef}
+                                                                                                type="file"
+                                                                                                accept=".pdf,.jpg,.jpeg,.png"
+                                                                                                className="hidden"
+                                                                                                disabled={isPhaseADisabled}
+                                                                                                onChange={(e) => {
+                                                                                                    const file = e.target.files[0]
+                                                                                                    if (file) handleEvidenceUpload('foto_carga_path', file, truckPhotoInputRef)
+                                                                                                }}
+                                                                                            />
+
                                                                                             {logisticsChecklist.foto_carga_path ? (
                                                                                                 <div className="space-y-2">
                                                                                                     <div className="flex items-center gap-2 text-green-600 font-semibold text-sm">
                                                                                                         <CheckCircle className="w-5 h-5 flex-shrink-0" />
                                                                                                         <span>Evidência da Carga Salva!</span>
                                                                                                     </div>
-                                                                                                    <a 
+                                                                                                    <a
                                                                                                         href={getDownloadUrl(logisticsChecklist.foto_carga_path)}
-                                                                                                        target="_blank" 
-                                                                                                        rel="noreferrer" 
+                                                                                                        target="_blank"
+                                                                                                        rel="noreferrer"
                                                                                                         className="text-xs text-blue-600 hover:text-blue-800 font-semibold underline block"
                                                                                                     >
                                                                                                         Abrir Foto da Carga
                                                                                                     </a>
-                                                                        {!isPhaseADisabled && (
-                                                                         <div className="pt-1">
-                                                                             <input
-                                                                                 type="file"
-                                                                                 accept=".pdf,.jpg,.jpeg,.png"
-                                                                                 onClick={(e) => { e.stopPropagation(); e.target.value = null; }}
-                                                                                 onChange={(e) => handleEvidenceUpload('foto_carga_path', e.target.files[0])}
-                                                                                 className="hidden"
-                                                                                 id="foto-carga-reupload"
-                                                                             />
-                                                                             <button
-                                                                                 type="button"
-                                                                                 onClick={(e) => {
-                                                                                     e.stopPropagation();
-                                                                                     document.getElementById('foto-carga-reupload').click();
-                                                                                 }}
-                                                                                 className="inline-flex items-center gap-1 text-[10px] text-gray-550 bg-gray-100 hover:bg-gray-200 border border-gray-305 rounded px-2 py-0.5 cursor-pointer transition-colors"
-                                                                             >
-                                                                                 Substituir Arquivo
-                                                                             </button>
-                                                                         </div>
-                                                                     )}
-                                                                </div>
-                                                            ) : (
-                                                                  <div>
-                                                                      <input
-                                                                          type="file"
-                                                                          accept=".pdf,.jpg,.jpeg,.png"
-                                                                          onClick={(e) => { e.stopPropagation(); e.target.value = null; }}
-                                                                          onChange={(e) => handleEvidenceUpload('foto_carga_path', e.target.files[0])}
-                                                                          className="hidden"
-                                                                          id="foto-carga-upload"
-                                                                          disabled={isPhaseADisabled}
-                                                                      />
-                                                                      <button
-                                                                          type="button"
-                                                                          onClick={(e) => {
-                                                                              e.stopPropagation();
-                                                                              document.getElementById('foto-carga-upload').click();
-                                                                          }}
-                                                                          disabled={isPhaseADisabled}
-                                                                          className={`flex items-center justify-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg transition-colors text-xs font-semibold shadow-xs ${isPhaseADisabled ? 'cursor-not-allowed opacity-50 bg-orange-400' : 'hover:bg-orange-700 cursor-pointer'}`}
-                                                                      >
-                                                                          Enviar Foto
-                                                                      </button>
-                                                                  </div>
+                                                                                                    {!isPhaseADisabled && (
+                                                                                                        <button
+                                                                                                            type="button"
+                                                                                                            onClick={(e) => { e.stopPropagation(); truckPhotoInputRef.current?.click() }}
+                                                                                                            className="inline-flex items-center gap-1 text-[10px] text-gray-600 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded px-2 py-0.5 cursor-pointer transition-colors"
+                                                                                                        >
+                                                                                                            Substituir Arquivo
+                                                                                                        </button>
+                                                                                                    )}
+                                                                                                </div>
+                                                                                            ) : (
+                                                                                                <button
+                                                                                                    type="button"
+                                                                                                    onClick={(e) => { e.stopPropagation(); truckPhotoInputRef.current?.click() }}
+                                                                                                    disabled={isPhaseADisabled}
+                                                                                                    className={`flex items-center justify-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg transition-colors text-xs font-semibold shadow-xs ${isPhaseADisabled ? 'cursor-not-allowed opacity-50 bg-orange-400' : 'hover:bg-orange-700 cursor-pointer'}`}
+                                                                                                >
+                                                                                                    Enviar Foto
+                                                                                                </button>
                                                                                             )}
                                                                                         </div>
 
-                                                                                        {/* Foto do Canhoto/NF */}
+                                                                                        {/* ── Nota Fiscal com Canhoto Assinado ────────────────────── */}
                                                                                         <div className="border-2 border-dashed border-cyan-200 bg-cyan-50/10 rounded-lg p-4 transition-colors">
                                                                                             <label className="block text-xs font-bold text-cyan-900 uppercase mb-2">
                                                                                                 Nota Fiscal com Canhoto Assinado
                                                                                             </label>
+
+                                                                                            <input
+                                                                                                ref={receiptPhotoInputRef}
+                                                                                                type="file"
+                                                                                                accept=".pdf,.jpg,.jpeg,.png"
+                                                                                                className="hidden"
+                                                                                                disabled={isPhaseADisabled}
+                                                                                                onChange={(e) => {
+                                                                                                    const file = e.target.files[0]
+                                                                                                    if (file) handleEvidenceUpload('foto_canhoto_path', file, receiptPhotoInputRef)
+                                                                                                }}
+                                                                                            />
+
                                                                                             {logisticsChecklist.foto_canhoto_path ? (
                                                                                                 <div className="space-y-2">
                                                                                                     <div className="flex items-center gap-2 text-green-600 font-semibold text-sm">
                                                                                                         <CheckCircle className="w-5 h-5 flex-shrink-0" />
                                                                                                         <span>Nota Fiscal com Canhoto Assinado Salva!</span>
                                                                                                     </div>
-                                                                                                    <a 
+                                                                                                    <a
                                                                                                         href={getDownloadUrl(logisticsChecklist.foto_canhoto_path)}
-                                                                                                        target="_blank" 
-                                                                                                        rel="noreferrer" 
+                                                                                                        target="_blank"
+                                                                                                        rel="noreferrer"
                                                                                                         className="text-xs text-blue-600 hover:text-blue-800 font-semibold underline block"
                                                                                                     >
                                                                                                         Abrir Nota Fiscal com Canhoto Assinado
                                                                                                     </a>
-                                                                       {!isPhaseADisabled && (
-                                                                           <div className="pt-1">
-                                                                               <input
-                                                                                   type="file"
-                                                                                   accept=".pdf,.jpg,.jpeg,.png"
-                                                                                   onClick={(e) => { e.stopPropagation(); e.target.value = null; }}
-                                                                                   onChange={(e) => handleEvidenceUpload('foto_canhoto_path', e.target.files[0])}
-                                                                                   className="hidden"
-                                                                                   id="foto-canhoto-reupload"
-                                                                               />
-                                                                               <button
-                                                                                   type="button"
-                                                                                   onClick={(e) => {
-                                                                                       e.stopPropagation();
-                                                                                       document.getElementById('foto-canhoto-reupload').click();
-                                                                                   }}
-                                                                                   className="inline-flex items-center gap-1 text-[10px] text-gray-550 bg-gray-100 hover:bg-gray-200 border border-gray-305 rounded px-2 py-0.5 cursor-pointer transition-colors"
-                                                                               >
-                                                                                   Substituir Arquivo
-                                                                               </button>
-                                                                           </div>
-                                                                       )}
+                                                                                                    {!isPhaseADisabled && (
+                                                                                                        <button
+                                                                                                            type="button"
+                                                                                                            onClick={(e) => { e.stopPropagation(); receiptPhotoInputRef.current?.click() }}
+                                                                                                            className="inline-flex items-center gap-1 text-[10px] text-gray-600 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded px-2 py-0.5 cursor-pointer transition-colors"
+                                                                                                        >
+                                                                                                            Substituir Arquivo
+                                                                                                        </button>
+                                                                                                    )}
                                                                                                 </div>
                                                                                             ) : (
-                                                                   <div>
-                                                                       <input
-                                                                           type="file"
-                                                                           accept=".pdf,.jpg,.jpeg,.png"
-                                                                           onClick={(e) => { e.stopPropagation(); e.target.value = null; }}
-                                                                           onChange={(e) => handleEvidenceUpload('foto_canhoto_path', e.target.files[0])}
-                                                                           className="hidden"
-                                                                           id="foto-canhoto-upload"
-                                                                           disabled={isPhaseADisabled}
-                                                                       />
-                                                                       <button
-                                                                           type="button"
-                                                                           onClick={(e) => {
-                                                                               e.stopPropagation();
-                                                                               document.getElementById('foto-canhoto-upload').click();
-                                                                           }}
-                                                                           disabled={isPhaseADisabled}
-                                                                           className={`flex items-center justify-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg transition-colors text-xs font-semibold shadow-xs ${isPhaseADisabled ? 'cursor-not-allowed opacity-50 bg-orange-400' : 'hover:bg-orange-700 cursor-pointer'}`}
-                                                                       >
-                                                                           Enviar Foto
-                                                                       </button>
-                                                                   </div>
+                                                                                                <button
+                                                                                                    type="button"
+                                                                                                    onClick={(e) => { e.stopPropagation(); receiptPhotoInputRef.current?.click() }}
+                                                                                                    disabled={isPhaseADisabled}
+                                                                                                    className={`flex items-center justify-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg transition-colors text-xs font-semibold shadow-xs ${isPhaseADisabled ? 'cursor-not-allowed opacity-50 bg-orange-400' : 'hover:bg-orange-700 cursor-pointer'}`}
+                                                                                                >
+                                                                                                    Enviar Foto
+                                                                                                </button>
                                                                                             )}
                                                                                         </div>
+
                                                                                     </div>
                                                                                 </div>
                                                                             </div>
