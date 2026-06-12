@@ -79,6 +79,14 @@ const KanbanPage = () => {
             item.extra_metadata?.block_status === 'BLOQUEADO'
         ))
     ) : false;
+
+    // FF-HARDENING-008: SLA justification editing is restricted to the PCP stage only.
+    // Admins / masters can always edit. Other roles can only edit when the PO is in PCP.
+    const PCP_STATUS_MACROS = ['APPROVED', 'approved', 'PCP', 'pcp', 'WAITING_MATERIAL']
+    const isUserPrivileged = user && ['admin', 'master'].includes((user.role || '').toLowerCase())
+    const isPOInPCP = selectedPO ? PCP_STATUS_MACROS.includes(selectedPO.status_macro) || selectedPO.status === 'PCP' : false
+    const slaJustificationEditable = isUserPrivileged || isPOInPCP
+
     
     const handleFinanceiroChecklistChange = (field, checked) => {
         setChecklistFinanceiro(prev => ({
@@ -705,9 +713,9 @@ const KanbanPage = () => {
             })
 
             dismissToast(toastId)
-            
-            setSelectedPO(response.data.po)
+
             const poData = response.data.po
+            setSelectedPO(poData)
             if (poData) {
                 const pMeta = poData.partition_metadata || {}
                 const checklist = pMeta.logistics_checklist || {}
@@ -717,6 +725,17 @@ const KanbanPage = () => {
                     etiquetas_impressas: checklist.etiquetas_impressas || false,
                     foto_carga_path: pMeta.foto_carga_path || checklist.foto_carga_path || null,
                     foto_canhoto_path: pMeta.foto_canhoto_path || checklist.foto_canhoto_path || null
+                })
+
+                // FF-HARDENING-008: Sync the updated PO back into boardData so re-opening the
+                // modal always reads the persisted GCS links from state instead of the stale card.
+                setBoardData(prev => {
+                    if (!prev || !prev.columns) return prev
+                    const updatedColumns = prev.columns.map(col => ({
+                        ...col,
+                        pos: col.pos.map(p => p.id === poId ? { ...p, ...poData } : p)
+                    }))
+                    return { ...prev, columns: updatedColumns }
                 })
             }
             showSuccess(`${field === 'foto_carga_path' ? 'Foto da Carga' : 'Nota Fiscal com Canhoto Assinado'} enviada com sucesso`)
@@ -1490,7 +1509,7 @@ const KanbanPage = () => {
                                                     <div className="w-full bg-slate-200 rounded-full h-3 overflow-hidden border border-slate-300">
                                                         <div 
                                                             className={`h-full transition-all duration-500 ${getProgressBarColor(areaPercent)}`} 
-                                                            style={{ width: `${areaPercent}%` }}
+                                                        style={{ width: `${areaPercent}%` }}
                                                         />
                                                     </div>
                                                     <p className="text-[10px] text-slate-500 mt-1">
@@ -1506,7 +1525,21 @@ const KanbanPage = () => {
                                                     <span className="text-[9px] bg-amber-100 text-amber-800 border border-amber-300 rounded-full px-2 py-0.5 font-semibold">
                                                         Registro de Auditoria Imutável
                                                     </span>
+                                                    {/* FF-HARDENING-008: access indicator */}
+                                                    {slaJustificationEditable ? (
+                                                        <span className="text-[9px] bg-green-100 text-green-800 border border-green-300 rounded-full px-2 py-0.5 font-semibold">✏️ Editável (PCP)</span>
+                                                    ) : (
+                                                        <span className="text-[9px] bg-slate-100 text-slate-600 border border-slate-300 rounded-full px-2 py-0.5 font-semibold">🔒 Somente Leitura</span>
+                                                    )}
                                                 </div>
+
+                                                {/* Read-only notice — shown when not in PCP */}
+                                                {!slaJustificationEditable && (
+                                                    <div className="mb-3 p-2 bg-slate-50 border border-slate-200 rounded-lg text-[11px] text-slate-500 flex items-start gap-1.5">
+                                                        <span>🔒</span>
+                                                        <span>A edição de Justificativa SLA é restrita ao setor <strong>PCP</strong>. Acesse este card no Kanban PCP para registrar ou alterar a justificativa.</span>
+                                                    </div>
+                                                )}
 
                                                 {/* Previously-saved justification badge */}
                                                 {selectedPO?.sla_justification_category && (
@@ -1537,7 +1570,8 @@ const KanbanPage = () => {
                                                         id={`sla-category-${selectedPO.id}`}
                                                         value={slaJustificationCategory}
                                                         onChange={(e) => setSlaJustificationCategory(e.target.value)}
-                                                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white focus:ring-2 focus:ring-amber-400 focus:border-amber-400 transition-colors"
+                                                        disabled={!slaJustificationEditable}
+                                                        className={`w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-amber-400 focus:border-amber-400 transition-colors ${!slaJustificationEditable ? 'bg-slate-100 cursor-not-allowed text-slate-400' : 'bg-white'}`}
                                                     >
                                                         <option value="">Selecione um modo de falha...</option>
                                                         <option value="Falta de Energia">Falta de Energia</option>
@@ -1563,11 +1597,14 @@ const KanbanPage = () => {
                                                         rows={3}
                                                         value={slaJustificationText}
                                                         onChange={(e) => setSlaJustificationText(e.target.value)}
-                                                        placeholder="Descreva a causa raiz ou o contexto da falha operacional..."
+                                                        disabled={!slaJustificationEditable}
+                                                        placeholder={slaJustificationEditable ? 'Descreva a causa raiz ou o contexto da falha operacional...' : 'Somente editável no setor PCP'}
                                                         className={`w-full px-3 py-2 border rounded-lg text-xs resize-none focus:ring-2 focus:ring-amber-400 transition-colors ${
-                                                            slaJustificationCategory === 'Outros' && !slaJustificationText.trim()
-                                                                ? 'border-rose-400 bg-rose-50'
-                                                                : 'border-slate-300 bg-white'
+                                                            !slaJustificationEditable
+                                                                ? 'border-slate-200 bg-slate-100 cursor-not-allowed text-slate-400'
+                                                                : slaJustificationCategory === 'Outros' && !slaJustificationText.trim()
+                                                                    ? 'border-rose-400 bg-rose-50'
+                                                                    : 'border-slate-300 bg-white'
                                                         }`}
                                                     />
                                                 </div>
@@ -1581,6 +1618,7 @@ const KanbanPage = () => {
                                                         id={`btn-save-sla-justification-${selectedPO.id}`}
                                                         onClick={handleSaveSlaJustification}
                                                         disabled={
+                                                            !slaJustificationEditable ||
                                                             savingJustification ||
                                                             !slaJustificationCategory ||
                                                             (slaJustificationCategory === 'Outros' && !slaJustificationText.trim())
