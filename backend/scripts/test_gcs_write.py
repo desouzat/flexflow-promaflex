@@ -57,10 +57,10 @@ try:
     blob = bucket.blob(TEST_BLOB)
     blob.upload_from_file(io.BytesIO(TEST_CONTENT), content_type="text/plain")
     public_url = f"https://storage.googleapis.com/{BUCKET_NAME}/{TEST_BLOB}"
-    print(f"\n[SUCCESS] ✅ WRITE PERMISSION CONFIRMED")
+    print(f"\n[SUCCESS] GCS WRITE PERMISSION CONFIRMED")
     print(f"[SUCCESS] Blob created at: {public_url}")
 except Exception as e:
-    print(f"\n[FAIL] ❌ WRITE FAILED: {e}")
+    print(f"\n[FAIL] WRITE FAILED: {e}")
     print("\n[DIAGNOSIS] The GCP service account does NOT have Storage Object Creator")
     print("            or Storage Object Admin on this bucket.")
     print("            Fix: In GCP IAM Console, grant the SA 'Storage Object Admin'")
