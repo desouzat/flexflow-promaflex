@@ -722,6 +722,9 @@ const KanbanPage = () => {
     // We MUST reset inputRef.current.value = "" after every upload attempt (success or failure)
     // so the browser fires onChange again if the user re-selects the same file after an error.
     const handleEvidenceUpload = async (field, file, inputRef) => {
+        // [F12 TRACE 3] — handler entry point
+        console.log('[F12 TRACE 3] Entered handleEvidenceUpload. Field: ' + field + ' | File: ' + file?.name)
+
         if (!file) return
 
         // Immediately reset the input value so the browser treats the next pick as a new event,
@@ -739,9 +742,15 @@ const KanbanPage = () => {
             // Use the api instance's baseURL (/api) so auth headers + interceptors apply cleanly.
             const endpoint = `/kanban/pos/${poId}/${suffix}`
 
+            // [F12 TRACE 4] — immediately before the Axios POST fires
+            console.log('[F12 TRACE 4] Dispatched Axios POST upload request... endpoint:', endpoint, '| poId:', poId, '| filename:', file.name)
+
             const response = await api.post(endpoint, formData, {
                 headers: { 'Content-Type': 'multipart/form-data' }
             })
+
+            // [F12 TRACE 5] — successful response received
+            console.log('[F12 TRACE 5] Successfully uploaded. Response payload: ', response.data)
 
             dismissToast(toastId)
 
@@ -780,6 +789,8 @@ const KanbanPage = () => {
             }
             showSuccess(`${field === 'foto_carga_path' ? 'Foto da Carga' : 'Nota Fiscal com Canhoto Assinado'} enviada com sucesso`)
         } catch (error) {
+            // [F12 TRACE ERROR] — upload failed
+            console.log('[F12 TRACE ERROR] Upload failed. Error context: ', error)
             dismissToast(toastId)
             console.error('Failed to upload evidence:', error)
             showError(error.response?.data?.detail || 'Erro ao enviar evidência')
@@ -2407,6 +2418,8 @@ const KanbanPage = () => {
                                                                                                 className="hidden"
                                                                                                 disabled={isPhaseADisabled}
                                                                                                 onChange={(e) => {
+                                                                                                    // [F12 TRACE 2] — file input onChange fired
+                                                                                                    console.log('[F12 TRACE 2] File input onChange fired (foto_carga_path). Files detected: ', e.target.files)
                                                                                                     const file = e.target.files[0]
                                                                                                     if (file) handleEvidenceUpload('foto_carga_path', file, truckPhotoInputRef)
                                                                                                 }}
@@ -2429,7 +2442,12 @@ const KanbanPage = () => {
                                                                                                     {!isPhaseADisabled && (
                                                                                                         <button
                                                                                                             type="button"
-                                                                                                            onClick={(e) => { e.stopPropagation(); truckPhotoInputRef.current?.click() }}
+                                                                                                            onClick={(e) => {
+                                                                                                                // [F12 TRACE 1] — Substituir button clicked
+                                                                                                                console.log('[F12 TRACE 1] Upload button clicked for field: foto_carga_path (Substituir)')
+                                                                                                                e.stopPropagation()
+                                                                                                                truckPhotoInputRef.current?.click()
+                                                                                                            }}
                                                                                                             className="inline-flex items-center gap-1 text-[10px] text-gray-600 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded px-2 py-0.5 cursor-pointer transition-colors"
                                                                                                         >
                                                                                                             Substituir Arquivo
@@ -2439,7 +2457,12 @@ const KanbanPage = () => {
                                                                                             ) : (
                                                                                                 <button
                                                                                                     type="button"
-                                                                                                    onClick={(e) => { e.stopPropagation(); truckPhotoInputRef.current?.click() }}
+                                                                                                    onClick={(e) => {
+                                                                                                        // [F12 TRACE 1] — Enviar Foto button clicked
+                                                                                                        console.log('[F12 TRACE 1] Upload button clicked for field: foto_carga_path (Enviar Foto)')
+                                                                                                        e.stopPropagation()
+                                                                                                        truckPhotoInputRef.current?.click()
+                                                                                                    }}
                                                                                                     disabled={isPhaseADisabled}
                                                                                                     className={`flex items-center justify-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg transition-colors text-xs font-semibold shadow-xs ${isPhaseADisabled ? 'cursor-not-allowed opacity-50 bg-orange-400' : 'hover:bg-orange-700 cursor-pointer'}`}
                                                                                                 >
@@ -2461,6 +2484,8 @@ const KanbanPage = () => {
                                                                                                 className="hidden"
                                                                                                 disabled={isPhaseADisabled}
                                                                                                 onChange={(e) => {
+                                                                                                    // [F12 TRACE 2] — file input onChange fired
+                                                                                                    console.log('[F12 TRACE 2] File input onChange fired (foto_canhoto_path). Files detected: ', e.target.files)
                                                                                                     const file = e.target.files[0]
                                                                                                     if (file) handleEvidenceUpload('foto_canhoto_path', file, receiptPhotoInputRef)
                                                                                                 }}
@@ -2483,7 +2508,12 @@ const KanbanPage = () => {
                                                                                                     {!isPhaseADisabled && (
                                                                                                         <button
                                                                                                             type="button"
-                                                                                                            onClick={(e) => { e.stopPropagation(); receiptPhotoInputRef.current?.click() }}
+                                                                                                            onClick={(e) => {
+                                                                                                                // [F12 TRACE 1] — Substituir button clicked
+                                                                                                                console.log('[F12 TRACE 1] Upload button clicked for field: foto_canhoto_path (Substituir)')
+                                                                                                                e.stopPropagation()
+                                                                                                                receiptPhotoInputRef.current?.click()
+                                                                                                            }}
                                                                                                             className="inline-flex items-center gap-1 text-[10px] text-gray-600 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded px-2 py-0.5 cursor-pointer transition-colors"
                                                                                                         >
                                                                                                             Substituir Arquivo
@@ -2493,7 +2523,12 @@ const KanbanPage = () => {
                                                                                             ) : (
                                                                                                 <button
                                                                                                     type="button"
-                                                                                                    onClick={(e) => { e.stopPropagation(); receiptPhotoInputRef.current?.click() }}
+                                                                                                    onClick={(e) => {
+                                                                                                        // [F12 TRACE 1] — Enviar Foto button clicked
+                                                                                                        console.log('[F12 TRACE 1] Upload button clicked for field: foto_canhoto_path (Enviar Foto)')
+                                                                                                        e.stopPropagation()
+                                                                                                        receiptPhotoInputRef.current?.click()
+                                                                                                    }}
                                                                                                     disabled={isPhaseADisabled}
                                                                                                     className={`flex items-center justify-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg transition-colors text-xs font-semibold shadow-xs ${isPhaseADisabled ? 'cursor-not-allowed opacity-50 bg-orange-400' : 'hover:bg-orange-700 cursor-pointer'}`}
                                                                                                 >
