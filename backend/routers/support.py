@@ -73,7 +73,17 @@ def generate_ticket_id(db: Session) -> str:
 def send_ticket_email(ticket_id: str, username: str, email: str, description: str, support_email: str, attachment_name: str | None = None) -> bool:
     """
     Sends an email notification to the address defined in settings or SUPPORT_EMAIL_DESTINATION.
-    Falls back to console logging if credentials or mail server are not configured.
+
+    Environment variables:
+        SMTP_HOST         SMTP server hostname (default: smtp.gmail.com)
+        SMTP_PORT         SMTP server port — 587 = STARTTLS, 465 = SSL (default: 587)
+        SMTP_USER         SMTP login username (e.g. noreply@botcase.com.br)
+        SMTP_PASS         SMTP login password or app-password
+        SMTP_SENDER       Display sender address (falls back to SMTP_USER if not set)
+        SMTP_SIMULATE     If set to "true" / "1" / "yes", skips real SMTP and logs only (default: false)
+
+    Returns True if the email was delivered (or simulated), False on delivery failure.
+    Falls back gracefully — never raises, never crashes the calling request thread.
     """
     if not support_email:
         print("[WARNING] Support email destination is not defined. Falling back to console logging.")
@@ -81,7 +91,7 @@ def send_ticket_email(ticket_id: str, username: str, email: str, description: st
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     subject = f"{ticket_id} - FlexFlow Issue {timestamp}"
-    
+
     body = f"""
 [SUPORTE] NOVO TICKET DE SUPORTE DETECTADO
 ----------------------------------------
@@ -95,46 +105,104 @@ DESCRIÇÃO DO PROBLEMA:
 Anexo: {attachment_name or "Nenhum"}
 """
 
-    # Traceability simulated email message requested
-    print(f"\n--- SIMULATED EMAIL SENT TO: {support_email} | TICKET: {ticket_id} ---")
-
-    print("\n" + "=" * 80)
-    print("[SUPORTE] SENDING SUPPORT TICKET EMAIL (COMPLETE BODY BELOW)...")
+    # ── Always print a console trace for traceability ────────────────────────
+    print(f"\n{'='*80}")
+    print("[SUPORTE] SUPPORT TICKET EMAIL DISPATCH")
     print(f"To: {support_email}")
     print(f"Subject: {subject}")
     print(body)
-    print("=" * 80 + "\n")
+    print(f"{'='*80}\n")
 
-    # Read SMTP credentials
-    smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
+    # ── Read SMTP configuration from environment ──────────────────────────────
+    smtp_host     = os.getenv("SMTP_HOST", "smtp.gmail.com")
     smtp_port_str = os.getenv("SMTP_PORT", "587")
-    smtp_user = os.getenv("SMTP_USER", "")
-    smtp_pass = os.getenv("SMTP_PASS", "")
+    smtp_user     = os.getenv("SMTP_USER", "")
+    smtp_pass     = os.getenv("SMTP_PASS", "")
+    smtp_sender   = os.getenv("SMTP_SENDER", smtp_user)   # Falls back to SMTP_USER if not set
+    simulate_raw  = os.getenv("SMTP_SIMULATE", "false").strip().lower()
+    smtp_simulate = simulate_raw in ("true", "1", "yes")
 
-    if not smtp_user or not smtp_pass:
-        print("[INFO] SMTP credentials not fully configured in env (SMTP_USER/SMTP_PASS). Treating console log as successful mock delivery.")
+    # ── Simulate mode (explicit mock) ─────────────────────────────────────────
+    if smtp_simulate:
+        print(f"[SMTP] SIMULATE mode active — skipping real SMTP dispatch for ticket {ticket_id}.")
         return True
 
+    # ── Credentials gate ─────────────────────────────────────────────────────
+    if not smtp_user or not smtp_pass:
+        print(
+            "[SMTP] SMTP_USER or SMTP_PASS not configured in environment. "
+            "Ticket saved successfully; email not sent (no credentials). "
+            "Set SMTP_SIMULATE=true to suppress this warning in test environments."
+        )
+        return False
+
+    # ── Build the MIME message ────────────────────────────────────────────────
     try:
         smtp_port = int(smtp_port_str)
-        msg = MIMEMultipart()
-        msg['From'] = smtp_user
-        msg['To'] = support_email
-        msg['Subject'] = subject
-        msg.attach(MIMEText(body, 'plain', 'utf-8'))
+    except ValueError:
+        print(f"[SMTP] Invalid SMTP_PORT value '{smtp_port_str}' — defaulting to 587.")
+        smtp_port = 587
 
-        # Connect to SMTP server
-        server = smtplib.SMTP(smtp_host, smtp_port, timeout=10)
-        server.starttls()
+    msg = MIMEMultipart()
+    msg['From']    = smtp_sender
+    msg['To']      = support_email
+    msg['Subject'] = subject
+    msg['Reply-To'] = email  # Route replies to the ticket creator
+    msg.attach(MIMEText(body, 'plain', 'utf-8'))
+
+    # ── Establish secure SMTP connection with timeout guard ──────────────────
+    # timeout=10 ensures the blocking connect()/starttls()/login() calls
+    # fail fast on unreachable servers, preventing Gunicorn worker timeouts.
+    server = None
+    try:
+        if smtp_port == 465:
+            # SSL mode: full TLS tunnel from the first byte
+            print(f"[SMTP] Connecting via SSL on {smtp_host}:{smtp_port} (timeout=10s)...")
+            server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=10)
+        else:
+            # STARTTLS mode (port 587 or custom): upgrade plain connection to TLS
+            print(f"[SMTP] Connecting via STARTTLS on {smtp_host}:{smtp_port} (timeout=10s)...")
+            server = smtplib.SMTP(smtp_host, smtp_port, timeout=10)
+            server.ehlo()
+            server.starttls()
+            server.ehlo()   # Re-identify after STARTTLS upgrade
+
         server.login(smtp_user, smtp_pass)
-        server.sendmail(smtp_user, support_email, msg.as_string())
-        server.close()
-        print(f"✅ Email sent successfully to {support_email} via {smtp_host}:{smtp_port}")
+        server.sendmail(smtp_sender, [support_email], msg.as_string())
+        print(f"✅ [SMTP] Email sent successfully → {support_email} via {smtp_host}:{smtp_port}")
         return True
+
+    except smtplib.SMTPAuthenticationError as auth_err:
+        print(
+            f"❌ [SMTP] Authentication failed for user '{smtp_user}'. "
+            f"Check SMTP_USER / SMTP_PASS credentials. Detail: {auth_err}"
+        )
+    except smtplib.SMTPConnectError as conn_err:
+        print(
+            f"❌ [SMTP] Could not connect to {smtp_host}:{smtp_port}. "
+            f"Server may be unreachable or blocked by firewall. Detail: {conn_err}"
+        )
+    except smtplib.SMTPRecipientsRefused as ref_err:
+        print(
+            f"❌ [SMTP] Recipient '{support_email}' was refused by the server. Detail: {ref_err}"
+        )
+    except TimeoutError:
+        print(
+            f"❌ [SMTP] Connection to {smtp_host}:{smtp_port} timed out after 10s. "
+            "Ticket is saved; email delivery skipped."
+        )
     except Exception as e:
-        print(f"❌ Error sending real SMTP email: {e}")
-        print("[FALLBACK] Saved ticket successfully despite email failure. Console logs preserve ticket details.")
-        return False
+        print(f"❌ [SMTP] Unexpected error during email dispatch: {type(e).__name__}: {e}")
+    finally:
+        # Always attempt a clean QUIT to release the server-side connection slot
+        if server is not None:
+            try:
+                server.quit()
+            except Exception:
+                pass  # If quit fails, the OS will close the socket on garbage collection
+
+    print("[SMTP] Ticket saved successfully despite email failure. Console logs preserve ticket details.")
+    return False
 
 # ============================================================================
 # ROUTER
