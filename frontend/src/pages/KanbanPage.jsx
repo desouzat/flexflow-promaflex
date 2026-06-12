@@ -96,14 +96,8 @@ const KanbanPage = () => {
         ))
     ) : false;
 
-    // FF-HARDENING-008: SLA justification editing is restricted to the PCP stage only.
-    // PCP_STATUS_MACROS is defined at module level (above). The three derived booleans
-    // that depend on runtime state remain here, inside the component.
-    const isUserPrivileged = user && ['admin', 'master'].includes((user.role || '').toLowerCase())
-    const isPOInPCP = selectedPO ? PCP_STATUS_MACROS.includes(selectedPO.status_macro) || selectedPO.status === 'PCP' : false
-    const slaJustificationEditable = isUserPrivileged || isPOInPCP
 
-    
+
     const handleFinanceiroChecklistChange = (field, checked) => {
         setChecklistFinanceiro(prev => ({
             ...prev,
@@ -168,6 +162,13 @@ const KanbanPage = () => {
     const [localFields, setLocalFields] = useState({})
     const { refreshNotifications } = useNotifications()
     const { user } = useAuth()
+
+    // FF-HARDENING-008: SLA justification is restricted to the PCP stage only.
+    // Declared here — after useAuth() — so `user` is guaranteed to exist.
+    // PCP_STATUS_MACROS is defined at module level to avoid any TDZ from bundler hoisting.
+    const isUserPrivileged = user && ['admin', 'master'].includes((user.role || '').toLowerCase())
+    const isPOInPCP = selectedPO ? PCP_STATUS_MACROS.includes(selectedPO.status_macro) || selectedPO.status === 'PCP' : false
+    const slaJustificationEditable = isUserPrivileged || isPOInPCP
 
     const fetchBoard = async () => {
         try {
