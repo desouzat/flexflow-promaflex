@@ -51,6 +51,157 @@ const getDownloadUrl = (path) => {
     return generated;
 };
 
+// =============================================================================
+// LogisticsUploadSection
+// FF-HARDENING-008 — Single source-of-truth upload subcomponent.
+//
+// Architecture:
+//   • Declared at MODULE SCOPE so it is fully initialized before any render.
+//   • Owns TWO hidden <input type="file"> elements rendered at its own root —
+//     never inside a .map() or conditional block — so refs are always stable.
+//   • Uses a useRef (activePoIdRef) for the target PO ID so the onChange
+//     closure always reads the LIVE value written synchronously by the button
+//     onClick — eliminating the stale useState closure bug entirely.
+//   • Value reset (e.target.value = '') on onChange entry guarantees the
+//     browser fires onChange again for same-file re-selection.
+//   • All F12 TRACE logs (1–5 + ERROR) are preserved for UAT diagnosis.
+// =============================================================================
+const LogisticsUploadSection = ({ poId, logisticsChecklist, isDisabled, onUploadRequest }) => {
+    const truckInputRef   = useRef(null)
+    const receiptInputRef = useRef(null)
+    const activePoIdRef   = useRef(null)   // sync ref — no stale closure
+
+    const triggerUpload = (field) => {
+        console.log('[F12 TRACE 1] Upload button clicked for field:', field, '| poId:', poId)
+        activePoIdRef.current = poId
+        if (field === 'foto_carga_path') {
+            setTimeout(() => { truckInputRef.current?.click() }, 150)
+        } else {
+            setTimeout(() => { receiptInputRef.current?.click() }, 150)
+        }
+    }
+
+    const handleFileChange = (field, e) => {
+        e.target.value = ''   // reset immediately so same-file re-selection works
+        const file = e.target.files?.[0]
+        const pid  = activePoIdRef.current
+        console.log('[F12 TRACE 2] Global input onChange fired. field:', field, '| file:', file?.name, '| poId:', pid)
+        if (file && pid) {
+            onUploadRequest(field, file, pid)
+        }
+    }
+
+    return (
+        <div className="border-t border-gray-150 pt-4 mt-2">
+            <h5 className="text-xs font-bold uppercase text-gray-700 mb-3 tracking-wide">
+                Upload de Evidências Logísticas (Obrigatório)
+            </h5>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+                {/* ── Foto da Carga Carregada ─────────────────────────────── */}
+                <div className="border-2 border-dashed border-cyan-200 bg-cyan-50/10 rounded-lg p-4 transition-colors">
+                    <label className="block text-xs font-bold text-cyan-900 uppercase mb-2">
+                        Foto da Carga Carregada
+                    </label>
+                    {logisticsChecklist?.foto_carga_path ? (
+                        <div className="space-y-2">
+                            <div className="flex items-center gap-2 text-green-600 font-semibold text-sm">
+                                <CheckCircle className="w-5 h-5 flex-shrink-0" />
+                                <span>Evidência da Carga Salva!</span>
+                            </div>
+                            <a
+                                href={getDownloadUrl(logisticsChecklist.foto_carga_path)}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-xs text-blue-600 hover:text-blue-800 font-semibold underline block"
+                            >
+                                Abrir Foto da Carga
+                            </a>
+                            {!isDisabled && (
+                                <button
+                                    type="button"
+                                    onClick={() => triggerUpload('foto_carga_path')}
+                                    className="inline-flex items-center gap-1 text-[10px] text-gray-600 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded px-2 py-0.5 cursor-pointer transition-colors"
+                                >
+                                    Substituir Arquivo
+                                </button>
+                            )}
+                        </div>
+                    ) : (
+                        <button
+                            type="button"
+                            onClick={() => triggerUpload('foto_carga_path')}
+                            disabled={isDisabled}
+                            className={`flex items-center justify-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg transition-colors text-xs font-semibold shadow-xs ${isDisabled ? 'cursor-not-allowed opacity-50 bg-orange-400' : 'hover:bg-orange-700 cursor-pointer'}`}
+                        >
+                            Enviar Foto
+                        </button>
+                    )}
+                </div>
+
+                {/* ── Nota Fiscal com Canhoto Assinado ────────────────────── */}
+                <div className="border-2 border-dashed border-cyan-200 bg-cyan-50/10 rounded-lg p-4 transition-colors">
+                    <label className="block text-xs font-bold text-cyan-900 uppercase mb-2">
+                        Nota Fiscal com Canhoto Assinado
+                    </label>
+                    {logisticsChecklist?.foto_canhoto_path ? (
+                        <div className="space-y-2">
+                            <div className="flex items-center gap-2 text-green-600 font-semibold text-sm">
+                                <CheckCircle className="w-5 h-5 flex-shrink-0" />
+                                <span>Nota Fiscal com Canhoto Assinado Salva!</span>
+                            </div>
+                            <a
+                                href={getDownloadUrl(logisticsChecklist.foto_canhoto_path)}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-xs text-blue-600 hover:text-blue-800 font-semibold underline block"
+                            >
+                                Abrir Nota Fiscal com Canhoto Assinado
+                            </a>
+                            {!isDisabled && (
+                                <button
+                                    type="button"
+                                    onClick={() => triggerUpload('foto_canhoto_path')}
+                                    className="inline-flex items-center gap-1 text-[10px] text-gray-600 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded px-2 py-0.5 cursor-pointer transition-colors"
+                                >
+                                    Substituir Arquivo
+                                </button>
+                            )}
+                        </div>
+                    ) : (
+                        <button
+                            type="button"
+                            onClick={() => triggerUpload('foto_canhoto_path')}
+                            disabled={isDisabled}
+                            className={`flex items-center justify-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg transition-colors text-xs font-semibold shadow-xs ${isDisabled ? 'cursor-not-allowed opacity-50 bg-orange-400' : 'hover:bg-orange-700 cursor-pointer'}`}
+                        >
+                            Enviar Foto
+                        </button>
+                    )}
+                </div>
+
+            </div>
+
+            {/* Global singleton file inputs — owned by this component, rendered ONCE */}
+            <input
+                ref={truckInputRef}
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png"
+                style={{ display: 'none' }}
+                onChange={(e) => handleFileChange('foto_carga_path', e)}
+            />
+            <input
+                ref={receiptInputRef}
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png"
+                style={{ display: 'none' }}
+                onChange={(e) => handleFileChange('foto_canhoto_path', e)}
+            />
+        </div>
+    )
+}
+
 const KanbanPage = () => {
 
     const [boardData, setBoardData] = useState(null)
@@ -161,15 +312,7 @@ const KanbanPage = () => {
     const [savingFields, setSavingFields] = useState(false)
     const [localFields, setLocalFields] = useState({})
 
-    // FF-HARDENING-008 (Global Input Pattern): Two singleton file inputs rendered
-    // at the KanbanPage root — never inside modals/maps — so they are always enabled
-    // and always mounted. activeUploadPoIdRef is a REF (not state) so its .current
-    // value is written synchronously in the button onClick and is immediately readable
-    // by the global input's onChange closure — avoiding the stale-closure bug that
-    // useState causes (async re-render means onChange reads the old null value).
-    const globalTruckInputRef   = useRef(null)
-    const globalReceiptInputRef = useRef(null)
-    const activeUploadPoIdRef   = useRef(null)   // SYNC ref — no stale closure
+
 
     const { refreshNotifications } = useNotifications()
     const { user } = useAuth()
@@ -2394,119 +2537,13 @@ const KanbanPage = () => {
                                                                                     </div>
                                                                                 </div>
 
-                                                                                {/* File Evidence Uploads */}
-                                                                                <div className="border-t border-gray-150 pt-4 mt-2">
-                                                                                    <h5 className="text-xs font-bold uppercase text-gray-700 mb-3 tracking-wide">
-                                                                                        Upload de Evidências Logísticas (Obrigatório)
-                                                                                    </h5>
-                                                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-
-                                                                                        {/* ── Foto da Carga Carregada ─────────────────────────────── */}
-                                                                                        <div className="border-2 border-dashed border-cyan-200 bg-cyan-50/10 rounded-lg p-4 transition-colors">
-                                                                                            <label className="block text-xs font-bold text-cyan-900 uppercase mb-2">
-                                                                                                Foto da Carga Carregada
-                                                                                            </label>
-
-                                                                                            {logisticsChecklist.foto_carga_path ? (
-                                                                                                <div className="space-y-2">
-                                                                                                    <div className="flex items-center gap-2 text-green-600 font-semibold text-sm">
-                                                                                                        <CheckCircle className="w-5 h-5 flex-shrink-0" />
-                                                                                                        <span>Evidência da Carga Salva!</span>
-                                                                                                    </div>
-                                                                                                    <a
-                                                                                                        href={getDownloadUrl(logisticsChecklist.foto_carga_path)}
-                                                                                                        target="_blank"
-                                                                                                        rel="noreferrer"
-                                                                                                        className="text-xs text-blue-600 hover:text-blue-800 font-semibold underline block"
-                                                                                                    >
-                                                                                                        Abrir Foto da Carga
-                                                                                                    </a>
-                                                                                                    {!isPhaseADisabled && (
-                                                                                                        <button
-                                                                                                            type="button"
-                                                                                                            onClick={(e) => {
-                                                                                                                console.log('[F12 TRACE 1] Upload button clicked for field: foto_carga_path (Substituir)')
-                                                                                                                e.stopPropagation()
-                                                                                                                activeUploadPoIdRef.current = selectedPO?.id
-                                                                                                                setTimeout(() => { globalTruckInputRef.current?.click() }, 150)
-                                                                                                            }}
-                                                                                                            className="inline-flex items-center gap-1 text-[10px] text-gray-600 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded px-2 py-0.5 cursor-pointer transition-colors"
-                                                                                                        >
-                                                                                                            Substituir Arquivo
-                                                                                                        </button>
-                                                                                                    )}
-                                                                                                </div>
-                                                                                            ) : (
-                                                                                                <button
-                                                                                                    type="button"
-                                                                                                    onClick={(e) => {
-                                                                                                        console.log('[F12 TRACE 1] Upload button clicked for field: foto_carga_path (Enviar Foto)')
-                                                                                                        e.stopPropagation()
-                                                                                                        activeUploadPoIdRef.current = selectedPO?.id
-                                                                                                        setTimeout(() => { globalTruckInputRef.current?.click() }, 150)
-                                                                                                    }}
-                                                                                                    disabled={isPhaseADisabled}
-                                                                                                    className={`flex items-center justify-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg transition-colors text-xs font-semibold shadow-xs ${isPhaseADisabled ? 'cursor-not-allowed opacity-50 bg-orange-400' : 'hover:bg-orange-700 cursor-pointer'}`}
-                                                                                                >
-                                                                                                    Enviar Foto
-                                                                                                </button>
-                                                                                            )}
-                                                                                        </div>
-
-                                                                                        {/* ── Nota Fiscal com Canhoto Assinado ────────────────────── */}
-                                                                                        <div className="border-2 border-dashed border-cyan-200 bg-cyan-50/10 rounded-lg p-4 transition-colors">
-                                                                                            <label className="block text-xs font-bold text-cyan-900 uppercase mb-2">
-                                                                                                Nota Fiscal com Canhoto Assinado
-                                                                                            </label>
-
-                                                                                            {logisticsChecklist.foto_canhoto_path ? (
-                                                                                                <div className="space-y-2">
-                                                                                                    <div className="flex items-center gap-2 text-green-600 font-semibold text-sm">
-                                                                                                        <CheckCircle className="w-5 h-5 flex-shrink-0" />
-                                                                                                        <span>Nota Fiscal com Canhoto Assinado Salva!</span>
-                                                                                                    </div>
-                                                                                                    <a
-                                                                                                        href={getDownloadUrl(logisticsChecklist.foto_canhoto_path)}
-                                                                                                        target="_blank"
-                                                                                                        rel="noreferrer"
-                                                                                                        className="text-xs text-blue-600 hover:text-blue-800 font-semibold underline block"
-                                                                                                    >
-                                                                                                        Abrir Nota Fiscal com Canhoto Assinado
-                                                                                                    </a>
-                                                                                                    {!isPhaseADisabled && (
-                                                                                                        <button
-                                                                                                            type="button"
-                                                                                                            onClick={(e) => {
-                                                                                                                console.log('[F12 TRACE 1] Upload button clicked for field: foto_canhoto_path (Substituir)')
-                                                                                                                e.stopPropagation()
-                                                                                                                activeUploadPoIdRef.current = selectedPO?.id
-                                                                                                                setTimeout(() => { globalReceiptInputRef.current?.click() }, 150)
-                                                                                                            }}
-                                                                                                            className="inline-flex items-center gap-1 text-[10px] text-gray-600 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded px-2 py-0.5 cursor-pointer transition-colors"
-                                                                                                        >
-                                                                                                            Substituir Arquivo
-                                                                                                        </button>
-                                                                                                    )}
-                                                                                                </div>
-                                                                                            ) : (
-                                                                                                <button
-                                                                                                    type="button"
-                                                                                                    onClick={(e) => {
-                                                                                                        console.log('[F12 TRACE 1] Upload button clicked for field: foto_canhoto_path (Enviar Foto)')
-                                                                                                        e.stopPropagation()
-                                                                                                        activeUploadPoIdRef.current = selectedPO?.id
-                                                                                                        setTimeout(() => { globalReceiptInputRef.current?.click() }, 150)
-                                                                                                    }}
-                                                                                                    disabled={isPhaseADisabled}
-                                                                                                    className={`flex items-center justify-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg transition-colors text-xs font-semibold shadow-xs ${isPhaseADisabled ? 'cursor-not-allowed opacity-50 bg-orange-400' : 'hover:bg-orange-700 cursor-pointer'}`}
-                                                                                                >
-                                                                                                    Enviar Foto
-                                                                                                </button>
-                                                                                            )}
-                                                                                        </div>
-
-                                                                                    </div>
-                                                                                </div>
+                                                                                {/* FF-HARDENING-008: Single source-of-truth upload subcomponent */}
+                                                                                <LogisticsUploadSection
+                                                                                    poId={selectedPO?.id}
+                                                                                    logisticsChecklist={logisticsChecklist}
+                                                                                    isDisabled={isPhaseADisabled}
+                                                                                    onUploadRequest={handleEvidenceUpload}
+                                                                                />
                                                                             </div>
                                                                         )}
                                                                     </div>
@@ -3577,42 +3614,6 @@ const KanbanPage = () => {
                 )}
             </div>
 
-            {/* ── FF-HARDENING-008: Global singleton file inputs ──────────────────────
-                 Rendered ONCE at the KanbanPage root, outside all modals and card maps.
-                 Never disabled — .click() always opens the OS file picker.
-                 activeUploadPoIdRef.current is written SYNCHRONOUSLY in the button onClick
-                 so the onChange closure always reads the correct live PO id.
-            ─────────────────────────────────────────────────────────────────────── */}
-            <input
-                ref={globalTruckInputRef}
-                type="file"
-                accept=".pdf,.jpg,.jpeg,.png"
-                style={{ display: 'none' }}
-                onChange={(e) => {
-                    const file = e.target.files[0]
-                    const poId = activeUploadPoIdRef.current
-                    console.log('[F12 TRACE 2] Global Truck Input onChange fired. File:', file?.name, '| poId:', poId)
-                    if (file && poId) {
-                        handleEvidenceUpload('foto_carga_path', file, poId, globalTruckInputRef)
-                    }
-                    e.target.value = ''
-                }}
-            />
-            <input
-                ref={globalReceiptInputRef}
-                type="file"
-                accept=".pdf,.jpg,.jpeg,.png"
-                style={{ display: 'none' }}
-                onChange={(e) => {
-                    const file = e.target.files[0]
-                    const poId = activeUploadPoIdRef.current
-                    console.log('[F12 TRACE 2] Global Receipt Input onChange fired. File:', file?.name, '| poId:', poId)
-                    if (file && poId) {
-                        handleEvidenceUpload('foto_canhoto_path', file, poId, globalReceiptInputRef)
-                    }
-                    e.target.value = ''
-                }}
-            />
 
         </ErrorBoundary>
     )
