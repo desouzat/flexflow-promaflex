@@ -53,46 +53,38 @@ const getDownloadUrl = (path) => {
 
 // =============================================================================
 // LogisticsUploadSection
-// FF-HARDENING-008 — Single source-of-truth upload subcomponent.
+// FF-HARDENING-008 — Single source-of-truth upload UI subcomponent.
 //
 // Architecture:
 //   • Declared at MODULE SCOPE so it is fully initialized before any render.
-//   • Owns TWO hidden <input type="file"> elements rendered at its own root —
-//     never inside a .map() or conditional block — so refs are always stable.
-//   • Uses a useRef (activePoIdRef) for the target PO ID so the onChange
-//     closure always reads the LIVE value written synchronously by the button
-//     onClick — eliminating the stale useState closure bug entirely.
-//   • Value reset (e.target.value = '') on onChange entry guarantees the
-//     browser fires onChange again for same-file re-selection.
-//   • All F12 TRACE logs (1–5 + ERROR) are preserved for UAT diagnosis.
+//   • Does NOT own its own <input type="file"> elements.
+//   • Receives truckInputRef, receiptInputRef, activePoIdRef as props from
+//     KanbanPage, where the actual <input> elements live BEFORE <ErrorBoundary>.
+//   • This guarantees the inputs are ALWAYS mounted in the DOM, completely
+//     independent of ErrorBoundary state or modal visibility.
+//   • .click() is called SYNCHRONOUSLY to preserve Chrome User Activation.
+//   • All F12 TRACE logs (1, 1.5, 2) preserved for UAT diagnosis.
 // =============================================================================
-const LogisticsUploadSection = ({ poId, logisticsChecklist, isDisabled, onUploadRequest }) => {
-    const truckInputRef   = useRef(null)
-    const receiptInputRef = useRef(null)
-    const activePoIdRef   = useRef(null)   // sync ref — no stale closure
+const LogisticsUploadSection = ({
+    poId,
+    logisticsChecklist,
+    isDisabled,
+    onUploadRequest,
+    truckInputRef,
+    receiptInputRef,
+    activePoIdRef,
+}) => {
 
     const triggerUpload = (field) => {
         console.log('[F12 TRACE 1] Upload button clicked for field:', field, '| poId:', poId)
-        // Write the PO ID synchronously BEFORE .click() — useRef guarantees the
-        // onChange closure reads this value immediately (no stale closure risk).
         activePoIdRef.current = poId
-        // Call .click() SYNCHRONOUSLY within the same user-gesture event handler.
-        // Chrome's User Activation policy blocks programmatic .click() on file inputs
-        // when called inside setTimeout/Promise (async context breaks the activation chain).
+        // TRACE 1.5 — log ref status to confirm inputs are mounted
         if (field === 'foto_carga_path') {
+            console.log('[F12 TRACE 1.5] truckInputRef.current:', truckInputRef.current)
             truckInputRef.current?.click()
         } else {
+            console.log('[F12 TRACE 1.5] receiptInputRef.current:', receiptInputRef.current)
             receiptInputRef.current?.click()
-        }
-    }
-
-    const handleFileChange = (field, e) => {
-        e.target.value = ''   // reset immediately so same-file re-selection works
-        const file = e.target.files?.[0]
-        const pid  = activePoIdRef.current
-        console.log('[F12 TRACE 2] Global input onChange fired. field:', field, '| file:', file?.name, '| poId:', pid)
-        if (file && pid) {
-            onUploadRequest(field, file, pid)
         }
     }
 
@@ -187,22 +179,6 @@ const LogisticsUploadSection = ({ poId, logisticsChecklist, isDisabled, onUpload
                 </div>
 
             </div>
-
-            {/* Global singleton file inputs — owned by this component, rendered ONCE */}
-            <input
-                ref={truckInputRef}
-                type="file"
-                accept=".pdf,.jpg,.jpeg,.png"
-                style={{ display: 'none' }}
-                onChange={(e) => handleFileChange('foto_carga_path', e)}
-            />
-            <input
-                ref={receiptInputRef}
-                type="file"
-                accept=".pdf,.jpg,.jpeg,.png"
-                style={{ display: 'none' }}
-                onChange={(e) => handleFileChange('foto_canhoto_path', e)}
-            />
         </div>
     )
 }
@@ -316,6 +292,14 @@ const KanbanPage = () => {
 
     const [savingFields, setSavingFields] = useState(false)
     const [localFields, setLocalFields] = useState({})
+
+    // FF-HARDENING-008: File input refs declared at KanbanPage scope so they
+    // can be attached to <input type="file"> elements rendered BEFORE <ErrorBoundary>.
+    // This guarantees the inputs are ALWAYS mounted in the DOM — independent of
+    // ErrorBoundary state and modal visibility.
+    const globalTruckInputRef   = useRef(null)
+    const globalReceiptInputRef = useRef(null)
+    const activeUploadPoIdRef   = useRef(null)  // sync ref — no stale closure
 
 
 
@@ -1378,7 +1362,46 @@ const KanbanPage = () => {
     const isArchived = selectedPO ? (['ARCHIVED', 'ARCHIVED_PARTITIONED', 'COMPLETED'].includes(selectedPO.status_macro) || selectedPO.status === 'Concluídos') : false;
 
     return (
-        <ErrorBoundary>
+        <>
+            {/* FF-HARDENING-008: Global singleton file inputs rendered BEFORE <ErrorBoundary>
+                 and outside ALL conditional renders. These are ALWAYS mounted in the DOM.
+                 Chrome's User Activation policy requires .click() to be called synchronously;
+                 having the inputs here (outside modals/maps/error boundaries) guarantees the
+                 refs are non-null the instant any upload button is pressed. */}
+            <input
+                ref={globalTruckInputRef}
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                    // Read file BEFORE resetting value (reset clears FileList)
+                    const file = e.target.files[0]
+                    e.target.value = ''
+                    const poId = activeUploadPoIdRef.current
+                    console.log('[F12 TRACE 2] Global Truck input onChange. file:', file?.name, '| poId:', poId)
+                    if (file && poId) {
+                        handleEvidenceUpload('foto_carga_path', file, poId, globalTruckInputRef)
+                    }
+                }}
+            />
+            <input
+                ref={globalReceiptInputRef}
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                    // Read file BEFORE resetting value (reset clears FileList)
+                    const file = e.target.files[0]
+                    e.target.value = ''
+                    const poId = activeUploadPoIdRef.current
+                    console.log('[F12 TRACE 2] Global Receipt input onChange. file:', file?.name, '| poId:', poId)
+                    if (file && poId) {
+                        handleEvidenceUpload('foto_canhoto_path', file, poId, globalReceiptInputRef)
+                    }
+                }}
+            />
+
+            <ErrorBoundary>
             <div className="h-full flex flex-col">
                 {/* Header */}
                 <div className="bg-white border-b border-gray-200 px-6 py-4">
@@ -2548,6 +2571,9 @@ const KanbanPage = () => {
                                                                                     logisticsChecklist={logisticsChecklist}
                                                                                     isDisabled={isPhaseADisabled}
                                                                                     onUploadRequest={handleEvidenceUpload}
+                                                                                    truckInputRef={globalTruckInputRef}
+                                                                                    receiptInputRef={globalReceiptInputRef}
+                                                                                    activePoIdRef={activeUploadPoIdRef}
                                                                                 />
                                                                             </div>
                                                                         )}
@@ -3621,6 +3647,7 @@ const KanbanPage = () => {
 
 
         </ErrorBoundary>
+        </>
     )
 }
 
