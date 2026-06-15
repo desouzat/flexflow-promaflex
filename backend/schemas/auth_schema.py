@@ -31,6 +31,8 @@ class UserInfo(BaseModel):
     role: str = Field(..., description="User role")
     permissions: List[str] = Field(default_factory=list, description="User permissions")
     is_active: bool = Field(default=True, description="User active status")
+    # FF-HARDENING-011: SLA manager delegation flag (from DB, baked into JWT at login)
+    is_sla_manager: bool = Field(default=False, description="Whether user can manage SLA config")
 
 
 class MeResponse(BaseModel):

@@ -1,16 +1,27 @@
 import React, { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
-import { Shield, Settings, Mail, Save, Loader2, Clock, Calendar, Timer, AlertCircle, UserCheck } from 'lucide-react'
+import { Shield, Settings, Mail, Save, Loader2, Clock, Calendar, Timer, AlertCircle } from 'lucide-react'
 import api from '../utils/api'
 import { showSuccess, showError, showLoading, dismissToast } from '../utils/toast'
 
+/**
+ * SettingsPage — System configuration panel.
+ *
+ * Access logic (FF-HARDENING-011):
+ *   - "Parâmetros de SLA Industrial" card: visible if user.role in ['admin','master']
+ *     OR user.is_sla_manager === true (set via Gestão de Usuários by admin).
+ *   - "Suporte & Chamados" card: visible ONLY to admin role.
+ *   - Page itself: requires admin OR (master/sla_manager with SLA access).
+ *
+ * The is_sla_manager flag is baked into the JWT at login — no extra API call needed.
+ */
 const SettingsPage = () => {
     const { user, loading: authLoading } = useAuth()
 
-    // --- Support Email State ---
+    // --- Support Email State (admin only) ---
     const [supportEmail, setSupportEmail] = useState('')
-    const [loading, setLoading] = useState(true)
-    const [saving, setSaving] = useState(false)
+    const [emailLoading, setEmailLoading] = useState(false)
+    const [emailSaving, setEmailSaving] = useState(false)
 
     // --- SLA Config State (FF-HARDENING-010) ---
     const [slaTotalHours, setSlaTotalHours] = useState(240)
@@ -21,60 +32,36 @@ const SettingsPage = () => {
     const [slaLoading, setSlaLoading] = useState(true)
     const [slaSaving, setSlaSaving] = useState(false)
 
-    // --- SLA Manager Email Delegation (FF-HARDENING-011) ---
-    const [slaManagerEmail, setSlaManagerEmail] = useState('')
-    const [slaManagerEmailInput, setSlaManagerEmailInput] = useState('')
-    const [slaAccessLoading, setSlaAccessLoading] = useState(true)
-    const [hasSlaAccess, setHasSlaAccess] = useState(false)
-    const [slaManagerSaving, setSlaManagerSaving] = useState(false)
-
-    const isAdmin = (user?.role || '').toLowerCase() === 'admin'
-    const isPrivileged = ['admin', 'master'].includes((user?.role || '').toLowerCase())
+    // Derive access flags from the JWT-backed auth context (no extra API call needed)
+    const isAdmin   = (user?.role || '').toLowerCase() === 'admin'
+    const isMaster  = (user?.role || '').toLowerCase() === 'master'
+    // FF-HARDENING-011: is_sla_manager baked into JWT at login time
+    const isSlaManager = Boolean(user?.is_sla_manager)
+    // SLA card is visible for admin, master, OR delegated SLA manager
+    const hasSlaAccess = isAdmin || isMaster || isSlaManager
+    // Full settings access = any user with at least one visible card
+    const hasAnyAccess = isAdmin || hasSlaAccess
 
     useEffect(() => {
-        if (authLoading) return
-        // Check SLA access for all logged-in users (admin, master, OR SLA manager delegate)
-        fetchSlaAccess()
-        // Only admin fetches support email
+        if (authLoading || !user) return
+        if (hasSlaAccess) {
+            fetchSlaConfig()
+        }
         if (isAdmin) {
             fetchSupportEmail()
         }
     }, [user, authLoading])
 
-    // When we know hasSlaAccess, fetch SLA config
-    useEffect(() => {
-        if (!slaAccessLoading && hasSlaAccess) {
-            fetchSlaConfig()
-        }
-    }, [slaAccessLoading, hasSlaAccess])
-
-    const fetchSlaAccess = async () => {
-        try {
-            setSlaAccessLoading(true)
-            const response = await api.get('/settings/sla-access')
-            setHasSlaAccess(response.data.has_access)
-            const mgr = response.data.sla_manager_email || ''
-            setSlaManagerEmail(mgr)
-            setSlaManagerEmailInput(mgr)
-        } catch (error) {
-            console.error('Failed to fetch SLA access:', error)
-            // If 403, user has no access; that is fine
-            setHasSlaAccess(isPrivileged)
-        } finally {
-            setSlaAccessLoading(false)
-        }
-    }
-
     const fetchSupportEmail = async () => {
         try {
-            setLoading(true)
+            setEmailLoading(true)
             const response = await api.get('/settings/support-email')
             setSupportEmail(response.data.support_email)
         } catch (error) {
-            console.error('Failed to fetch settings:', error)
+            console.error('Failed to fetch support email:', error)
             showError('Erro ao carregar configurações de suporte.')
         } finally {
-            setLoading(false)
+            setEmailLoading(false)
         }
     }
 
@@ -88,9 +75,6 @@ const SettingsPage = () => {
             setSlaStartHour(data.sla_start_hour)
             setSlaEndHour(data.sla_end_hour)
             setSlaWorkingDays(data.sla_working_days)
-            const mgr = data.sla_manager_email || ''
-            setSlaManagerEmail(mgr)
-            setSlaManagerEmailInput(mgr)
         } catch (error) {
             console.error('Failed to fetch SLA config:', error)
             showError('Erro ao carregar parâmetros de SLA.')
@@ -105,7 +89,7 @@ const SettingsPage = () => {
             showError('O e-mail de suporte não pode estar vazio.')
             return
         }
-        setSaving(true)
+        setEmailSaving(true)
         const toastId = showLoading('Salvando configurações...')
         try {
             const response = await api.post('/settings/support-email', { support_email: supportEmail })
@@ -116,15 +100,14 @@ const SettingsPage = () => {
             dismissToast(toastId)
             showError(error.response?.data?.detail || 'Erro ao salvar configurações.')
         } finally {
-            setSaving(false)
+            setEmailSaving(false)
         }
     }
 
     const handleSaveSlaConfig = async (e) => {
         e.preventDefault()
 
-        // Client-side validation
-        if (slaStartHour >= slaEndHour) {
+        if (parseInt(slaStartHour, 10) >= parseInt(slaEndHour, 10)) {
             showError('A hora de início do expediente deve ser menor que a hora de encerramento.')
             return
         }
@@ -143,10 +126,6 @@ const SettingsPage = () => {
                 sla_end_hour:    parseInt(slaEndHour, 10),
                 sla_working_days: slaWorkingDays,
             }
-            // Admin can also save sla_manager_email inline
-            if (isAdmin) {
-                payload.sla_manager_email = slaManagerEmailInput.trim() || null
-            }
             const response = await api.put('/settings/sla-config', payload)
             const d = response.data
             setSlaTotalHours(d.sla_total_hours)
@@ -154,10 +133,6 @@ const SettingsPage = () => {
             setSlaStartHour(d.sla_start_hour)
             setSlaEndHour(d.sla_end_hour)
             setSlaWorkingDays(d.sla_working_days)
-            if (d.sla_manager_email !== undefined) {
-                setSlaManagerEmail(d.sla_manager_email || '')
-                setSlaManagerEmailInput(d.sla_manager_email || '')
-            }
             dismissToast(toastId)
             showSuccess('Parâmetros de SLA atualizados com sucesso!')
         } catch (error) {
@@ -168,7 +143,7 @@ const SettingsPage = () => {
         }
     }
 
-    if (authLoading || slaAccessLoading) {
+    if (authLoading) {
         return (
             <div className="h-full flex items-center justify-center bg-gray-50">
                 <div className="w-12 h-12 border-4 border-primary-600 border-t-transparent rounded-full animate-spin" />
@@ -176,14 +151,14 @@ const SettingsPage = () => {
         )
     }
 
-    // Access gate: admin, master, OR SLA manager email delegate
-    if (!hasSlaAccess && !isAdmin) {
+    // No visible cards for this user at all
+    if (!hasAnyAccess) {
         return (
             <div className="h-full flex items-center justify-center bg-gray-50">
                 <div className="text-center p-8 bg-white rounded-lg shadow-md max-w-md">
                     <Shield className="w-16 h-16 text-red-500 mx-auto mb-4" />
                     <h2 className="text-2xl font-bold text-gray-900 mb-2">Acesso Negado</h2>
-                    <p className="text-gray-650">Você não possui o nível de permissão necessário (Administrador) para gerenciar as configurações do sistema.</p>
+                    <p className="text-gray-500">Você não possui o nível de permissão necessário para acessar as configurações do sistema.</p>
                 </div>
             </div>
         )
@@ -210,7 +185,7 @@ const SettingsPage = () => {
             <div className="flex-1 p-6 overflow-auto">
                 <div className="max-w-2xl mx-auto space-y-6">
 
-                    {/* ── Support Email Card (admin only) ── */}
+                    {/* ── Support Email Card (ADMIN ONLY) ── */}
                     {isAdmin && (
                         <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden">
                             <div className="p-6 border-b border-gray-200 bg-gray-50">
@@ -223,7 +198,7 @@ const SettingsPage = () => {
                                 </p>
                             </div>
 
-                            {loading ? (
+                            {emailLoading ? (
                                 <div className="flex items-center justify-center h-32">
                                     <div className="w-8 h-8 border-4 border-primary-600 border-t-transparent rounded-full animate-spin" />
                                 </div>
@@ -238,6 +213,7 @@ const SettingsPage = () => {
                                                 <Mail className="h-5 w-5 text-gray-400" />
                                             </div>
                                             <input
+                                                id="support-email-input"
                                                 type="email"
                                                 value={supportEmail}
                                                 onChange={(e) => setSupportEmail(e.target.value)}
@@ -253,20 +229,15 @@ const SettingsPage = () => {
 
                                     <div className="flex items-center justify-end pt-4 border-t border-gray-200">
                                         <button
+                                            id="btn-save-support-email"
                                             type="submit"
-                                            disabled={saving}
+                                            disabled={emailSaving}
                                             className="flex items-center gap-2 px-5 py-2.5 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors shadow-sm disabled:bg-primary-400 font-semibold text-sm cursor-pointer"
                                         >
-                                            {saving ? (
-                                                <>
-                                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                                    Salvando...
-                                                </>
+                                            {emailSaving ? (
+                                                <><Loader2 className="w-4 h-4 animate-spin" />Salvando...</>
                                             ) : (
-                                                <>
-                                                    <Save className="w-4 h-4" />
-                                                    Salvar Configurações
-                                                </>
+                                                <><Save className="w-4 h-4" />Salvar Configurações</>
                                             )}
                                         </button>
                                     </div>
@@ -275,8 +246,9 @@ const SettingsPage = () => {
                         </div>
                     )}
 
-                    {/* ── SLA Parameters Card (admin + master + sla_manager_email delegate) ── */}
-                    {/* FF-HARDENING-011 [Item 3]: visible PERMANENTLY when hasSlaAccess is true */}
+                    {/* ── SLA Parameters Card (admin + master + is_sla_manager delegate) ── */}
+                    {/* FF-HARDENING-011: Always visible when hasSlaAccess is true.
+                        Does NOT depend on Kanban board state or any other runtime condition. */}
                     {hasSlaAccess && (
                         <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden">
                             <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-indigo-50 to-blue-50">
@@ -288,6 +260,11 @@ const SettingsPage = () => {
                                     Configure os limites e o calendário de horas úteis para o cálculo automático de SLA.
                                     Alterações têm efeito imediato no cronômetro de todos os pedidos ativos.
                                 </p>
+                                {isSlaManager && !isAdmin && !isMaster && (
+                                    <p className="text-xs text-indigo-600 mt-1 font-semibold">
+                                        ✓ Você tem acesso como Responsável pelo SLA
+                                    </p>
+                                )}
                             </div>
 
                             {slaLoading ? (
@@ -296,7 +273,7 @@ const SettingsPage = () => {
                                 </div>
                             ) : (
                                 <form onSubmit={handleSaveSlaConfig} className="p-6 space-y-6">
-                                    {/* Informational notice */}
+                                    {/* Info notice */}
                                     <div className="flex items-start gap-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
                                         <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
                                         <p className="text-xs text-amber-800">
@@ -324,7 +301,7 @@ const SettingsPage = () => {
                                                     onChange={(e) => setSlaTotalHours(e.target.value)}
                                                     className="block w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm font-medium font-mono"
                                                 />
-                                                <p className="text-xs text-gray-400 mt-1">Prazo máximo total (padrão: 240h = 30 dias úteis de 8h)</p>
+                                                <p className="text-xs text-gray-400 mt-1">Prazo máximo total (padrão: 240h)</p>
                                             </div>
                                             <div>
                                                 <label className="block text-sm font-semibold text-gray-700 mb-1">
@@ -339,7 +316,7 @@ const SettingsPage = () => {
                                                     onChange={(e) => setSlaAreaHours(e.target.value)}
                                                     className="block w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm font-medium font-mono"
                                                 />
-                                                <p className="text-xs text-gray-400 mt-1">Prazo máximo por setor operacional (padrão: 24h)</p>
+                                                <p className="text-xs text-gray-400 mt-1">Prazo máximo por setor (padrão: 24h)</p>
                                             </div>
                                         </div>
                                     </div>
@@ -396,11 +373,11 @@ const SettingsPage = () => {
                                                 <option value="Mon-Sun">Segunda a Domingo (Mon-Sun)</option>
                                                 <option value="Mon,Wed,Fri">Seg, Qua, Sex (Mon,Wed,Fri)</option>
                                             </select>
-                                            <p className="text-xs text-gray-400 mt-1">Sábados e Domingos não são contados como horas úteis no padrão Mon-Fri.</p>
+                                            <p className="text-xs text-gray-400 mt-1">Sábados e Domingos não contam no padrão Mon-Fri.</p>
                                         </div>
                                     </div>
 
-                                    {/* Preview of computed daily hours */}
+                                    {/* Live preview */}
                                     <div className="flex items-center gap-2 p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
                                         <Timer className="w-4 h-4 text-indigo-500 flex-shrink-0" />
                                         <p className="text-xs text-indigo-800">
@@ -412,48 +389,17 @@ const SettingsPage = () => {
                                         </p>
                                     </div>
 
-                                    {/* FF-HARDENING-011 [Item 3]: SLA Manager Email (admin only) */}
-                                    {isAdmin && (
-                                        <div>
-                                            <h3 className="text-xs font-bold text-gray-600 uppercase tracking-wider mb-3 flex items-center gap-1.5">
-                                                <UserCheck className="w-3.5 h-3.5" /> Responsável pelo SLA (Delegação)
-                                            </h3>
-                                            <div>
-                                                <label className="block text-sm font-semibold text-gray-700 mb-1">
-                                                    E-mail do Responsável pelo SLA
-                                                </label>
-                                                <input
-                                                    id="sla-manager-email"
-                                                    type="email"
-                                                    value={slaManagerEmailInput}
-                                                    onChange={(e) => setSlaManagerEmailInput(e.target.value)}
-                                                    placeholder="responsavel@empresa.com (deixe vazio para remover)"
-                                                    className="block w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm font-medium"
-                                                />
-                                                <p className="text-xs text-gray-400 mt-1">
-                                                    Quando definido, este usuário poderá acessar e editar os Parâmetros de SLA mesmo sem perfil admin/master.
-                                                    Deixe em branco para remover a delegação.
-                                                </p>
-                                            </div>
-                                        </div>
-                                    )}
-
                                     <div className="flex items-center justify-end pt-4 border-t border-gray-200">
                                         <button
+                                            id="btn-save-sla-config"
                                             type="submit"
                                             disabled={slaSaving}
                                             className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-sm disabled:bg-indigo-400 font-semibold text-sm cursor-pointer"
                                         >
                                             {slaSaving ? (
-                                                <>
-                                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                                    Salvando...
-                                                </>
+                                                <><Loader2 className="w-4 h-4 animate-spin" />Salvando...</>
                                             ) : (
-                                                <>
-                                                    <Save className="w-4 h-4" />
-                                                    Salvar Parâmetros de SLA
-                                                </>
+                                                <><Save className="w-4 h-4" />Salvar Parâmetros de SLA</>
                                             )}
                                         </button>
                                     </div>

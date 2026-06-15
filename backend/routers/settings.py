@@ -89,6 +89,8 @@ async def update_support_email(
 
 # ============================================================
 # FF-HARDENING-010: SLA Parameter Configuration Endpoints
+# FF-HARDENING-011: Delegation now via User.is_sla_manager (DB column)
+#                  — sla_manager_email GlobalConfig approach removed.
 # ============================================================
 
 # Default values for SLA parameters
@@ -108,7 +110,6 @@ class SlaConfigResponse(BaseModel):
     sla_start_hour: int = 8
     sla_end_hour: int = 18
     sla_working_days: str = "Mon-Fri"
-    sla_manager_email: Optional[str] = None  # FF-HARDENING-011
 
 
 class SlaConfigUpdate(BaseModel):
@@ -118,7 +119,17 @@ class SlaConfigUpdate(BaseModel):
     sla_start_hour: Optional[int] = None
     sla_end_hour: Optional[int] = None
     sla_working_days: Optional[str] = None
-    sla_manager_email: Optional[str] = None  # FF-HARDENING-011
+
+
+def _has_sla_access(user: UserInfo) -> bool:
+    """
+    FF-HARDENING-011: Determines whether the current user may access the
+    SLA Parameters configuration card.
+    Access is granted if:
+      - user.role is 'admin' or 'master', OR
+      - user.is_sla_manager is True (set by admin in Gestão de Usuários)
+    """
+    return user.role.lower() in ("admin", "master") or bool(user.is_sla_manager)
 
 
 def _is_privileged(role: str) -> bool:
@@ -134,16 +145,16 @@ async def get_sla_config(
     """
     FF-HARDENING-010: Get current SLA parameters.
     Returns defaults for any keys not yet persisted to GlobalConfig.
-    Accessible by admin and master roles.
+    FF-HARDENING-011: Accessible by admin, master, or users with is_sla_manager=True.
     """
-    if not _is_privileged(current_user.role):
+    if not _has_sla_access(current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Acesso negado. Apenas administradores e masters podem visualizar os parâmetros de SLA.",
+            detail="Acesso negado. Apenas administradores, masters ou responsáveis pelo SLA podem visualizar os parâmetros.",
         )
 
     tenant_uuid = uuid.UUID(str(current_user.tenant_id))
-    sla_keys = list(SLA_CONFIG_DEFAULTS.keys()) + ["sla_manager_email"]
+    sla_keys = list(SLA_CONFIG_DEFAULTS.keys())
 
     rows = db.query(GlobalConfig).filter(
         GlobalConfig.tenant_id == tenant_uuid,
@@ -151,7 +162,6 @@ async def get_sla_config(
     ).all()
 
     result = {k: v["value"] for k, v in SLA_CONFIG_DEFAULTS.items()}
-    result["sla_manager_email"] = None  # FF-HARDENING-011
     for row in rows:
         result[row.config_key] = row.config_value
 
@@ -161,7 +171,6 @@ async def get_sla_config(
         sla_start_hour=int(result["sla_start_hour"]),
         sla_end_hour=int(result["sla_end_hour"]),
         sla_working_days=str(result["sla_working_days"]),
-        sla_manager_email=result.get("sla_manager_email"),  # FF-HARDENING-011
     )
 
 
@@ -174,12 +183,12 @@ async def update_sla_config(
     """
     FF-HARDENING-010: Upsert SLA parameters.
     Only sends the provided (non-None) fields. Missing fields retain their current value.
-    Accessible by admin and master roles.
+    FF-HARDENING-011: Accessible by admin, master, or users with is_sla_manager=True.
     """
-    if not _is_privileged(current_user.role):
+    if not _has_sla_access(current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Acesso negado. Apenas administradores e masters podem alterar os parâmetros de SLA.",
+            detail="Acesso negado. Apenas administradores, masters ou responsáveis pelo SLA podem alterar os parâmetros.",
         )
 
     tenant_uuid = uuid.UUID(str(current_user.tenant_id))
@@ -203,29 +212,6 @@ async def update_sla_config(
         if not payload.sla_working_days.strip():
             raise HTTPException(status_code=400, detail="sla_working_days não pode ser vazio.")
         updates["sla_working_days"] = payload.sla_working_days.strip()
-    # FF-HARDENING-011: handle sla_manager_email separately (no SLA_CONFIG_DEFAULTS entry)
-    if payload.sla_manager_email is not None:
-        mgr_row = db.query(GlobalConfig).filter(
-            GlobalConfig.tenant_id == tenant_uuid,
-            GlobalConfig.config_key == "sla_manager_email",
-        ).first()
-        new_mgr_email = payload.sla_manager_email.strip() or None
-        if new_mgr_email is None and mgr_row:
-            db.delete(mgr_row)
-        elif new_mgr_email:
-            if mgr_row:
-                mgr_row.config_value = new_mgr_email
-                mgr_row.updated_by = user_uuid
-            else:
-                db.add(GlobalConfig(
-                    id=uuid.uuid4(),
-                    tenant_id=tenant_uuid,
-                    config_key="sla_manager_email",
-                    config_value=new_mgr_email,
-                    config_type="str",
-                    description="E-mail do responsável pelo SLA (delegação)",
-                    updated_by=user_uuid,
-                ))
 
     # Validate start < end if both provided
     start = int(updates.get("sla_start_hour", -1)) if "sla_start_hour" in updates else None
@@ -260,11 +246,10 @@ async def update_sla_config(
     # Return fresh read
     rows = db.query(GlobalConfig).filter(
         GlobalConfig.tenant_id == tenant_uuid,
-        GlobalConfig.config_key.in_(list(SLA_CONFIG_DEFAULTS.keys()) + ["sla_manager_email"]),
+        GlobalConfig.config_key.in_(list(SLA_CONFIG_DEFAULTS.keys())),
     ).all()
 
     result = {k: v["value"] for k, v in SLA_CONFIG_DEFAULTS.items()}
-    result["sla_manager_email"] = None  # FF-HARDENING-011
     for row in rows:
         result[row.config_key] = row.config_value
 
@@ -274,97 +259,4 @@ async def update_sla_config(
         sla_start_hour=int(result["sla_start_hour"]),
         sla_end_hour=int(result["sla_end_hour"]),
         sla_working_days=str(result["sla_working_days"]),
-        sla_manager_email=result.get("sla_manager_email"),  # FF-HARDENING-011
     )
-
-
-# ============================================================
-# FF-HARDENING-011: SLA Manager Email Delegation Endpoints
-# ============================================================
-
-class SlaManagerEmailUpdate(BaseModel):
-    """Schema for setting/clearing the SLA manager email"""
-    sla_manager_email: Optional[str] = None
-
-
-@router.get("/sla-access")
-async def check_sla_access(
-    current_user: UserInfo = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """
-    FF-HARDENING-011: Any authenticated user may check if they have SLA config access.
-    Grants access if admin/master OR if email matches sla_manager_email config.
-    """
-    tenant_uuid = uuid.UUID(str(current_user.tenant_id))
-    mgr_config = db.query(GlobalConfig).filter(
-        GlobalConfig.tenant_id == tenant_uuid,
-        GlobalConfig.config_key == "sla_manager_email",
-    ).first()
-    sla_mgr_email = mgr_config.config_value.strip().lower() if mgr_config and mgr_config.config_value else None
-
-    user_email = (current_user.email or "").strip().lower()
-    is_privileged = _is_privileged(current_user.role)
-    email_match = bool(sla_mgr_email and user_email and user_email == sla_mgr_email)
-
-    return {
-        "has_access": is_privileged or email_match,
-        "sla_manager_email": mgr_config.config_value if mgr_config else None,
-    }
-
-
-@router.get("/sla-manager-email")
-async def get_sla_manager_email_ep(
-    current_user: UserInfo = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """FF-HARDENING-011: Get the SLA manager email (admin only)."""
-    if current_user.role.lower() != "admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
-            detail="Apenas administradores podem consultar o responsavel pelo SLA.")
-    tenant_uuid = uuid.UUID(str(current_user.tenant_id))
-    config = db.query(GlobalConfig).filter(
-        GlobalConfig.tenant_id == tenant_uuid,
-        GlobalConfig.config_key == "sla_manager_email",
-    ).first()
-    return {"sla_manager_email": config.config_value if config else None}
-
-
-@router.put("/sla-manager-email")
-async def update_sla_manager_email_ep(
-    payload: SlaManagerEmailUpdate,
-    current_user: UserInfo = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """FF-HARDENING-011: Set or clear the SLA manager email (admin only)."""
-    if current_user.role.lower() != "admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
-            detail="Apenas administradores podem configurar o responsavel pelo SLA.")
-    tenant_uuid = uuid.UUID(str(current_user.tenant_id))
-    user_uuid = uuid.UUID(str(current_user.id))
-    new_email = (payload.sla_manager_email or "").strip() or None
-
-    config = db.query(GlobalConfig).filter(
-        GlobalConfig.tenant_id == tenant_uuid,
-        GlobalConfig.config_key == "sla_manager_email",
-    ).first()
-
-    if new_email is None:
-        if config:
-            db.delete(config)
-            db.commit()
-        return {"sla_manager_email": None, "message": "Delegacao removida."}
-
-    if config:
-        config.config_value = new_email
-    else:
-        config = GlobalConfig(
-            tenant_id=tenant_uuid,
-            config_key="sla_manager_email",
-            config_value=new_email,
-            updated_by=user_uuid,
-        )
-        db.add(config)
-    db.commit()
-    return {"sla_manager_email": new_email, "message": "Email do responsavel pelo SLA atualizado."}
-

@@ -40,6 +40,8 @@ class UserUpdate(BaseModel):
     role: str
     area: str
     password: Optional[str] = None
+    # FF-HARDENING-011: SLA manager delegation flag (only meaningful for 'master' role)
+    is_sla_manager: Optional[bool] = None
 
 
 class UserResponse(BaseModel):
@@ -51,7 +53,8 @@ class UserResponse(BaseModel):
     area: str
     tenant_id: str
     created_at: str
-    
+    is_sla_manager: bool = False  # FF-HARDENING-011
+
     class Config:
         from_attributes = True
 
@@ -100,7 +103,8 @@ async def list_users(
                 role=user.role,
                 area=user.area or "N/A",
                 tenant_id=str(user.tenant_id),
-                created_at=user.created_at.isoformat() if user.created_at else ""
+                created_at=user.created_at.isoformat() if user.created_at else "",
+                is_sla_manager=bool(getattr(user, 'is_sla_manager', False)),  # FF-HARDENING-011
             ))
         
         return user_list
@@ -196,7 +200,8 @@ async def create_user(
             role=new_user.role,
             area=new_user.area or "N/A",
             tenant_id=str(new_user.tenant_id),
-            created_at=new_user.created_at.isoformat() if new_user.created_at else ""
+            created_at=new_user.created_at.isoformat() if new_user.created_at else "",
+            is_sla_manager=bool(getattr(new_user, 'is_sla_manager', False)),  # FF-HARDENING-011
         )
         
     except HTTPException:
@@ -321,6 +326,13 @@ async def update_user(
         user.area = user_data.area
         if user_data.password:
             user.hashed_password = get_password_hash(user_data.password)
+        # FF-HARDENING-011: is_sla_manager can only be set for master role users
+        if user_data.is_sla_manager is not None:
+            if user_data.role == 'master':
+                user.is_sla_manager = user_data.is_sla_manager
+            else:
+                # Silently reset if role is not master (safety guard)
+                user.is_sla_manager = False
         user.updated_at = datetime.utcnow()
         
         db.add(user)
@@ -336,7 +348,8 @@ async def update_user(
             role=user.role,
             area=user.area or "N/A",
             tenant_id=str(user.tenant_id),
-            created_at=user.created_at.isoformat() if user.created_at else ""
+            created_at=user.created_at.isoformat() if user.created_at else "",
+            is_sla_manager=bool(getattr(user, 'is_sla_manager', False)),  # FF-HARDENING-011
         )
         
     except HTTPException:

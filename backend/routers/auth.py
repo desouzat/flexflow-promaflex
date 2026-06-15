@@ -136,7 +136,8 @@ async def get_current_user(
         name=payload.get("name", "User"),
         role=payload.get("role", "user"),
         permissions=payload.get("permissions", []),
-        is_active=True
+        is_active=True,
+        is_sla_manager=payload.get("is_sla_manager", False),  # FF-HARDENING-011
     )
     
     return user_info
@@ -210,7 +211,8 @@ async def login(
         "email": user.email,
         "name": user.name,
         "role": user.role,
-        "permissions": permissions
+        "permissions": permissions,
+        "is_sla_manager": bool(getattr(user, 'is_sla_manager', False)),  # FF-HARDENING-011
     }
     print("\n" + "="*80)
     print("[AUTH LOGIN] Token Payload BEFORE encoding:")
@@ -246,7 +248,8 @@ async def login(
         "name": user.name,
         "role": user.role,
         "permissions": permissions,
-        "is_active": user.is_active
+        "is_active": user.is_active,
+        "is_sla_manager": bool(getattr(user, 'is_sla_manager', False)),  # FF-HARDENING-011
     }
     
     return TokenResponse(

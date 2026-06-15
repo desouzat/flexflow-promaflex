@@ -145,6 +145,8 @@ class User(Base):
     )
     area: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # FF-HARDENING-011: SLA manager delegation flag — grants Settings SLA card access
+    is_sla_manager: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), 
         server_default=func.now()

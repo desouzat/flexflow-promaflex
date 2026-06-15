@@ -15,7 +15,8 @@ const UsersPage = () => {
         email: '',
         password: '',
         role: 'user',
-        area: ''
+        area: '',
+        is_sla_manager: false,  // FF-HARDENING-011
     })
 
     useEffect(() => {
@@ -77,7 +78,8 @@ const UsersPage = () => {
             email: u.email,
             password: '', // Not used/edited in PUT
             role: u.role,
-            area: u.area === 'N/A' ? '' : (u.area || '')
+            area: u.area === 'N/A' ? '' : (u.area || ''),
+            is_sla_manager: Boolean(u.is_sla_manager),  // FF-HARDENING-011
         })
         setShowModal(true)
     }
@@ -88,7 +90,8 @@ const UsersPage = () => {
             email: '',
             password: '',
             role: 'user',
-            area: ''
+            area: '',
+            is_sla_manager: false,  // FF-HARDENING-011
         })
         setEditingUser(null)
         setShowModal(false)
@@ -116,7 +119,9 @@ const UsersPage = () => {
             if (editingUser) {
                 const payload = {
                     role: formData.role,
-                    area: formData.area
+                    area: formData.area,
+                    // FF-HARDENING-011: include is_sla_manager in PUT (only relevant for master)
+                    is_sla_manager: formData.role === 'master' ? Boolean(formData.is_sla_manager) : false,
                 }
                 if (formData.password) {
                     payload.password = formData.password
@@ -270,7 +275,13 @@ const UsersPage = () => {
                                                         <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center">
                                                             <UserIcon className="w-5 h-5 text-primary-600" />
                                                         </div>
-                                                        <span className="font-medium text-gray-900">{u.username}</span>
+                                                        <div>
+                                                            <span className="font-medium text-gray-900">{u.username}</span>
+                                                            {/* FF-HARDENING-011: show SLA manager badge */}
+                                                            {u.is_sla_manager && (
+                                                                <span className="ml-2 text-[10px] bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-full px-2 py-0.5 font-semibold">SLA</span>
+                                                            )}
+                                                        </div>
                                                     </div>
                                                 </td>
                                                 <td className="py-3 px-4">
@@ -436,6 +447,26 @@ const UsersPage = () => {
                                         <option value="Management">Management</option>
                                     </select>
                                 </div>
+
+                                {/* FF-HARDENING-011: SLA Manager delegation checkbox — only for 'master' role in edit mode */}
+                                {editingUser && formData.role === 'master' && (
+                                    <div className="flex items-start gap-3 p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
+                                        <input
+                                            id="chk-sla-manager"
+                                            type="checkbox"
+                                            checked={Boolean(formData.is_sla_manager)}
+                                            onChange={(e) => setFormData({ ...formData, is_sla_manager: e.target.checked })}
+                                            className="mt-0.5 h-4 w-4 rounded border-indigo-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                                        />
+                                        <label htmlFor="chk-sla-manager" className="cursor-pointer">
+                                            <span className="block text-sm font-semibold text-indigo-800">Liberar Config/SLA</span>
+                                            <span className="block text-xs text-indigo-600 mt-0.5">
+                                                Permite que este usuário acesse e edite os Parâmetros de SLA Industrial nas Configurações do Sistema,
+                                                sem precisar de perfil admin.
+                                            </span>
+                                        </label>
+                                    </div>
+                                )}
 
                                 <div className="flex items-center justify-end gap-3 pt-4">
                                     <button

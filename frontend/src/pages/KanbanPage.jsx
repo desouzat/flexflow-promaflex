@@ -1944,15 +1944,15 @@ const KanbanPage = () => {
                                             (selectedPO.items && selectedPO.items.find(item => item.finance_justification)?.finance_justification) ||
                                             'Sem justificativa comercial registrada.';
 
-                                        // FF-HARDENING-011 [Item 2]: Exclude 'Concluídos' stage for archived POs.
-                                        // For active POs the accordion renders all stages normally.
-                                        // For archived POs the "Concluídos" stage is redundant — the PO
-                                        // status already shows as Concluídos in the modal header.
-                                        const stagesBase = ['Comercial', 'PCP', 'Produção/Embalagem', 'Faturamento/Expedição', 'Financeiro', 'Concluídos'];
-                                        const stages = isArchived
-                                            ? stagesBase.filter(s => s !== 'Concluídos')
-                                            : stagesBase;
-                                        const currentStageIndex = stages.indexOf(mapStatusToStageName(selectedPO.status));
+                                        // FF-HARDENING-011 [Item 3]: The 'Concluídos' accordion has been permanently removed.
+                                        // It was always empty and redundant — the archived status is already shown in the modal header.
+                                        // All 5 operational stages (Comercial → Financeiro) are rendered for ALL POs.
+                                        // For active POs: stages beyond currentStageIndex return null (isLocked guard at L1962).
+                                        // For archived POs: currentStageIndex will be stages.length (all completed), so all 5 show.
+                                        const stages = ['Comercial', 'PCP', 'Produção/Embalagem', 'Faturamento/Expedição', 'Financeiro'];
+                                        const currentStageIndex = isArchived
+                                            ? stages.length  // all stages completed for archived POs
+                                            : stages.indexOf(mapStatusToStageName(selectedPO.status));
 
                                         return stages.map((stageName, idx) => {
                                             const isCompleted = idx < currentStageIndex;
