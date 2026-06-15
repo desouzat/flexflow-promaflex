@@ -58,12 +58,14 @@ const getDownloadUrl = (path) => {
 // Architecture:
 //   • Declared at MODULE SCOPE so it is fully initialized before any render.
 //   • Does NOT own its own <input type="file"> elements.
-//   • Receives truckInputRef, receiptInputRef, activePoIdRef as props from
-//     KanbanPage, where the actual <input> elements live BEFORE <ErrorBoundary>.
-//   • This guarantees the inputs are ALWAYS mounted in the DOM, completely
-//     independent of ErrorBoundary state or modal visibility.
+//   • Receives truckInputRef, receiptInputRef, isPickerActiveRef as props from
+//     KanbanPage. The actual <input> elements live BEFORE <ErrorBoundary> and
+//     use Callback Refs to wire node.onchange synchronously at mount time.
+//   • The onchange closures capture selectedPO?.id directly from KanbanPage scope
+//     (safe: callback ref is a new arrow fn every render, React re-calls it with
+//     the latest node, re-assigning node.onchange with the current closure).
 //   • .click() is called SYNCHRONOUSLY to preserve Chrome User Activation.
-//   • All F12 TRACE logs (1, 1.5, 2) preserved for UAT diagnosis.
+//   • isPickerActiveRef suppresses the window-focus fetchBoard() during OS dialog.
 // =============================================================================
 const LogisticsUploadSection = ({
     poId,
@@ -72,15 +74,13 @@ const LogisticsUploadSection = ({
     onUploadRequest,
     truckInputRef,
     receiptInputRef,
-    activePoIdRef,
     isPickerActiveRef,
 }) => {
 
     const triggerUpload = (field) => {
         console.log('[F12 TRACE 1] Upload button clicked for field:', field, '| poId:', poId)
-        // Write PO ID and flag picker-active synchronously before .click()
-        // so the window focus guard suppresses fetchBoard() during OS dialog lifetime.
-        activePoIdRef.current = poId
+        // Set picker flag synchronously before .click() so the window focus guard
+        // suppresses fetchBoard() while the OS dialog is open.
         isPickerActiveRef.current = true
         // TRACE 1.5 — log ref status to confirm inputs are mounted
         if (field === 'foto_carga_path') {
@@ -305,7 +305,6 @@ const KanbanPage = () => {
     // at which point the inputs are not yet in the DOM and ref.current is null.
     const globalTruckInputRef   = useRef(null)
     const globalReceiptInputRef = useRef(null)
-    const activeUploadPoIdRef   = useRef(null)  // sync ref — no stale closure
 
     // FF-HARDENING-008 KILLER FIX: Suppress fetchBoard() while file picker is open.
     const isPickerActiveRef = useRef(false)
@@ -1401,13 +1400,16 @@ const KanbanPage = () => {
                     // Update the useRef so LogisticsUploadSection can .click() via the prop
                     globalTruckInputRef.current = node
                     if (node) {
-                        // Attach handler via DOM property — exactly one handler, always current
+                        // node.onchange is re-assigned on every render (callback ref is a
+                        // new arrow fn each render — React calls ref(null) then ref(node)
+                        // on every update). The closure therefore always captures the
+                        // CURRENT selectedPO?.id — no stale-closure risk, no extra ref needed.
                         node.onchange = (e) => {
                             isPickerActiveRef.current = false  // re-enable auto-sync
                             const file = e.target.files[0]    // read BEFORE resetting
                             e.target.value = ''
-                            const poId = activeUploadPoIdRef.current
-                            console.log('[F12 TRACE 2] Truck callback-ref onchange. file:', file?.name, '| poId:', poId)
+                            const poId = selectedPO?.id
+                            console.log('[F12 TRACE 2] Truck onchange fired. file:', file?.name, '| poId:', poId)
                             if (file && poId && handleUploadRef.current) {
                                 handleUploadRef.current('foto_carga_path', file, poId, globalTruckInputRef)
                             }
@@ -1427,8 +1429,8 @@ const KanbanPage = () => {
                             isPickerActiveRef.current = false  // re-enable auto-sync
                             const file = e.target.files[0]    // read BEFORE resetting
                             e.target.value = ''
-                            const poId = activeUploadPoIdRef.current
-                            console.log('[F12 TRACE 2] Receipt callback-ref onchange. file:', file?.name, '| poId:', poId)
+                            const poId = selectedPO?.id
+                            console.log('[F12 TRACE 2] Receipt onchange fired. file:', file?.name, '| poId:', poId)
                             if (file && poId && handleUploadRef.current) {
                                 handleUploadRef.current('foto_canhoto_path', file, poId, globalReceiptInputRef)
                             }
@@ -2612,7 +2614,6 @@ const KanbanPage = () => {
                                                                                     onUploadRequest={handleEvidenceUpload}
                                                                                     truckInputRef={globalTruckInputRef}
                                                                                     receiptInputRef={globalReceiptInputRef}
-                                                                                    activePoIdRef={activeUploadPoIdRef}
                                                                                     isPickerActiveRef={isPickerActiveRef}
                                                                                 />
                                                                             </div>
