@@ -5,7 +5,7 @@ import MetadataVisualizer from '../components/MetadataVisualizer'
 import { calculatePOMargins } from '../utils/marginCalculator'
 import api from '../utils/api'
 import axios from 'axios'
-import { showSuccess, showError } from '../utils/toast'
+import { showSuccess, showError, showLoading, dismissToast } from '../utils/toast'
 import toast from 'react-hot-toast'
 import { useNotifications } from '../context/NotificationContext'
 import { useAuth } from '../context/AuthContext'
@@ -52,37 +52,28 @@ const getDownloadUrl = (path) => {
 };
 
 // =============================================================================
-// LogisticsUploadSection
-// FF-HARDENING-008 — Single source-of-truth upload UI subcomponent.
-//
-// Architecture:
-//   • Declared at MODULE SCOPE so it is fully initialized before any render.
-//   • Does NOT own its own <input type="file"> elements.
-//   • Receives truckInputRef, receiptInputRef, isPickerActiveRef as props from
-//     KanbanPage. The actual <input> elements live BEFORE <ErrorBoundary> and
-//     use Callback Refs to wire node.onchange synchronously at mount time.
-//   • The onchange closures capture selectedPO?.id directly from KanbanPage scope
-//     (safe: callback ref is a new arrow fn every render, React re-calls it with
-//     the latest node, re-assigning node.onchange with the current closure).
-//   • .click() is called SYNCHRONOUSLY to preserve Chrome User Activation.
-//   • isPickerActiveRef suppresses the window-focus fetchBoard() during OS dialog.
+// LogisticsUploadSection  —  FF-HARDENING-008 (CLEAN REBUILD)
+// Renders the two upload slots for Foto da Carga and NF c/ Canhoto.
+// Props:
+//   poId              — the active PO's UUID (direct, no ref indirection)
+//   logisticsChecklist— { foto_carga_path, foto_canhoto_path, ... }
+//   isDisabled        — locks controls when PO is in FASE_A or archived
+//   truckInputRef     — ref to the global <input type=file> for foto_carga
+//   receiptInputRef   — ref to the global <input type=file> for foto_canhoto
+//   isPickerActiveRef — guards window-focus auto-sync during OS dialog
 // =============================================================================
 const LogisticsUploadSection = ({
     poId,
     logisticsChecklist,
     isDisabled,
-    onUploadRequest,
     truckInputRef,
     receiptInputRef,
     isPickerActiveRef,
 }) => {
 
     const triggerUpload = (field) => {
-        console.log('[F12 TRACE 1] Upload button clicked for field:', field, '| poId:', poId)
-        // Set picker flag synchronously before .click() so the window focus guard
-        // suppresses fetchBoard() while the OS dialog is open.
+        console.log('[F12 TRACE 1] triggerUpload called. field:', field, '| poId:', poId)
         isPickerActiveRef.current = true
-        // TRACE 1.5 — log ref status to confirm inputs are mounted
         if (field === 'foto_carga_path') {
             console.log('[F12 TRACE 1.5] truckInputRef.current:', truckInputRef.current)
             truckInputRef.current?.click()
@@ -92,96 +83,120 @@ const LogisticsUploadSection = ({
         }
     }
 
+    const UploadSlot = ({ field, label, path }) => (
+        <div style={{
+            border: '2px dashed #a5f3fc',
+            borderRadius: '12px',
+            padding: '16px',
+            background: 'rgba(6,182,212,0.04)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '10px',
+        }}>
+            {/* Label + status pill */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
+                <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#0e7490' }}>
+                    {label}
+                </span>
+                {path ? (
+                    <span style={{
+                        display: 'inline-flex', alignItems: 'center', gap: '4px',
+                        background: '#d1fae5', color: '#065f46',
+                        fontSize: '10px', fontWeight: 700,
+                        padding: '2px 8px', borderRadius: '999px',
+                    }}>
+                        <CheckCircle style={{ width: 12, height: 12 }} /> Enviado
+                    </span>
+                ) : (
+                    <span style={{
+                        display: 'inline-flex', alignItems: 'center', gap: '4px',
+                        background: '#fef9c3', color: '#92400e',
+                        fontSize: '10px', fontWeight: 600,
+                        padding: '2px 8px', borderRadius: '999px',
+                    }}>
+                        ⚠️ Pendente
+                    </span>
+                )}
+            </div>
+
+            {/* Action area */}
+            {path ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#059669', fontSize: '13px', fontWeight: 600 }}>
+                        <CheckCircle style={{ width: 16, height: 16, flexShrink: 0 }} />
+                        Evidência salva com sucesso!
+                    </div>
+                    <a
+                        href={getDownloadUrl(path)}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ fontSize: '12px', color: '#2563eb', fontWeight: 700, textDecoration: 'underline' }}
+                    >
+                        🔍 Abrir arquivo
+                    </a>
+                    {!isDisabled && (
+                        <button
+                            type="button"
+                            onClick={() => triggerUpload(field)}
+                            style={{
+                                fontSize: '10px', color: '#6b7280',
+                                background: '#f3f4f6', border: '1px solid #d1d5db',
+                                borderRadius: '6px', padding: '3px 10px',
+                                cursor: 'pointer', alignSelf: 'flex-start',
+                            }}
+                        >
+                            Substituir arquivo
+                        </button>
+                    )}
+                </div>
+            ) : (
+                <button
+                    type="button"
+                    onClick={() => triggerUpload(field)}
+                    disabled={isDisabled}
+                    style={{
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        gap: '8px',
+                        padding: '9px 18px',
+                        background: isDisabled ? '#fdba74' : '#ea580c',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: '8px',
+                        fontSize: '13px', fontWeight: 700,
+                        cursor: isDisabled ? 'not-allowed' : 'pointer',
+                        opacity: isDisabled ? 0.6 : 1,
+                        transition: 'background 0.15s',
+                        alignSelf: 'flex-start',
+                    }}
+                    onMouseEnter={e => { if (!isDisabled) e.currentTarget.style.background = '#c2410c' }}
+                    onMouseLeave={e => { if (!isDisabled) e.currentTarget.style.background = '#ea580c' }}
+                >
+                    <Upload style={{ width: 15, height: 15 }} />
+                    Enviar Foto
+                </button>
+            )}
+        </div>
+    )
+
     return (
-        <div className="border-t border-gray-150 pt-4 mt-2">
-            <h5 className="text-xs font-bold uppercase text-gray-700 mb-3 tracking-wide">
+        <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: '16px', marginTop: '8px' }}>
+            <h5 style={{
+                fontSize: '11px', fontWeight: 700, textTransform: 'uppercase',
+                letterSpacing: '0.08em', color: '#374151', marginBottom: '12px',
+            }}>
                 Upload de Evidências Logísticas (Obrigatório)
             </h5>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-
-                {/* ── Foto da Carga Carregada ─────────────────────────────── */}
-                <div className="border-2 border-dashed border-cyan-200 bg-cyan-50/10 rounded-lg p-4 transition-colors">
-                    <label className="block text-xs font-bold text-cyan-900 uppercase mb-2">
-                        Foto da Carga Carregada
-                    </label>
-                    {logisticsChecklist?.foto_carga_path ? (
-                        <div className="space-y-2">
-                            <div className="flex items-center gap-2 text-green-600 font-semibold text-sm">
-                                <CheckCircle className="w-5 h-5 flex-shrink-0" />
-                                <span>Evidência da Carga Salva!</span>
-                            </div>
-                            <a
-                                href={getDownloadUrl(logisticsChecklist.foto_carga_path)}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-xs text-blue-600 hover:text-blue-800 font-semibold underline block"
-                            >
-                                Abrir Foto da Carga
-                            </a>
-                            {!isDisabled && (
-                                <button
-                                    type="button"
-                                    onClick={() => triggerUpload('foto_carga_path')}
-                                    className="inline-flex items-center gap-1 text-[10px] text-gray-600 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded px-2 py-0.5 cursor-pointer transition-colors"
-                                >
-                                    Substituir Arquivo
-                                </button>
-                            )}
-                        </div>
-                    ) : (
-                        <button
-                            type="button"
-                            onClick={() => triggerUpload('foto_carga_path')}
-                            disabled={isDisabled}
-                            className={`flex items-center justify-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg transition-colors text-xs font-semibold shadow-xs ${isDisabled ? 'cursor-not-allowed opacity-50 bg-orange-400' : 'hover:bg-orange-700 cursor-pointer'}`}
-                        >
-                            Enviar Foto
-                        </button>
-                    )}
-                </div>
-
-                {/* ── Nota Fiscal com Canhoto Assinado ────────────────────── */}
-                <div className="border-2 border-dashed border-cyan-200 bg-cyan-50/10 rounded-lg p-4 transition-colors">
-                    <label className="block text-xs font-bold text-cyan-900 uppercase mb-2">
-                        Nota Fiscal com Canhoto Assinado
-                    </label>
-                    {logisticsChecklist?.foto_canhoto_path ? (
-                        <div className="space-y-2">
-                            <div className="flex items-center gap-2 text-green-600 font-semibold text-sm">
-                                <CheckCircle className="w-5 h-5 flex-shrink-0" />
-                                <span>Nota Fiscal com Canhoto Assinado Salva!</span>
-                            </div>
-                            <a
-                                href={getDownloadUrl(logisticsChecklist.foto_canhoto_path)}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-xs text-blue-600 hover:text-blue-800 font-semibold underline block"
-                            >
-                                Abrir Nota Fiscal com Canhoto Assinado
-                            </a>
-                            {!isDisabled && (
-                                <button
-                                    type="button"
-                                    onClick={() => triggerUpload('foto_canhoto_path')}
-                                    className="inline-flex items-center gap-1 text-[10px] text-gray-600 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded px-2 py-0.5 cursor-pointer transition-colors"
-                                >
-                                    Substituir Arquivo
-                                </button>
-                            )}
-                        </div>
-                    ) : (
-                        <button
-                            type="button"
-                            onClick={() => triggerUpload('foto_canhoto_path')}
-                            disabled={isDisabled}
-                            className={`flex items-center justify-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg transition-colors text-xs font-semibold shadow-xs ${isDisabled ? 'cursor-not-allowed opacity-50 bg-orange-400' : 'hover:bg-orange-700 cursor-pointer'}`}
-                        >
-                            Enviar Foto
-                        </button>
-                    )}
-                </div>
-
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
+                <UploadSlot
+                    field="foto_carga_path"
+                    label="Foto da Carga Carregada"
+                    path={logisticsChecklist?.foto_carga_path}
+                />
+                <UploadSlot
+                    field="foto_canhoto_path"
+                    label="Nota Fiscal com Canhoto Assinado"
+                    path={logisticsChecklist?.foto_canhoto_path}
+                />
             </div>
         </div>
     )
@@ -2604,7 +2619,6 @@ const KanbanPage = () => {
                                                                                     poId={selectedPO?.id}
                                                                                     logisticsChecklist={logisticsChecklist}
                                                                                     isDisabled={isPhaseADisabled}
-                                                                                    onUploadRequest={handleEvidenceUpload}
                                                                                     truckInputRef={globalTruckInputRef}
                                                                                     receiptInputRef={globalReceiptInputRef}
                                                                                     isPickerActiveRef={isPickerActiveRef}
