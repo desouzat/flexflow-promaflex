@@ -297,69 +297,22 @@ const KanbanPage = () => {
     const [savingFields, setSavingFields] = useState(false)
     const [localFields, setLocalFields] = useState({})
 
-    // FF-HARDENING-008: File input refs declared at KanbanPage scope so they
-    // can be attached to <input type="file"> elements rendered BEFORE <ErrorBoundary>.
-    // This guarantees the inputs are ALWAYS mounted in the DOM — independent of
-    // ErrorBoundary state and modal visibility.
+    // FF-HARDENING-008: File input refs — kept as useRef so LogisticsUploadSection
+    // can call .click() via the passed ref props. The actual change listener is
+    // attached via Callback Ref in the JSX (see below), NOT via useEffect.
+    // Callback Ref fires synchronously when the DOM node mounts — unlike
+    // useEffect([], []) which fires after the FIRST render (loading spinner),
+    // at which point the inputs are not yet in the DOM and ref.current is null.
     const globalTruckInputRef   = useRef(null)
     const globalReceiptInputRef = useRef(null)
     const activeUploadPoIdRef   = useRef(null)  // sync ref — no stale closure
 
     // FF-HARDENING-008 KILLER FIX: Suppress fetchBoard() while file picker is open.
-    // When the OS file-picker dialog closes after file selection, Chrome fires a
-    // window 'focus' event on the parent page. The auto-sync handler below calls
-    // fetchBoard() which sets loading=true, triggering the early-return loading guard
-    // and UNMOUNTING the file inputs before the native 'change' event fires.
-    // isPickerActiveRef is set to true synchronously in triggerUpload() (same tick
-    // as .click()) and cleared to false at the start of each native change handler.
     const isPickerActiveRef = useRef(false)
 
-    // FF-HARDENING-008: Wrap handleEvidenceUpload in a ref so the native DOM
-    // event listener (attached once via useEffect) always calls the LATEST version
-    // without capturing a stale closure. This ref is updated on every render.
+    // FF-HARDENING-008: handleUploadRef always points to the latest
+    // handleEvidenceUpload so the callback-ref onchange closure never goes stale.
     const handleUploadRef = useRef(null)
-
-    // FF-HARDENING-008: Attach NATIVE DOM change listeners directly to both inputs.
-    // This completely bypasses React's synthetic onChange event system, which can
-    // silently fail to fire when the component re-renders between .click() and
-    // file selection (React may re-attach synthetic listeners to a new fiber,
-    // orphaning the native file-picker event from the original listener).
-    // Empty deps [] = attached ONCE on component mount, never re-attached.
-    useEffect(() => {
-        const truckInput   = globalTruckInputRef.current
-        const receiptInput = globalReceiptInputRef.current
-
-        const handleTruckChange = (e) => {
-            isPickerActiveRef.current = false  // picker closed, re-enable auto-sync
-            const file = e.target.files[0]
-            e.target.value = ''
-            const poId = activeUploadPoIdRef.current
-            console.log('[F12 TRACE 2] Native truck change event. file:', file?.name, '| poId:', poId)
-            if (file && poId && handleUploadRef.current) {
-                handleUploadRef.current('foto_carga_path', file, poId, globalTruckInputRef)
-            }
-        }
-
-        const handleReceiptChange = (e) => {
-            isPickerActiveRef.current = false  // picker closed, re-enable auto-sync
-            const file = e.target.files[0]
-            e.target.value = ''
-            const poId = activeUploadPoIdRef.current
-            console.log('[F12 TRACE 2] Native receipt change event. file:', file?.name, '| poId:', poId)
-            if (file && poId && handleUploadRef.current) {
-                handleUploadRef.current('foto_canhoto_path', file, poId, globalReceiptInputRef)
-            }
-        }
-
-        if (truckInput)   truckInput.addEventListener('change',   handleTruckChange)
-        if (receiptInput) receiptInput.addEventListener('change', handleReceiptChange)
-
-        return () => {
-            if (truckInput)   truckInput.removeEventListener('change',   handleTruckChange)
-            if (receiptInput) receiptInput.removeEventListener('change', handleReceiptChange)
-        }
-    }, [])  // eslint-disable-line react-hooks/exhaustive-deps
-
 
 
     const { refreshNotifications } = useNotifications()
@@ -1435,19 +1388,53 @@ const KanbanPage = () => {
 
     return (
         <>
-            {/* FF-HARDENING-008: Global singleton file inputs rendered BEFORE <ErrorBoundary>
-                 and outside ALL conditional renders. These are ALWAYS mounted in the DOM.
-                 onChange is intentionally OMITTED — change events are handled by native
-                 addEventListener in the useEffect above, which is immune to React
-                 re-render cycles and synthetic-event re-attachment. */}
+            {/* FF-HARDENING-008: Global singleton file inputs — Callback Ref pattern.
+                 The ref prop is a function (not a useRef object). React calls it
+                 synchronously with the DOM node when the element MOUNTS, and with
+                 null when it UNMOUNTS. This guarantees the onchange handler is
+                 attached the exact moment the node appears — unlike useEffect([], [])
+                 which fires after the first render (loading spinner) when ref.current
+                 is still null. node.onchange replaces the DOM property atomically;
+                 no addEventListener/removeEventListener bookkeeping needed. */}
             <input
-                ref={globalTruckInputRef}
+                ref={(node) => {
+                    // Update the useRef so LogisticsUploadSection can .click() via the prop
+                    globalTruckInputRef.current = node
+                    if (node) {
+                        // Attach handler via DOM property — exactly one handler, always current
+                        node.onchange = (e) => {
+                            isPickerActiveRef.current = false  // re-enable auto-sync
+                            const file = e.target.files[0]    // read BEFORE resetting
+                            e.target.value = ''
+                            const poId = activeUploadPoIdRef.current
+                            console.log('[F12 TRACE 2] Truck callback-ref onchange. file:', file?.name, '| poId:', poId)
+                            if (file && poId && handleUploadRef.current) {
+                                handleUploadRef.current('foto_carga_path', file, poId, globalTruckInputRef)
+                            }
+                        }
+                    }
+                }}
                 type="file"
                 accept=".pdf,.jpg,.jpeg,.png"
                 style={{ display: 'none' }}
             />
             <input
-                ref={globalReceiptInputRef}
+                ref={(node) => {
+                    // Update the useRef so LogisticsUploadSection can .click() via the prop
+                    globalReceiptInputRef.current = node
+                    if (node) {
+                        node.onchange = (e) => {
+                            isPickerActiveRef.current = false  // re-enable auto-sync
+                            const file = e.target.files[0]    // read BEFORE resetting
+                            e.target.value = ''
+                            const poId = activeUploadPoIdRef.current
+                            console.log('[F12 TRACE 2] Receipt callback-ref onchange. file:', file?.name, '| poId:', poId)
+                            if (file && poId && handleUploadRef.current) {
+                                handleUploadRef.current('foto_canhoto_path', file, poId, globalReceiptInputRef)
+                            }
+                        }
+                    }
+                }}
                 type="file"
                 accept=".pdf,.jpg,.jpeg,.png"
                 style={{ display: 'none' }}
