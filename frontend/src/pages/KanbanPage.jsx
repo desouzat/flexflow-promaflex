@@ -73,11 +73,15 @@ const LogisticsUploadSection = ({
     truckInputRef,
     receiptInputRef,
     activePoIdRef,
+    isPickerActiveRef,
 }) => {
 
     const triggerUpload = (field) => {
         console.log('[F12 TRACE 1] Upload button clicked for field:', field, '| poId:', poId)
+        // Write PO ID and flag picker-active synchronously before .click()
+        // so the window focus guard suppresses fetchBoard() during OS dialog lifetime.
         activePoIdRef.current = poId
+        isPickerActiveRef.current = true
         // TRACE 1.5 — log ref status to confirm inputs are mounted
         if (field === 'foto_carga_path') {
             console.log('[F12 TRACE 1.5] truckInputRef.current:', truckInputRef.current)
@@ -301,6 +305,15 @@ const KanbanPage = () => {
     const globalReceiptInputRef = useRef(null)
     const activeUploadPoIdRef   = useRef(null)  // sync ref — no stale closure
 
+    // FF-HARDENING-008 KILLER FIX: Suppress fetchBoard() while file picker is open.
+    // When the OS file-picker dialog closes after file selection, Chrome fires a
+    // window 'focus' event on the parent page. The auto-sync handler below calls
+    // fetchBoard() which sets loading=true, triggering the early-return loading guard
+    // and UNMOUNTING the file inputs before the native 'change' event fires.
+    // isPickerActiveRef is set to true synchronously in triggerUpload() (same tick
+    // as .click()) and cleared to false at the start of each native change handler.
+    const isPickerActiveRef = useRef(false)
+
     // FF-HARDENING-008: Wrap handleEvidenceUpload in a ref so the native DOM
     // event listener (attached once via useEffect) always calls the LATEST version
     // without capturing a stale closure. This ref is updated on every render.
@@ -317,6 +330,7 @@ const KanbanPage = () => {
         const receiptInput = globalReceiptInputRef.current
 
         const handleTruckChange = (e) => {
+            isPickerActiveRef.current = false  // picker closed, re-enable auto-sync
             const file = e.target.files[0]
             e.target.value = ''
             const poId = activeUploadPoIdRef.current
@@ -327,6 +341,7 @@ const KanbanPage = () => {
         }
 
         const handleReceiptChange = (e) => {
+            isPickerActiveRef.current = false  // picker closed, re-enable auto-sync
             const file = e.target.files[0]
             e.target.value = ''
             const poId = activeUploadPoIdRef.current
@@ -565,9 +580,18 @@ const KanbanPage = () => {
 
     useEffect(() => {
         fetchBoard()
-        
-        // Auto-sync: Trigger a re-fetch of the board when the window recovers focus
+
+        // Auto-sync: Trigger a re-fetch of the board when the window recovers focus.
+        // FF-HARDENING-008 GUARD: Skip the re-fetch if a file picker is currently
+        // open. When the OS file-picker closes, Chrome fires this 'focus' event
+        // BEFORE dispatching the input's native 'change' event. Calling fetchBoard()
+        // here sets loading=true, which triggers the early-return loading guard and
+        // unmounts the file inputs — killing the change event before it fires.
         const handleFocus = () => {
+            if (isPickerActiveRef.current) {
+                console.log('[FF-HARDENING-008] focus event skipped — file picker active, suppressing fetchBoard()')
+                return
+            }
             console.log('Window focused, triggering auto-sync...');
             fetchBoard();
         };
@@ -2602,6 +2626,7 @@ const KanbanPage = () => {
                                                                                     truckInputRef={globalTruckInputRef}
                                                                                     receiptInputRef={globalReceiptInputRef}
                                                                                     activePoIdRef={activeUploadPoIdRef}
+                                                                                    isPickerActiveRef={isPickerActiveRef}
                                                                                 />
                                                                             </div>
                                                                         )}
