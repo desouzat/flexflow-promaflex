@@ -73,11 +73,16 @@ const LogisticsUploadSection = ({ poId, logisticsChecklist, isDisabled, onUpload
 
     const triggerUpload = (field) => {
         console.log('[F12 TRACE 1] Upload button clicked for field:', field, '| poId:', poId)
+        // Write the PO ID synchronously BEFORE .click() — useRef guarantees the
+        // onChange closure reads this value immediately (no stale closure risk).
         activePoIdRef.current = poId
+        // Call .click() SYNCHRONOUSLY within the same user-gesture event handler.
+        // Chrome's User Activation policy blocks programmatic .click() on file inputs
+        // when called inside setTimeout/Promise (async context breaks the activation chain).
         if (field === 'foto_carga_path') {
-            setTimeout(() => { truckInputRef.current?.click() }, 150)
+            truckInputRef.current?.click()
         } else {
-            setTimeout(() => { receiptInputRef.current?.click() }, 150)
+            receiptInputRef.current?.click()
         }
     }
 
