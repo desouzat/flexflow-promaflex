@@ -309,9 +309,6 @@ const KanbanPage = () => {
     // FF-HARDENING-008 KILLER FIX: Suppress fetchBoard() while file picker is open.
     const isPickerActiveRef = useRef(false)
 
-    // FF-HARDENING-008: handleUploadRef always points to the latest
-    // handleEvidenceUpload so the callback-ref onchange closure never goes stale.
-    const handleUploadRef = useRef(null)
 
 
     const { refreshNotifications } = useNotifications()
@@ -880,10 +877,6 @@ const KanbanPage = () => {
     // poId is now received as a direct argument (not read from selectedPO closure).
     // inputRef points to the global singleton <input> rendered at the KanbanPage root.
     const handleEvidenceUpload = async (field, file, poId, inputRef) => {
-        // FF-HARDENING-008: Keep the ref in sync so the native change listener
-        // (registered once via useEffect) always calls the current version of
-        // this function without capturing a stale closure.
-        handleUploadRef.current = handleEvidenceUpload
         // [F12 TRACE 3] — handler entry point
         console.log('[F12 TRACE 3] Entered handleEvidenceUpload. Field: ' + field + ' | File: ' + file?.name + ' | poId: ' + poId)
 
@@ -1410,8 +1403,8 @@ const KanbanPage = () => {
                             e.target.value = ''
                             const poId = selectedPO?.id
                             console.log('[F12 TRACE 2] Truck onchange fired. file:', file?.name, '| poId:', poId)
-                            if (file && poId && handleUploadRef.current) {
-                                handleUploadRef.current('foto_carga_path', file, poId, globalTruckInputRef)
+                            if (file && poId) {
+                                handleEvidenceUpload('foto_carga_path', file, poId, globalTruckInputRef)
                             }
                         }
                     }
@@ -1431,8 +1424,8 @@ const KanbanPage = () => {
                             e.target.value = ''
                             const poId = selectedPO?.id
                             console.log('[F12 TRACE 2] Receipt onchange fired. file:', file?.name, '| poId:', poId)
-                            if (file && poId && handleUploadRef.current) {
-                                handleUploadRef.current('foto_canhoto_path', file, poId, globalReceiptInputRef)
+                            if (file && poId) {
+                                handleEvidenceUpload('foto_canhoto_path', file, poId, globalReceiptInputRef)
                             }
                         }
                     }
