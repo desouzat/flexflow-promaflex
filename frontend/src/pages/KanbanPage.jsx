@@ -268,15 +268,12 @@ const KanbanPage = () => {
 
     const getFinanceiroMissingFieldsTooltip = () => {
         const missing = [];
-        if (!checklistFinanceiro.margem_comissoes_validadas) missing.push('validar margem e comissões');
-        if (!checklistFinanceiro.nfe_chave_conferidas) missing.push('conferir NF-e');
-        if (!checklistFinanceiro.evidencias_fotograficas_verificadas) missing.push('verificar evidências fotográficas');
-        
+        // FF-HARDENING-009: Financial audit checklist removed from workflow.
+        // Only the audit comment is required to finalizar.
         const commentLen = (localFields.audit_comment || '').trim().length;
         if (commentLen < 20) {
-            missing.push(`faltam ${20 - commentLen} caracteres no parecer`);
+            missing.push(`faltam ${20 - commentLen} caracteres no parecer de auditoria`);
         }
-        
         if (missing.length === 0) return '';
         const joined = missing.join(', ');
         return joined.charAt(0).toUpperCase() + joined.slice(1);
@@ -1290,8 +1287,8 @@ const KanbanPage = () => {
             const endConferido = !!(logisticsChecklist.endereco_conferido || selectedPO.partition_metadata?.logistics_checklist?.endereco_conferido);
             const pesoValidado = !!(logisticsChecklist.peso_validado || selectedPO.partition_metadata?.logistics_checklist?.peso_validado);
             const etiqImpressas = !!(logisticsChecklist.etiquetas_impressas || selectedPO.partition_metadata?.logistics_checklist?.etiquetas_impressas);
-            
-            return !!numeroNfe && !!transportadora && endConferido && pesoValidado && etiqImpressas;
+            // FF-HARDENING-009: Both GCS upload paths are mandatory to advance.
+            return !!numeroNfe && !!transportadora && endConferido && pesoValidado && etiqImpressas && isDispatchReady();
         }
 
         if (selectedPO.status === 'Financeiro') {
@@ -1333,12 +1330,15 @@ const KanbanPage = () => {
             const endConferido = !!(logisticsChecklist.endereco_conferido || selectedPO.partition_metadata?.logistics_checklist?.endereco_conferido);
             const pesoValidado = !!(logisticsChecklist.peso_validado || selectedPO.partition_metadata?.logistics_checklist?.peso_validado);
             const etiqImpressas = !!(logisticsChecklist.etiquetas_impressas || selectedPO.partition_metadata?.logistics_checklist?.etiquetas_impressas);
-            
+
             if (!numeroNfe) missing.push('Número NF-e');
             if (!transportadora) missing.push('Transportadora');
             if (!endConferido) missing.push('Endereço Conferido');
             if (!pesoValidado) missing.push('Peso Validado');
             if (!etiqImpressas) missing.push('Etiquetas Impressas');
+            // FF-HARDENING-009: GCS upload guardrails
+            if (!logisticsChecklist.foto_carga_path) missing.push('Foto da Carga (upload obrigatório)');
+            if (!logisticsChecklist.foto_canhoto_path) missing.push('NF c/ Canhoto Assinado (upload obrigatório)');
         }
 
         if (selectedPO.status === 'Financeiro') {
@@ -1531,7 +1531,14 @@ const KanbanPage = () => {
                         <div className="bg-white rounded-lg shadow-xl max-w-5xl w-full max-h-[90vh] overflow-hidden flex flex-col">
                             {/* Modal Header */}
                             {(() => {
-                                const activeColumn = boardData?.columns?.find?.(col => col?.status === selectedPO?.status);
+                                // FF-HARDENING-009: For archived POs (Concluídos), find the column
+                                // by status_macro (ARCHIVED/COMPLETED) since their status field may
+                                // still read 'Concluídos' and the column.status is 'Concluídos'.
+                                const activeColumn = boardData?.columns?.find?.(col =>
+                                    isArchived
+                                        ? (col?.status === 'Concluídos' || col?.status === selectedPO?.status)
+                                        : col?.status === selectedPO?.status
+                                );
                                 const columnPOs = activeColumn ? filterPOs(activeColumn.pos) : [];
                                 const currentPOIndex = columnPOs?.findIndex?.(po => po?.id === selectedPO?.id);
                                 const hasPrevPO = currentPOIndex > 0;
@@ -2785,44 +2792,14 @@ const KanbanPage = () => {
                                                                                     </div>
                                                                                 </div>
 
-                                                                                {/* Checklist de Auditoria Financeira */}
+                                                                                {/* FF-HARDENING-009: Checklist de Auditoria Financeira hidden
+                                                                                     — Finance department does not use these checkboxes.
+                                                                                     State (checklistFinanceiro) is preserved for potential
+                                                                                     future re-activation. JSX intentionally commented out.
                                                                                 <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg space-y-3">
-                                                                                    <h5 className="text-xs font-bold text-slate-800 uppercase tracking-wider border-b border-slate-200 pb-2">
-                                                                                        Checklist de Auditoria Financeira
-                                                                                    </h5>
-                                                                                    <div className="flex flex-col gap-2.5">
-                                                                                        <label className="flex items-center gap-2.5 text-xs text-slate-700 font-semibold cursor-pointer">
-                                                                                            <input
-                                                                                                type="checkbox"
-                                                                                                checked={checklistFinanceiro.margem_comissoes_validadas}
-                                                                                                onChange={(e) => handleFinanceiroChecklistChange('margem_comissoes_validadas', e.target.checked)}
-                                                                                                className="w-4 h-4 text-emerald-600 border-gray-300 rounded focus:ring-emerald-500 cursor-pointer"
-                                                                                                disabled={!isActive}
-                                                                                            />
-                                                                                            <span>Margem e Comissões Validadas</span>
-                                                                                        </label>
-                                                                                        <label className="flex items-center gap-2.5 text-xs text-slate-700 font-semibold cursor-pointer">
-                                                                                            <input
-                                                                                                type="checkbox"
-                                                                                                checked={checklistFinanceiro.nfe_chave_conferidas}
-                                                                                                onChange={(e) => handleFinanceiroChecklistChange('nfe_chave_conferidas', e.target.checked)}
-                                                                                                className="w-4 h-4 text-emerald-600 border-gray-300 rounded focus:ring-emerald-500 cursor-pointer"
-                                                                                                disabled={!isActive}
-                                                                                            />
-                                                                                            <span>NF-e Conferida</span>
-                                                                                        </label>
-                                                                                        <label className="flex items-center gap-2.5 text-xs text-slate-700 font-semibold cursor-pointer">
-                                                                                            <input
-                                                                                                type="checkbox"
-                                                                                                checked={checklistFinanceiro.evidencias_fotograficas_verificadas}
-                                                                                                onChange={(e) => handleFinanceiroChecklistChange('evidencias_fotograficas_verificadas', e.target.checked)}
-                                                                                                className="w-4 h-4 text-emerald-600 border-gray-300 rounded focus:ring-emerald-500 cursor-pointer"
-                                                                                                disabled={!isActive}
-                                                                                            />
-                                                                                            <span>Evidências Fotográficas Verificadas</span>
-                                                                                        </label>
-                                                                                    </div>
-                                                                                </div>
+                                                                                    <h5>Checklist de Auditoria Financeira</h5>
+                                                                                    ...3 checkboxes (margem, NF-e, evidências)...
+                                                                                </div> */}
 
                                                                                 {/* Comissão */}
                                                                                 <div className="p-4 bg-slate-50 border border-gray-200 rounded-lg">
@@ -3092,25 +3069,14 @@ const KanbanPage = () => {
                                     {selectedPO.status === 'Financeiro' && !isArchived && !isPOBlocked && (
                                         <button
                                             onClick={handleArchivePO}
-                                            disabled={
-                                                !checklistFinanceiro.margem_comissoes_validadas ||
-                                                !checklistFinanceiro.nfe_chave_conferidas ||
-                                                !checklistFinanceiro.evidencias_fotograficas_verificadas ||
-                                                (localFields.audit_comment || '').trim().length < 20
-                                            }
+                                            disabled={(localFields.audit_comment || '').trim().length < 20}
                                             className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition-colors shadow-sm text-sm ${
-                                                (checklistFinanceiro.margem_comissoes_validadas &&
-                                                checklistFinanceiro.nfe_chave_conferidas &&
-                                                checklistFinanceiro.evidencias_fotograficas_verificadas &&
-                                                (localFields.audit_comment || '').trim().length >= 20)
+                                                (localFields.audit_comment || '').trim().length >= 20
                                                     ? 'bg-emerald-600 text-white hover:bg-emerald-700 cursor-pointer animate-pulse'
                                                     : 'bg-gray-300 text-gray-500 cursor-not-allowed border border-gray-310'
                                             }`}
                                             title={
-                                                !(checklistFinanceiro.margem_comissoes_validadas &&
-                                                checklistFinanceiro.nfe_chave_conferidas &&
-                                                checklistFinanceiro.evidencias_fotograficas_verificadas &&
-                                                (localFields.audit_comment || '').trim().length >= 20)
+                                                (localFields.audit_comment || '').trim().length < 20
                                                     ? `Não é possível finalizar. ${getFinanceiroMissingFieldsTooltip()}`
                                                     : 'Finalizar Auditoria e Arquivar Definitivamente'
                                             }
