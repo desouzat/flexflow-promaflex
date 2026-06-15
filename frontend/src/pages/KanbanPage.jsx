@@ -301,6 +301,50 @@ const KanbanPage = () => {
     const globalReceiptInputRef = useRef(null)
     const activeUploadPoIdRef   = useRef(null)  // sync ref — no stale closure
 
+    // FF-HARDENING-008: Wrap handleEvidenceUpload in a ref so the native DOM
+    // event listener (attached once via useEffect) always calls the LATEST version
+    // without capturing a stale closure. This ref is updated on every render.
+    const handleUploadRef = useRef(null)
+
+    // FF-HARDENING-008: Attach NATIVE DOM change listeners directly to both inputs.
+    // This completely bypasses React's synthetic onChange event system, which can
+    // silently fail to fire when the component re-renders between .click() and
+    // file selection (React may re-attach synthetic listeners to a new fiber,
+    // orphaning the native file-picker event from the original listener).
+    // Empty deps [] = attached ONCE on component mount, never re-attached.
+    useEffect(() => {
+        const truckInput   = globalTruckInputRef.current
+        const receiptInput = globalReceiptInputRef.current
+
+        const handleTruckChange = (e) => {
+            const file = e.target.files[0]
+            e.target.value = ''
+            const poId = activeUploadPoIdRef.current
+            console.log('[F12 TRACE 2] Native truck change event. file:', file?.name, '| poId:', poId)
+            if (file && poId && handleUploadRef.current) {
+                handleUploadRef.current('foto_carga_path', file, poId, globalTruckInputRef)
+            }
+        }
+
+        const handleReceiptChange = (e) => {
+            const file = e.target.files[0]
+            e.target.value = ''
+            const poId = activeUploadPoIdRef.current
+            console.log('[F12 TRACE 2] Native receipt change event. file:', file?.name, '| poId:', poId)
+            if (file && poId && handleUploadRef.current) {
+                handleUploadRef.current('foto_canhoto_path', file, poId, globalReceiptInputRef)
+            }
+        }
+
+        if (truckInput)   truckInput.addEventListener('change',   handleTruckChange)
+        if (receiptInput) receiptInput.addEventListener('change', handleReceiptChange)
+
+        return () => {
+            if (truckInput)   truckInput.removeEventListener('change',   handleTruckChange)
+            if (receiptInput) receiptInput.removeEventListener('change', handleReceiptChange)
+        }
+    }, [])  // eslint-disable-line react-hooks/exhaustive-deps
+
 
 
     const { refreshNotifications } = useNotifications()
@@ -860,6 +904,10 @@ const KanbanPage = () => {
     // poId is now received as a direct argument (not read from selectedPO closure).
     // inputRef points to the global singleton <input> rendered at the KanbanPage root.
     const handleEvidenceUpload = async (field, file, poId, inputRef) => {
+        // FF-HARDENING-008: Keep the ref in sync so the native change listener
+        // (registered once via useEffect) always calls the current version of
+        // this function without capturing a stale closure.
+        handleUploadRef.current = handleEvidenceUpload
         // [F12 TRACE 3] — handler entry point
         console.log('[F12 TRACE 3] Entered handleEvidenceUpload. Field: ' + field + ' | File: ' + file?.name + ' | poId: ' + poId)
 
@@ -1365,40 +1413,20 @@ const KanbanPage = () => {
         <>
             {/* FF-HARDENING-008: Global singleton file inputs rendered BEFORE <ErrorBoundary>
                  and outside ALL conditional renders. These are ALWAYS mounted in the DOM.
-                 Chrome's User Activation policy requires .click() to be called synchronously;
-                 having the inputs here (outside modals/maps/error boundaries) guarantees the
-                 refs are non-null the instant any upload button is pressed. */}
+                 onChange is intentionally OMITTED — change events are handled by native
+                 addEventListener in the useEffect above, which is immune to React
+                 re-render cycles and synthetic-event re-attachment. */}
             <input
                 ref={globalTruckInputRef}
                 type="file"
                 accept=".pdf,.jpg,.jpeg,.png"
                 style={{ display: 'none' }}
-                onChange={(e) => {
-                    // Read file BEFORE resetting value (reset clears FileList)
-                    const file = e.target.files[0]
-                    e.target.value = ''
-                    const poId = activeUploadPoIdRef.current
-                    console.log('[F12 TRACE 2] Global Truck input onChange. file:', file?.name, '| poId:', poId)
-                    if (file && poId) {
-                        handleEvidenceUpload('foto_carga_path', file, poId, globalTruckInputRef)
-                    }
-                }}
             />
             <input
                 ref={globalReceiptInputRef}
                 type="file"
                 accept=".pdf,.jpg,.jpeg,.png"
                 style={{ display: 'none' }}
-                onChange={(e) => {
-                    // Read file BEFORE resetting value (reset clears FileList)
-                    const file = e.target.files[0]
-                    e.target.value = ''
-                    const poId = activeUploadPoIdRef.current
-                    console.log('[F12 TRACE 2] Global Receipt input onChange. file:', file?.name, '| poId:', poId)
-                    if (file && poId) {
-                        handleEvidenceUpload('foto_canhoto_path', file, poId, globalReceiptInputRef)
-                    }
-                }}
             />
 
             <ErrorBoundary>
