@@ -123,13 +123,14 @@ class SlaConfigUpdate(BaseModel):
 
 def _has_sla_access(user: UserInfo) -> bool:
     """
-    FF-HARDENING-011: Determines whether the current user may access the
+    FF-HARDENING-011 (revised): Determines whether the current user may access the
     SLA Parameters configuration card.
     Access is granted if:
-      - user.role is 'admin' or 'master', OR
-      - user.is_sla_manager is True (set by admin in Gestão de Usuários)
+      - user.role is 'admin', OR
+      - user.is_sla_manager is True (set by admin in Gestão de Usuários per-user)
+    NOTE: 'master' role alone does NOT grant access. Delegation must be explicitly enabled.
     """
-    return user.role.lower() in ("admin", "master") or bool(user.is_sla_manager)
+    return user.role.lower() == "admin" or bool(user.is_sla_manager)
 
 
 def _is_privileged(role: str) -> bool:

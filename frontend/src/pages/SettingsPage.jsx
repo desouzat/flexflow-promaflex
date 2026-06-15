@@ -7,13 +7,14 @@ import { showSuccess, showError, showLoading, dismissToast } from '../utils/toas
 /**
  * SettingsPage — System configuration panel.
  *
- * Access logic (FF-HARDENING-011):
- *   - "Parâmetros de SLA Industrial" card: visible if user.role in ['admin','master']
- *     OR user.is_sla_manager === true (set via Gestão de Usuários by admin).
+ * Access logic (FF-HARDENING-011 revised):
+ *   - "Parâmetros de SLA Industrial" card: visible ONLY if user.role === 'admin'
+ *     OR user.is_sla_manager === true (explicitly enabled per-user by admin).
+ *     NOTE: 'master' role alone does NOT grant access — delegation must be set.
  *   - "Suporte & Chamados" card: visible ONLY to admin role.
- *   - Page itself: requires admin OR (master/sla_manager with SLA access).
  *
- * The is_sla_manager flag is baked into the JWT at login — no extra API call needed.
+ * is_sla_manager is baked into the JWT payload at login and stored in localStorage.
+ * No extra API call is needed — read directly from useAuth().user.is_sla_manager.
  */
 const SettingsPage = () => {
     const { user, loading: authLoading } = useAuth()
@@ -33,14 +34,14 @@ const SettingsPage = () => {
     const [slaSaving, setSlaSaving] = useState(false)
 
     // Derive access flags from the JWT-backed auth context (no extra API call needed)
-    const isAdmin   = (user?.role || '').toLowerCase() === 'admin'
-    const isMaster  = (user?.role || '').toLowerCase() === 'master'
-    // FF-HARDENING-011: is_sla_manager baked into JWT at login time
+    const isAdmin      = (user?.role || '').toLowerCase() === 'admin'
+    // FF-HARDENING-011: SLA card access = 'admin' role OR explicit is_sla_manager delegation.
+    // 'master' role alone does NOT grant access — delegation must be explicitly enabled by admin.
     const isSlaManager = Boolean(user?.is_sla_manager)
-    // SLA card is visible for admin, master, OR delegated SLA manager
-    const hasSlaAccess = isAdmin || isMaster || isSlaManager
+    // hasSlaAccess gates the SLA Parameters card (and its fetchSlaConfig call)
+    const hasSlaAccess = isAdmin || isSlaManager
     // Full settings access = any user with at least one visible card
-    const hasAnyAccess = isAdmin || hasSlaAccess
+    const hasAnyAccess = hasSlaAccess
 
     useEffect(() => {
         if (authLoading || !user) return
@@ -246,9 +247,10 @@ const SettingsPage = () => {
                         </div>
                     )}
 
-                    {/* ── SLA Parameters Card (admin + master + is_sla_manager delegate) ── */}
-                    {/* FF-HARDENING-011: Always visible when hasSlaAccess is true.
-                        Does NOT depend on Kanban board state or any other runtime condition. */}
+                    {/* ── SLA Parameters Card (admin OR explicit is_sla_manager delegate) ── */}
+                    {/* FF-HARDENING-011: Visible only when hasSlaAccess = isAdmin || isSlaManager.
+                        'master' role alone does NOT grant access. Always visible when hasSlaAccess is true
+                        — does NOT depend on Kanban board state or any other runtime condition. */}
                     {hasSlaAccess && (
                         <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden">
                             <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-indigo-50 to-blue-50">
@@ -260,7 +262,7 @@ const SettingsPage = () => {
                                     Configure os limites e o calendário de horas úteis para o cálculo automático de SLA.
                                     Alterações têm efeito imediato no cronômetro de todos os pedidos ativos.
                                 </p>
-                                {isSlaManager && !isAdmin && !isMaster && (
+                                {isSlaManager && !isAdmin && (
                                     <p className="text-xs text-indigo-600 mt-1 font-semibold">
                                         ✓ Você tem acesso como Responsável pelo SLA
                                     </p>
