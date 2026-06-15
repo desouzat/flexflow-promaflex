@@ -782,6 +782,19 @@ async def get_handoff_history(
             return None
         return dt.replace(tzinfo=None) if dt.tzinfo else dt
 
+    def to_brasilia(dt_naive):
+        """Convert a UTC-naive datetime to America/Sao_Paulo (UTC-3) for display.
+        FF-HARDENING-011 Item 1: All datetimes stored in DB are UTC.
+        Brasília is UTC-3 (no DST in production calendar consideration needed here;
+        the offset is applied as a fixed -3h shift consistent with Brazil Standard Time).
+        This function is ONLY used for human-readable display strings, never for
+        duration/business-hours arithmetic (which stays in UTC-naive).
+        """
+        if dt_naive is None:
+            return None
+        from datetime import timedelta
+        return dt_naive + timedelta(hours=-3)
+
     now_naive = to_naive(datetime.utcnow())
     po_created_naive = to_naive(po.created_at)
     
@@ -814,20 +827,25 @@ async def get_handoff_history(
         
     formatted_history = []
     for item in grouped_areas:
-        arrival = to_naive(item["arrival"])
-        departure = to_naive(item["departure"])
-        end_for_duration = departure if departure else now_naive
-        
-        duration_td = end_for_duration - arrival
+        arrival_naive = to_naive(item["arrival"])
+        departure_naive = to_naive(item["departure"])
+        end_for_duration = departure_naive if departure_naive else now_naive
+
+        duration_td = end_for_duration - arrival_naive
         duration_str = format_duration(duration_td)
-        
-        arrival_str = arrival.strftime("%d/%m/%Y %H:%M:%S") if arrival else ""
-        departure_str = departure.strftime("%d/%m/%Y %H:%M:%S") if departure else ("Concluído" if is_archived else "Em andamento")
-        
+
+        # FF-HARDENING-011 [Item 1]: Convert UTC → Brasília (UTC-3) for display
+        arrival_brt = to_brasilia(arrival_naive)
+        departure_brt = to_brasilia(departure_naive)
+
+        arrival_str = arrival_brt.strftime("%d/%m/%Y %H:%M") if arrival_brt else ""
+        departure_str = departure_brt.strftime("%d/%m/%Y %H:%M") if departure_brt else ("Concluído" if is_archived else "Em andamento")
+
         formatted_history.append({
             "area": item["area"],
-            "arrival": arrival_str,
-            "departure": departure_str,
+            "arrival": arrival_str,          # Brasília time (display)
+            "arrival_utc_iso": arrival_naive.isoformat() if arrival_naive else None,  # UTC (for SLA math)
+            "departure": departure_str,       # Brasília time (display)
             "duration": duration_str,
             "duration_seconds": int(duration_td.total_seconds()),
             "user": ", ".join(item["users"])
@@ -843,40 +861,62 @@ async def get_handoff_history(
                 is_replacement = True
                 break
                 
-    # SLA multiplier
+    # ── FF-HARDENING-010: Business-Hours SLA Calculation ─────────────────────
+    # Load SLA config from GlobalConfig (falls back to safe defaults)
+    from backend.utils.business_hours import get_sla_config_from_db, calculate_business_hours
+    sla_config = get_sla_config_from_db(db, po.tenant_id)
+
+    # SLA multiplier for replacement orders
     sla_factor = 0.5 if is_replacement else 1.0
-    total_sla_hours = 240.0 * sla_factor
-    
-    # Area SLAs
-    area_slas = {
-        "Comercial": 48.0,
-        "PCP": 24.0,
-        "Produção": 72.0,
-        "Expedição": 48.0,
-        "Financeiro": 48.0,
-        "Arquivado": 0.0
+    total_sla_hours = float(sla_config["sla_total_hours"]) * sla_factor
+
+    # Area SLAs — scale default 24h-base by the configured sla_area_hours ratio
+    # For now we keep the relative proportions between areas and scale them.
+    area_sla_base = float(sla_config["sla_area_hours"])
+    # Original proportions: Com=48, PCP=24, Prod=72, Exp=48, Fin=48 / base=48
+    area_sla_ratios = {
+        "Comercial":  48.0 / 48.0,
+        "PCP":        24.0 / 48.0,
+        "Produção":   72.0 / 48.0,
+        "Expedição":  48.0 / 48.0,
+        "Financeiro": 48.0 / 48.0,
+        "Arquivado":   0.0,
     }
-    
+    area_slas = {k: v * area_sla_base for k, v in area_sla_ratios.items()}
+
     active_area = STATUS_DISPLAY_MAP.get(po.status_macro, "Comercial")
-    current_area_sla_hours = area_slas.get(active_area, 48.0) * sla_factor
-    
-    # Total elapsed
+    current_area_sla_hours = area_slas.get(active_area, area_sla_base) * sla_factor
+
+    # Total elapsed business hours from PO creation to now (or archive time)
     total_elapsed_hours = 0.0
-    if po_created_naive:
-        total_elapsed_hours = (now_naive - po_created_naive).total_seconds() / 3600.0
-        
-    # Calculate freeze hold time - SLA counter NEVER pauses as requested by sponsor
-    hold_time_seconds = 0
-    hold_time_hours = 0.0
-    total_elapsed_hours = max(0.0, total_elapsed_hours - hold_time_hours)
-        
-    # Current Area elapsed
+    if po_created_naive and now_naive and now_naive > po_created_naive:
+        total_elapsed_hours = calculate_business_hours(
+            start_time=po_created_naive,
+            end_time=now_naive,
+            config=sla_config,
+        )
+
+    # Current area elapsed business hours (from latest handoff to now)
     current_area_elapsed_hours = 0.0
-    if is_archived:
-        current_area_elapsed_hours = 0.0
-    elif formatted_history:
-        current_area_elapsed_hours = formatted_history[-1]["duration_seconds"] / 3600.0
-        current_area_elapsed_hours = max(0.0, current_area_elapsed_hours - hold_time_hours)
+    if not is_archived and formatted_history:
+        # Use the UTC ISO field stored alongside the BRT display string
+        try:
+            last_arrival_utc_iso = formatted_history[-1].get("arrival_utc_iso")
+            if last_arrival_utc_iso:
+                last_arrival_utc = datetime.fromisoformat(last_arrival_utc_iso)
+                if now_naive > last_arrival_utc:
+                    current_area_elapsed_hours = calculate_business_hours(
+                        start_time=last_arrival_utc,
+                        end_time=now_naive,
+                        config=sla_config,
+                    )
+            else:
+                # Fallback: use raw seconds
+                current_area_elapsed_hours = formatted_history[-1]["duration_seconds"] / 3600.0
+        except (ValueError, KeyError):
+            # Fallback: use raw seconds from formatted_history
+            current_area_elapsed_hours = formatted_history[-1]["duration_seconds"] / 3600.0
+    # ── End FF-HARDENING-010 ──────────────────────────────────────────────────
         
     # Construct chronological transitions history
     transitions = []
@@ -884,8 +924,10 @@ async def get_handoff_history(
     # Initial status transition (po creation)
     initial_area = STATUS_DISPLAY_MAP.get(initial_status, initial_status)
     initial_reason = "CONFERIDO"
+    # FF-HARDENING-011 [Item 1]: Display creation date in Brasília time
+    po_created_brt = to_brasilia(po_created_naive)
     transitions.append({
-        "date": po_created_naive.strftime("%d/%m/%Y %H:%M:%S") if po_created_naive else "",
+        "date": po_created_brt.strftime("%d/%m/%Y %H:%M") if po_created_brt else "",
         "user": creator_name,
         "from_to": f"Mesa Conf ➔ {initial_area}",
         "reason": initial_reason
@@ -976,8 +1018,11 @@ async def get_handoff_history(
             else:
                 reason = "[Outros]"
             
+        # FF-HARDENING-011 [Item 1]: Transitions date displayed in Brasília time
+        log_dt_naive = to_naive(log.created_at)
+        log_dt_brt = to_brasilia(log_dt_naive)
         transitions.append({
-            "date": to_naive(log.created_at).strftime("%d/%m/%Y %H:%M:%S") if log.created_at else "",
+            "date": log_dt_brt.strftime("%d/%m/%Y %H:%M") if log_dt_brt else "",
             "user": log_user,
             "from_to": f"{from_area} ➔ {to_area}",
             "reason": reason
@@ -992,7 +1037,15 @@ async def get_handoff_history(
         "current_area": active_area,
         "current_area_sla_hours": current_area_sla_hours,
         "current_area_elapsed_hours": current_area_elapsed_hours,
-        "is_archived": is_archived
+        "is_archived": is_archived,
+        # FF-HARDENING-010: expose SLA config so the frontend can display limits
+        "sla_config": {
+            "sla_total_hours": sla_config["sla_total_hours"],
+            "sla_area_hours": sla_config["sla_area_hours"],
+            "sla_start_hour": sla_config["sla_start_hour"],
+            "sla_end_hour": sla_config["sla_end_hour"],
+            "sla_working_days": sla_config["sla_working_days"],
+        },
     }
 
 

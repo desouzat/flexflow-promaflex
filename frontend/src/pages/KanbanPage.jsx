@@ -1783,7 +1783,7 @@ const KanbanPage = () => {
                                                     <div className="w-full bg-slate-200 rounded-full h-3 overflow-hidden border border-slate-300">
                                                         <div 
                                                             className={`h-full transition-all duration-500 ${getProgressBarColor(areaPercent)}`} 
-                                                        style={{ width: `${areaPercent}%` }}
+                                                            style={{ width: `${areaPercent}%` }}
                                                         />
                                                     </div>
                                                     <p className="text-[10px] text-slate-500 mt-1">
@@ -1805,6 +1805,13 @@ const KanbanPage = () => {
                                                     ) : (
                                                         <span className="text-[9px] bg-slate-100 text-slate-600 border border-slate-300 rounded-full px-2 py-0.5 font-semibold">🔒 Somente Leitura</span>
                                                     )}
+                                                    {/* FF-HARDENING-010 [Item 1]: Explanatory tooltip */}
+                                                    <span
+                                                        title="O preenchimento serve para registrar ocorrências operacionais proativamente. Não pausa o cronômetro oficial do SLA."
+                                                        className="ml-1 inline-flex items-center justify-center w-4 h-4 rounded-full bg-slate-200 text-slate-600 text-[10px] font-bold cursor-help hover:bg-amber-200 hover:text-amber-800 transition-colors"
+                                                    >
+                                                        ?
+                                                    </span>
                                                 </div>
 
                                                 {/* Read-only notice — shown when not in PCP */}
@@ -1937,7 +1944,14 @@ const KanbanPage = () => {
                                             (selectedPO.items && selectedPO.items.find(item => item.finance_justification)?.finance_justification) ||
                                             'Sem justificativa comercial registrada.';
 
-                                        const stages = ['Comercial', 'PCP', 'Produção/Embalagem', 'Faturamento/Expedição', 'Financeiro', 'Concluídos'];
+                                        // FF-HARDENING-011 [Item 2]: Exclude 'Concluídos' stage for archived POs.
+                                        // For active POs the accordion renders all stages normally.
+                                        // For archived POs the "Concluídos" stage is redundant — the PO
+                                        // status already shows as Concluídos in the modal header.
+                                        const stagesBase = ['Comercial', 'PCP', 'Produção/Embalagem', 'Faturamento/Expedição', 'Financeiro', 'Concluídos'];
+                                        const stages = isArchived
+                                            ? stagesBase.filter(s => s !== 'Concluídos')
+                                            : stagesBase;
                                         const currentStageIndex = stages.indexOf(mapStatusToStageName(selectedPO.status));
 
                                         return stages.map((stageName, idx) => {
@@ -2724,84 +2738,12 @@ const KanbanPage = () => {
                                                                             </div>
                                                                         ) : (
                                                                             <div className="space-y-4">
-                                                                                {/* Painel de Evidências da Expedição (Visual 360º) */}
-                                                                                <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg space-y-3">
-                                                                                    <h5 className="text-xs font-bold text-slate-800 uppercase tracking-wider border-b border-slate-200 pb-2 flex items-center gap-1.5">
-                                                                                        <span>📋</span> Evidências Físicas & Fiscais (Expedição)
-                                                                                    </h5>
-                                                                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                                                                        {/* NF-e */}
-                                                                                        <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-2xs space-y-1">
-                                                                                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block">NF-e</span>
-                                                                                            <div className="text-xs font-semibold text-slate-800">
-                                                                                                Número NF-e: <span className="font-mono text-blue-600 font-bold">{selectedPO.extra_metadata?.numero_nfe || 'Não informado'}</span>
-                                                                                            </div>
-                                                                                        </div>
+                                                                                {/* FF-HARDENING-010 [Item 8]: Duplicate shipping evidence panel removed.
+                                                                                     NF-e, foto_carga_path, and foto_canhoto_path are already visible
+                                                                                     inside the Faturamento/Expedição accordion above. */}
 
-                                                                                        {/* Foto da Carga */}
-                                                                                        <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-2xs space-y-1 flex flex-col justify-between">
-                                                                                            <div>
-                                                                                                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block">Foto da Carga Carregada</span>
-                                                                                                {logisticsChecklist.foto_carga_path ? (
-                                                                                                    <div className="text-xs text-green-700 font-semibold flex items-center gap-1 mt-1">
-                                                                                                        <span className="text-emerald-500">✓</span> Foto Salva com Sucesso!
-                                                                                                    </div>
-                                                                                                ) : (
-                                                                                                    <div className="text-xs text-amber-700 font-medium flex items-center gap-1 mt-1">
-                                                                                                        <span>⚠</span> Nenhuma foto anexada
-                                                                                                    </div>
-                                                                                                )}
-                                                                                            </div>
-                                                                                            {logisticsChecklist.foto_carga_path && (
-                                                                                                <a 
-                                                                                                    href={getDownloadUrl(logisticsChecklist.foto_carga_path)}
-                                                                                                    target="_blank" 
-                                                                                                    rel="noreferrer" 
-                                                                                                    className="text-xs text-blue-600 hover:text-blue-850 font-bold hover:underline block mt-2"
-                                                                                                >
-                                                                                                    🔍 Visualizar Foto da Carga
-                                                                                                </a>
-                                                                                            )}
-                                                                                        </div>
-
-                                                                                        {/* Nota Fiscal com Canhoto Assinado */}
-                                                                                        <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-2xs space-y-1 flex flex-col justify-between">
-                                                                                            <div>
-                                                                                                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block">Nota Fiscal com Canhoto Assinado</span>
-                                                                                                {logisticsChecklist.foto_canhoto_path ? (
-                                                                                                    <div className="text-xs text-green-700 font-semibold flex items-center gap-1 mt-1">
-                                                                                                        <span className="text-emerald-500">✓</span> Evidência Salva com Sucesso!
-                                                                                                    </div>
-                                                                                                ) : (
-                                                                                                    <div className="text-xs text-amber-700 font-medium flex items-center gap-1 mt-1">
-                                                                                                        <span>⚠</span> Nenhum arquivo anexado
-                                                                                                    </div>
-                                                                                                )}
-                                                                                            </div>
-                                                                                            {logisticsChecklist.foto_canhoto_path && (
-                                                                                                <a 
-                                                                                                    href={getDownloadUrl(logisticsChecklist.foto_canhoto_path)}
-                                                                                                    target="_blank" 
-                                                                                                    rel="noreferrer" 
-                                                                                                    className="text-xs text-blue-600 hover:text-blue-850 font-bold hover:underline block mt-2"
-                                                                                                >
-                                                                                                    📄 Abrir Nota Fiscal com Canhoto Assinado
-                                                                                                </a>
-                                                                                            )}
-                                                                                        </div>
-                                                                                    </div>
-                                                                                </div>
-
-                                                                                {/* FF-HARDENING-009: Checklist de Auditoria Financeira hidden
-                                                                                     — Finance department does not use these checkboxes.
-                                                                                     State (checklistFinanceiro) is preserved for potential
-                                                                                     future re-activation. JSX intentionally commented out.
-                                                                                <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg space-y-3">
-                                                                                    <h5>Checklist de Auditoria Financeira</h5>
-                                                                                    ...3 checkboxes (margem, NF-e, evidências)...
-                                                                                </div> */}
-
-                                                                                {/* Comissão */}
+                                                                                {/* Comissão — admin/master ONLY (FF-HARDENING-010 [Item 8]) */}
+                                                                                {['admin', 'master'].includes((user?.role || '').toLowerCase()) && (
                                                                                 <div className="p-4 bg-slate-50 border border-gray-200 rounded-lg">
                                                                                     <div className="flex items-center justify-between mb-3 border-b border-gray-200 pb-2">
                                                                                         <h5 className="text-xs font-bold text-gray-700 uppercase tracking-wider">
@@ -2901,8 +2843,9 @@ const KanbanPage = () => {
                                                                                         </div>
                                                                                     )}
                                                                                 </div>
+                                                                                )}
 
-                                                                                {/* Comentário de Auditoria Financeira */}
+                                                                                {/* Comentário de Auditoria Financeira — visible to all roles */}
                                                                                 <div>
                                                                                     <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
                                                                                         Comentários e Parecer de Auditoria Financeira <span className="text-red-500">*</span>
