@@ -14,7 +14,8 @@ import {
     Package, DollarSign, Calendar, User, FileText, Globe,
     Star, RefreshCw as RefreshIcon, Zap, AlertCircle, Upload,
     CheckCircle, Edit2, Save, XCircle, Truck, Tag, Lock, Unlock,
-    ArrowUpRight, ShieldAlert, ChevronLeft, ChevronRight, Split, Paperclip, Percent
+    ArrowUpRight, ShieldAlert, ChevronLeft, ChevronRight, Split, Paperclip, Percent,
+    Download, Plus  // FF-HARDENING-012.2: Export CSV + Exchange card
 } from 'lucide-react'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -215,6 +216,20 @@ const KanbanPage = () => {
     const [compactView, setCompactView] = useState(false)
     const [selectedPO, setSelectedPO] = useState(null)
     const [showDetailsModal, setShowDetailsModal] = useState(false)
+    // FF-HARDENING-012.2 [Item 4]: Advanced filter state
+    const [filterClient, setFilterClient] = useState('')
+    const [filterDateStart, setFilterDateStart] = useState('')
+    const [filterDateEnd, setFilterDateEnd] = useState('')
+    const [filterColumn, setFilterColumn] = useState('')
+    const [showFilters, setShowFilters] = useState(false)
+    // FF-HARDENING-012.2 [Item 3]: Exchange/Return card modal state
+    const [showExchangeModal, setShowExchangeModal] = useState(false)
+    const [exchangeForm, setExchangeForm] = useState({ cliente: '', produto: '', quantidade: '', unidade_medida: 'M2', largura: '', comprimento: '' })
+    const [savingExchange, setSavingExchange] = useState(false)
+    // FF-HARDENING-012.2 [Item 2]: Invoice PDF upload ref
+    const globalInvoiceInputRef = useRef(null)
+    // FF-HARDENING-012.3 [Item 2]: Invoice XML upload ref
+    const globalXmlInvoiceInputRef = useRef(null)
     const isPhaseADisabled = selectedPO?.partition_metadata?.current_phase === 'FASE_A' || selectedPO?.extra_metadata?.current_phase === 'FASE_A';
     const [editingCommission, setEditingCommission] = useState(false)
     const [commissionValue, setCommissionValue] = useState('')
@@ -287,6 +302,13 @@ const KanbanPage = () => {
     const [partitionReason, setPartitionReason] = useState('')
     const [newDeliveryDate, setNewDeliveryDate] = useState('')
     const [qtySplits, setQtySplits] = useState({})
+    // FF-HARDENING-012.1 [Item 2]: Cancel PO modal (from Kanban board)
+    const [showCancelModal, setShowCancelModal] = useState(false)
+    const [cancelJustification, setCancelJustification] = useState('')
+    const [cancellingPO, setCancellingPO] = useState(false)
+    // FF-HARDENING-012.1 [Item 2]: FOB shipping — customer's own transport (zero freight)
+    const [isFOBShipping, setIsFOBShipping] = useState(false)
+
     const [showFreightModal, setShowFreightModal] = useState(false)
     const [freightC1, setFreightC1] = useState('')
     const [freightC2, setFreightC2] = useState('')
@@ -1111,13 +1133,16 @@ const KanbanPage = () => {
             'Comercial': 'Comercial',
             'PCP': 'PCP',
             'Produção/Embalagem': 'Produção/Embalagem',
-            'Faturamento/Expedição': 'Faturamento/Expedição',
+            'Faturamento': 'Faturamento',             // FF-HARDENING-012.2
+            'Expedição': 'Expedição',                 // FF-HARDENING-012.2
+            'Faturamento/Expedição': 'Faturamento',   // legacy → maps to Faturamento
             'Financeiro': 'Financeiro',
             'Concluídos': 'Concluídos',
             'SUBMITTED': 'Comercial',
             'APPROVED': 'PCP',
             'MANUFACTURING': 'Produção/Embalagem',
-            'SHIPPING': 'Faturamento/Expedição',
+            'BILLING': 'Faturamento',                 // FF-HARDENING-012.2
+            'SHIPPING': 'Expedição',                  // FF-HARDENING-012.2
             'FINANCE': 'Financeiro',
             'DRAFT': 'Comercial',
             'WAITING_COMMERCIAL_PARTITION': 'Comercial',
@@ -1136,8 +1161,9 @@ const KanbanPage = () => {
         const statusFlow = {
             'Comercial': 'PCP',
             'PCP': 'Produção/Embalagem',
-            'Produção/Embalagem': 'Faturamento/Expedição',
-            'Faturamento/Expedição': 'Concluídos',
+            'Produção/Embalagem': 'Faturamento',    // FF-HARDENING-012.2
+            'Faturamento': 'Expedição',               // FF-HARDENING-012.2
+            'Expedição': 'Concluídos',               // FF-HARDENING-012.2
             'Financeiro': 'Concluídos',
             'Concluídos': null
         }
@@ -1149,9 +1175,10 @@ const KanbanPage = () => {
         const statusFlow = {
             'PCP': 'Comercial',
             'Produção/Embalagem': 'PCP',
-            'Faturamento/Expedição': 'Produção/Embalagem',
-            'Financeiro': 'Faturamento/Expedição',
-            'Concluídos': 'Faturamento/Expedição'
+            'Faturamento': 'Produção/Embalagem',    // FF-HARDENING-012.2
+            'Expedição': 'Faturamento',              // FF-HARDENING-012.2
+            'Financeiro': 'Expedição',               // FF-HARDENING-012.2
+            'Concluídos': 'Expedição'               // FF-HARDENING-012.2
         }
         return statusFlow[mapped] || null
     }
@@ -1171,15 +1198,25 @@ const KanbanPage = () => {
         return po.status === 'PCP'
     }
 
+    // FF-HARDENING-012.3 [Item 4]: Strip GCS timestamp prefix for clean display names
+    const getCleanFilename = (rawPath) => {
+        if (!rawPath) return ''
+        const basename = rawPath.split('/').pop() || rawPath
+        const cleaned = basename.replace(/^\d+_/, '')
+        return decodeURIComponent(cleaned)
+    }
+
     const filterPOs = (pos) => {
         if (!pos || !Array.isArray(pos)) return []
-        if (!searchTerm) return pos
-
         return pos.filter((po) => {
-            const poNumber = po.po_number || ''
-            const clientName = po.client_name || ''
-            return poNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                clientName.toLowerCase().includes(searchTerm.toLowerCase())
+            const poNumber = (po.po_number || '').toLowerCase()
+            const clientName = (po.client_name || po.partition_metadata?.client_name || '').toLowerCase()
+            const matchSearch = !searchTerm || poNumber.includes(searchTerm.toLowerCase()) || clientName.includes(searchTerm.toLowerCase())
+            // FF-HARDENING-012.2 [Item 4]: Advanced filters
+            const matchClient = !filterClient || clientName.includes(filterClient.toLowerCase())
+            const matchDateStart = !filterDateStart || (po.created_at && new Date(po.created_at) >= new Date(filterDateStart))
+            const matchDateEnd = !filterDateEnd || (po.created_at && new Date(po.created_at) <= new Date(filterDateEnd + 'T23:59:59'))
+            return matchSearch && matchClient && matchDateStart && matchDateEnd
         })
     }
 
@@ -1188,7 +1225,9 @@ const KanbanPage = () => {
             'Comercial': 'yellow',
             'PCP': 'blue',
             'Produção/Embalagem': 'purple',
-            'Faturamento/Expedição': 'lightblue',
+            'Faturamento': 'lightblue',    // FF-HARDENING-012.2
+            'Expedição': 'teal',           // FF-HARDENING-012.2
+            'Faturamento/Expedição': 'lightblue',  // legacy fallback
             'Financeiro': 'green'
         }
         return colorMap[status] || 'gray'
@@ -1252,6 +1291,13 @@ const KanbanPage = () => {
         )
     }
 
+    // FF-HARDENING-012.3 [Item 2]: Either PDF or XML satisfies the Faturamento guardrail
+    const isBillingDocReady = () => {
+        const hasPdf = !!(selectedPO?.extra_metadata?.invoice_pdf_path)
+        const hasXml = !!(selectedPO?.extra_metadata?.invoice_xml_path)
+        return hasPdf || hasXml
+    }
+
     const canAdvanceCurrentArea = () => {
         if (!selectedPO) return false
 
@@ -1281,13 +1327,32 @@ const KanbanPage = () => {
             )
         }
 
+        // FF-HARDENING-012.2: Faturamento (BILLING) — NF-e, Transportadora, emission date required
+        if (selectedPO.status === 'Faturamento') {
+            const numeroNfe = selectedPO.extra_metadata?.numero_nfe || localFields.numero_nfe || '';
+            const transportadora = selectedPO.extra_metadata?.transportadora || localFields.transportadora || '';
+            const dataEmissao = selectedPO.extra_metadata?.data_emissao_nf || localFields.data_emissao_nf || '';
+            // FF-HARDENING-012.3: At least one fiscal doc (PDF or XML) required
+            return !!numeroNfe && !!transportadora && !!dataEmissao && isBillingDocReady();
+        }
+
+        // FF-HARDENING-012.2: Expedição (SHIPPING) — full checklist required
+        if (selectedPO.status === 'Expedição') {
+            const numeroNfe = selectedPO.extra_metadata?.numero_nfe || localFields.numero_nfe || '';
+            const transportadora = selectedPO.extra_metadata?.transportadora || localFields.transportadora || '';
+            const endConferido = !!(logisticsChecklist.endereco_conferido || selectedPO.partition_metadata?.logistics_checklist?.endereco_conferido);
+            const pesoValidado = !!(logisticsChecklist.peso_validado || selectedPO.partition_metadata?.logistics_checklist?.peso_validado);
+            const etiqImpressas = !!(logisticsChecklist.etiquetas_impressas || selectedPO.partition_metadata?.logistics_checklist?.etiquetas_impressas);
+            return !!numeroNfe && !!transportadora && endConferido && pesoValidado && etiqImpressas && isDispatchReady();
+        }
+
+        // Legacy: keep old Faturamento/Expedição check for backward compat
         if (selectedPO.status === 'Faturamento/Expedição') {
             const numeroNfe = selectedPO.extra_metadata?.numero_nfe || localFields.numero_nfe || '';
             const transportadora = selectedPO.extra_metadata?.transportadora || localFields.transportadora || '';
             const endConferido = !!(logisticsChecklist.endereco_conferido || selectedPO.partition_metadata?.logistics_checklist?.endereco_conferido);
             const pesoValidado = !!(logisticsChecklist.peso_validado || selectedPO.partition_metadata?.logistics_checklist?.peso_validado);
             const etiqImpressas = !!(logisticsChecklist.etiquetas_impressas || selectedPO.partition_metadata?.logistics_checklist?.etiquetas_impressas);
-            // FF-HARDENING-009: Both GCS upload paths are mandatory to advance.
             return !!numeroNfe && !!transportadora && endConferido && pesoValidado && etiqImpressas && isDispatchReady();
         }
 
@@ -1324,19 +1389,29 @@ const KanbanPage = () => {
             if (isNaN(qReal) || qReal <= 0) missing.push('Quantidade Real Produzida (>0)');
         }
 
-        if (selectedPO.status === 'Faturamento/Expedição') {
+        // FF-HARDENING-012.2: Faturamento stage missing fields
+        if (selectedPO.status === 'Faturamento') {
+            const numeroNfe = selectedPO.extra_metadata?.numero_nfe || localFields.numero_nfe || '';
+            const transportadora = selectedPO.extra_metadata?.transportadora || localFields.transportadora || '';
+            const dataEmissao = selectedPO.extra_metadata?.data_emissao_nf || localFields.data_emissao_nf || '';
+            if (!numeroNfe) missing.push('Número NF-e');
+            if (!transportadora) missing.push('Transportadora');
+            if (!dataEmissao) missing.push('Data de Emissão NF-e');
+            if (!isBillingDocReady()) missing.push('Documento Fiscal (PDF ou XML obrigatório)');
+        }
+
+        // FF-HARDENING-012.2: Expedição stage missing fields
+        if (selectedPO.status === 'Expedição' || selectedPO.status === 'Faturamento/Expedição') {
             const numeroNfe = selectedPO.extra_metadata?.numero_nfe || localFields.numero_nfe || '';
             const transportadora = selectedPO.extra_metadata?.transportadora || localFields.transportadora || '';
             const endConferido = !!(logisticsChecklist.endereco_conferido || selectedPO.partition_metadata?.logistics_checklist?.endereco_conferido);
             const pesoValidado = !!(logisticsChecklist.peso_validado || selectedPO.partition_metadata?.logistics_checklist?.peso_validado);
             const etiqImpressas = !!(logisticsChecklist.etiquetas_impressas || selectedPO.partition_metadata?.logistics_checklist?.etiquetas_impressas);
-
             if (!numeroNfe) missing.push('Número NF-e');
             if (!transportadora) missing.push('Transportadora');
             if (!endConferido) missing.push('Endereço Conferido');
             if (!pesoValidado) missing.push('Peso Validado');
             if (!etiqImpressas) missing.push('Etiquetas Impressas');
-            // FF-HARDENING-009: GCS upload guardrails
             if (!logisticsChecklist.foto_carga_path) missing.push('Foto da Carga (upload obrigatório)');
             if (!logisticsChecklist.foto_canhoto_path) missing.push('NF c/ Canhoto Assinado (upload obrigatório)');
         }
@@ -1425,7 +1500,8 @@ const KanbanPage = () => {
                     }
                 }}
                 type="file"
-                accept=".pdf,.jpg,.jpeg,.png"
+                accept="image/*"
+                capture="environment"
                 style={{ display: 'none' }}
             />
             <input
@@ -1446,7 +1522,8 @@ const KanbanPage = () => {
                     }
                 }}
                 type="file"
-                accept=".pdf,.jpg,.jpeg,.png"
+                accept="image/*"
+                capture="environment"
                 style={{ display: 'none' }}
             />
 
@@ -1472,6 +1549,59 @@ const KanbanPage = () => {
                                     className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                                 />
                             </div>
+
+                            {/* FF-HARDENING-012.2 [Item 4]: Advanced filter toggle */}
+                            <button
+                                id="btn-toggle-filters"
+                                onClick={() => setShowFilters(!showFilters)}
+                                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm font-semibold transition-colors cursor-pointer ${
+                                    showFilters ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+                                }`}
+                                title="Filtros avançados"
+                            >
+                                <Filter className="w-4 h-4" />
+                                Filtros
+                            </button>
+
+                            {/* FF-HARDENING-012.2 [Item 5]: Export CSV */}
+                            <button
+                                id="btn-export-csv"
+                                onClick={async () => {
+                                    try {
+                                        const token = localStorage.getItem('token')
+                                        const res = await fetch('/api/reports/po-export', {
+                                            headers: { 'Authorization': `Bearer ${token}` }
+                                        })
+                                        if (!res.ok) throw new Error('Falha no export')
+                                        const blob = await res.blob()
+                                        const url = URL.createObjectURL(blob)
+                                        const a = document.createElement('a')
+                                        a.href = url
+                                        a.download = `pedidos_export_${new Date().toISOString().slice(0,10)}.csv`
+                                        a.click()
+                                        URL.revokeObjectURL(url)
+                                    } catch (err) {
+                                        showError('Erro ao exportar relatório: ' + err.message)
+                                    }
+                                }}
+                                className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-green-600 text-green-700 bg-white hover:bg-green-50 text-sm font-semibold transition-colors cursor-pointer"
+                                title="Exportar CSV"
+                            >
+                                <Download className="w-4 h-4" />
+                                Exportar
+                            </button>
+
+                            {/* FF-HARDENING-012.2 [Item 3]: Exchange/Return card */}
+                            <button
+                                id="btn-new-exchange-card"
+                                onClick={() => setShowExchangeModal(true)}
+                                className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-purple-600 text-purple-700 bg-white hover:bg-purple-50 text-sm font-semibold transition-colors cursor-pointer"
+                                title="Registrar Troca/Devolução"
+                            >
+                                <Plus className="w-4 h-4" />
+                                Troca/Devolução
+                            </button>
+
                             <button
                                 onClick={() => setCompactView(!compactView)}
                                 className="btn-secondary flex items-center gap-2"
@@ -1500,6 +1630,36 @@ const KanbanPage = () => {
                             )}
                         </div>
                     </div>
+
+                    {/* FF-HARDENING-012.2 [Item 4]: Advanced filter bar */}
+                    {showFilters && (
+                        <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-4 flex-wrap">
+                            <div className="flex items-center gap-2">
+                                <label className="text-xs font-semibold text-gray-600">Cliente:</label>
+                                <input type="text" placeholder="Nome do cliente..." value={filterClient}
+                                    onChange={(e) => setFilterClient(e.target.value)}
+                                    className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 w-48" />
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <label className="text-xs font-semibold text-gray-600">De:</label>
+                                <input type="date" value={filterDateStart}
+                                    onChange={(e) => setFilterDateStart(e.target.value)}
+                                    className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" />
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <label className="text-xs font-semibold text-gray-600">Até:</label>
+                                <input type="date" value={filterDateEnd}
+                                    onChange={(e) => setFilterDateEnd(e.target.value)}
+                                    className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" />
+                            </div>
+                            {(filterClient || filterDateStart || filterDateEnd) && (
+                                <button onClick={() => { setFilterClient(''); setFilterDateStart(''); setFilterDateEnd('') }}
+                                    className="text-xs text-red-600 hover:text-red-800 font-semibold cursor-pointer underline">
+                                    Limpar filtros
+                                </button>
+                            )}
+                        </div>
+                    )}
                 </div>
 
                 {/* Kanban Board */}
@@ -1949,7 +2109,8 @@ const KanbanPage = () => {
                                         // All 5 operational stages (Comercial → Financeiro) are rendered for ALL POs.
                                         // For active POs: stages beyond currentStageIndex return null (isLocked guard at L1962).
                                         // For archived POs: currentStageIndex will be stages.length (all completed), so all 5 show.
-                                        const stages = ['Comercial', 'PCP', 'Produção/Embalagem', 'Faturamento/Expedição', 'Financeiro'];
+                                        // FF-HARDENING-012.2: 6 stages (Faturamento + Expedição split)
+                                        const stages = ['Comercial', 'PCP', 'Produção/Embalagem', 'Faturamento', 'Expedição', 'Financeiro'];
                                         const currentStageIndex = isArchived
                                             ? stages.length  // all stages completed for archived POs
                                             : stages.indexOf(mapStatusToStageName(selectedPO.status));
@@ -1982,7 +2143,8 @@ const KanbanPage = () => {
                                                 'Comercial': 'Comercial',
                                                 'PCP': 'PCP',
                                                 'Produção/Embalagem': 'Produção/Embalagem',
-                                                'Faturamento/Expedição': 'Faturamento/Expedição',
+                                                'Faturamento': '🧲 Faturamento',      // FF-HARDENING-012.2
+                                                'Expedição': '🚚 Expedição',       // FF-HARDENING-012.2
                                                 'Financeiro': 'Financeiro'
                                             };
 
@@ -2196,6 +2358,16 @@ const KanbanPage = () => {
                                                                                         >
                                                                                             Aprovar Partição
                                                                                         </button>
+                                                                                        {/* FF-HARDENING-012.1 [Item 2]: Cancelar PO from Comercial */}
+                                                                                        <button
+                                                                                            onClick={() => {
+                                                                                                setCancelJustification('');
+                                                                                                setShowCancelModal(true);
+                                                                                            }}
+                                                                                            className="inline-flex items-center justify-center px-3.5 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg cursor-pointer transition-colors shadow-2xs"
+                                                                                        >
+                                                                                            🚫 Cancelar PO
+                                                                                        </button>
                                                                                         <div className="flex flex-col gap-2 mt-2">
                                                                                             <button
                                                                                                 onClick={async () => {
@@ -2218,6 +2390,7 @@ const KanbanPage = () => {
                                                                                         </div>
                                                                                     </div>
                                                                                 )}
+
                                                                             </div>
                                                                         )}
                                                                     </div>
@@ -2432,11 +2605,11 @@ const KanbanPage = () => {
                                                                                 </div>
                                                                                 <div>
                                                                                     <span className="text-xs text-gray-500 font-semibold uppercase block">Quantidade Real Produzida</span>
-                                                                                    <span className="font-semibold text-gray-855">{selectedPO.extra_metadata?.qtd_real_produzida || '0'} SKUs</span>
+                                                                                    <span className="font-semibold text-gray-855">{selectedPO.extra_metadata?.qtd_real_produzida || '0'} {(selectedPO.items?.[0]?.extra_metadata?.unit || selectedPO.items?.[0]?.unit || 'UN').toUpperCase()}</span>
                                                                                 </div>
                                                                                 <div>
                                                                                     <span className="text-xs text-gray-500 font-semibold uppercase block">Perda Técnica</span>
-                                                                                    <span className="font-semibold text-gray-850">{selectedPO.extra_metadata?.perda_tecnica || '0'} unidades</span>
+                                                                                    <span className="font-semibold text-gray-850">{selectedPO.extra_metadata?.perda_tecnica || '0'} {(selectedPO.items?.[0]?.extra_metadata?.unit || selectedPO.items?.[0]?.unit || 'un').toUpperCase()}</span>
                                                                                 </div>
                                                                             </div>
                                                                         ) : (
@@ -2473,30 +2646,38 @@ const KanbanPage = () => {
                                                                                 </div>
 
                                                                                 <div>
-                                                                                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
-                                                                                        Perda Técnica (unidades) <span className="text-red-500">*</span>
-                                                                                    </label>
-                                                                                    <input
-                                                                                        type="number"
-                                                                                        step="1"
-                                                                                        min="0"
-                                                                                        value={localFields.perda_tecnica || ''}
-                                                                                        onChange={(e) => handleChangeLocalField('perda_tecnica', e.target.value)}
-                                                                                        onBlur={() => handleBlurLocalField('perda_tecnica')}
-                                                                                        placeholder="Ex: 12"
-                                                                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800 font-medium"
-                                                                                    />
+                                                                                    {/* FF-HARDENING-012.1 [Item 3]: Dynamic unit derived from PO items */}
+                                                                                    {(() => {
+                                                                                        const poUnit = (selectedPO.items?.[0]?.extra_metadata?.unit || selectedPO.items?.[0]?.unit || 'UN').toUpperCase();
+                                                                                        return (
+                                                                                            <>
+                                                                                                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                                                                                    Perda Técnica ({poUnit}) <span className="text-red-500">*</span>
+                                                                                                </label>
+                                                                                                <input
+                                                                                                    type="number"
+                                                                                                    step="1"
+                                                                                                    min="0"
+                                                                                                    value={localFields.perda_tecnica || ''}
+                                                                                                    onChange={(e) => handleChangeLocalField('perda_tecnica', e.target.value)}
+                                                                                                    onBlur={() => handleBlurLocalField('perda_tecnica')}
+                                                                                                    placeholder={`Ex: 12 ${poUnit}`}
+                                                                                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800 font-medium"
+                                                                                                />
+                                                                                            </>
+                                                                                        );
+                                                                                    })()}
                                                                                 </div>
                                                                             </div>
                                                                         )}
                                                                     </div>
                                                                 )}
 
-                                                                {stageName === 'Faturamento/Expedição' && (
+                                                                                                                                {(stageName === 'Faturamento' || stageName === 'Faturamento/Expedição') && (
                                                                     <div className="space-y-4">
                                                                         {!isActive ? (
                                                                             <div className="space-y-3 text-sm">
-                                                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-b border-gray-150 pb-3">
+                                                                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 border-b border-gray-150 pb-3">
                                                                                     <div>
                                                                                         <span className="text-xs text-gray-500 font-semibold uppercase block">Número NF-e</span>
                                                                                         <span className="font-semibold text-gray-800">{selectedPO.extra_metadata?.numero_nfe || 'Não informado'}</span>
@@ -2505,137 +2686,180 @@ const KanbanPage = () => {
                                                                                         <span className="text-xs text-gray-500 font-semibold uppercase block">Transportadora</span>
                                                                                         <span className="font-semibold text-gray-800">{selectedPO.extra_metadata?.transportadora || 'Não informada'}</span>
                                                                                     </div>
+                                                                                    <div>
+                                                                                        <span className="text-xs text-gray-500 font-semibold uppercase block">Data Emissão NF-e</span>
+                                                                                        <span className="font-semibold text-gray-800">{selectedPO.extra_metadata?.data_emissao_nf || 'Não informada'}</span>
+                                                                                    </div>
                                                                                 </div>
+                                                                                {selectedPO.extra_metadata?.invoice_pdf_path && (
+                                                                                    <a href={getDownloadUrl(selectedPO.extra_metadata.invoice_pdf_path)} target="_blank" rel="noreferrer"
+                                                                                        className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 font-semibold underline">
+                                                                                        📄 {getCleanFilename(selectedPO.extra_metadata.invoice_pdf_filename || selectedPO.extra_metadata.invoice_pdf_path) || 'NF-e PDF'}
+                                                                                    </a>
+                                                                                )}
+                                                                                {selectedPO.extra_metadata?.invoice_xml_path && (
+                                                                                    <a href={getDownloadUrl(selectedPO.extra_metadata.invoice_xml_path)} target="_blank" rel="noreferrer"
+                                                                                        className="text-xs text-green-600 hover:text-green-800 flex items-center gap-1 font-semibold underline">
+                                                                                        🗃️ {getCleanFilename(selectedPO.extra_metadata.invoice_xml_filename || selectedPO.extra_metadata.invoice_xml_path) || 'NF-e XML'}
+                                                                                    </a>
+                                                                                )}
+                                                                            </div>
+                                                                        ) : (
+                                                                            <div className="space-y-4">
+                                                                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                                                                    <div>
+                                                                                        <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                                                                            Número da NF-e <span className="text-red-500">*</span>
+                                                                                        </label>
+                                                                                        <input type="text" value={localFields.numero_nfe || ''}
+                                                                                            onChange={(e) => handleChangeLocalField('numero_nfe', e.target.value)}
+                                                                                            onBlur={() => handleBlurLocalField('numero_nfe')}
+                                                                                            placeholder="Ex: 004123"
+                                                                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800 font-medium" />
+                                                                                    </div>
+                                                                                    <div>
+                                                                                        <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                                                                            Transportadora <span className="text-red-500">*</span>
+                                                                                        </label>
+                                                                                        <input type="text" value={localFields.transportadora || ''}
+                                                                                            onChange={(e) => handleChangeLocalField('transportadora', e.target.value)}
+                                                                                            onBlur={() => handleBlurLocalField('transportadora')}
+                                                                                            placeholder="Ex: Braspress"
+                                                                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800 font-medium" />
+                                                                                    </div>
+                                                                                    <div>
+                                                                                        <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                                                                            Data Emissão NF-e <span className="text-red-500">*</span>
+                                                                                        </label>
+                                                                                        <input type="date" value={localFields.data_emissao_nf || ''}
+                                                                                            onChange={(e) => handleChangeLocalField('data_emissao_nf', e.target.value)}
+                                                                                            onBlur={() => handleBlurLocalField('data_emissao_nf')}
+                                                                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800 font-medium" />
+                                                                                    </div>
+                                                                                </div>
+                                                                                <div className="p-4 bg-sky-50 border border-sky-100 rounded-lg space-y-3">
+                                                                                    <h5 className="text-xs font-bold uppercase text-sky-800 mb-2 tracking-wide flex items-center gap-1.5">
+                                                                                        📄 Documentos Fiscais NF-e
+                                                                                    </h5>
+                                                                                    {/* Slot PDF */}
+                                                                                    <div>
+                                                                                        <span className="text-xs font-semibold text-gray-600 uppercase block mb-1">Anexar NF (PDF)</span>
+                                                                                        {selectedPO.extra_metadata?.invoice_pdf_path ? (
+                                                                                            <div className="flex items-center gap-3">
+                                                                                                <a href={getDownloadUrl(selectedPO.extra_metadata.invoice_pdf_path)} target="_blank" rel="noreferrer"
+                                                                                                    className="text-xs text-blue-600 hover:text-blue-800 font-semibold underline flex items-center gap-1">
+                                                                                                    📄 {getCleanFilename(selectedPO.extra_metadata.invoice_pdf_filename || selectedPO.extra_metadata.invoice_pdf_path) || 'NF-e PDF'}
+                                                                                                </a>
+                                                                                                <button onClick={() => globalInvoiceInputRef.current?.click()}
+                                                                                                    className="text-xs text-gray-500 hover:text-gray-700 underline cursor-pointer">
+                                                                                                    Substituir
+                                                                                                </button>
+                                                                                            </div>
+                                                                                        ) : (
+                                                                                            <button onClick={() => globalInvoiceInputRef.current?.click()}
+                                                                                                className="flex items-center gap-2 px-3 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer border-0">
+                                                                                                📎 Anexar NF (PDF)
+                                                                                            </button>
+                                                                                        )}
+                                                                                    </div>
+                                                                                    {/* Slot XML - FF-HARDENING-012.3 Item 2 */}
+                                                                                    <div>
+                                                                                        <span className="text-xs font-semibold text-gray-600 uppercase block mb-1">Anexar NF (XML) <span className="text-gray-400 normal-case font-normal">(opcional)</span></span>
+                                                                                        {selectedPO.extra_metadata?.invoice_xml_path ? (
+                                                                                            <div className="flex items-center gap-3">
+                                                                                                <a href={getDownloadUrl(selectedPO.extra_metadata.invoice_xml_path)} target="_blank" rel="noreferrer"
+                                                                                                    className="text-xs text-green-600 hover:text-green-800 font-semibold underline flex items-center gap-1">
+                                                                                                    🗃️ {getCleanFilename(selectedPO.extra_metadata.invoice_xml_filename || selectedPO.extra_metadata.invoice_xml_path) || 'NF-e XML'}
+                                                                                                </a>
+                                                                                                <button onClick={() => globalXmlInvoiceInputRef.current?.click()}
+                                                                                                    className="text-xs text-gray-500 hover:text-gray-700 underline cursor-pointer">
+                                                                                                    Substituir
+                                                                                                </button>
+                                                                                            </div>
+                                                                                        ) : (
+                                                                                            <button onClick={() => globalXmlInvoiceInputRef.current?.click()}
+                                                                                                className="flex items-center gap-2 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer border-0">
+                                                                                                🗃️ Anexar NF (XML)
+                                                                                            </button>
+                                                                                        )}
+                                                                                    </div>
+                                                                                    {!isBillingDocReady() && (
+                                                                                        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 mt-1">
+                                                                                            Pelo menos um documento fiscal (PDF ou XML) é obrigatório para avançar o card.
+                                                                                        </p>
+                                                                                    )}
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                )}
+
+                                                                {stageName === 'Expedição' && (
+                                                                    <div className="space-y-4">
+                                                                        {!isActive ? (
+                                                                            <div className="space-y-3 text-sm">
                                                                                 <div className="flex gap-4">
                                                                                     {logisticsChecklist.foto_carga_path && (
-                                                                                        <a 
-                                                                                            href={getDownloadUrl(logisticsChecklist.foto_carga_path)}
-                                                                                            target="_blank" 
-                                                                                            rel="noreferrer" 
-                                                                                            className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 font-semibold underline"
-                                                                                        >
-                                                                                            Visualizar Foto da Carga
+                                                                                        <a href={getDownloadUrl(logisticsChecklist.foto_carga_path)} target="_blank" rel="noreferrer"
+                                                                                            className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 font-semibold underline">
+                                                                                            {getCleanFilename(logisticsChecklist.foto_carga_path) || 'Foto da Carga'}
                                                                                         </a>
                                                                                     )}
                                                                                     {logisticsChecklist.foto_canhoto_path && (
-                                                                                        <a 
-                                                                                            href={getDownloadUrl(logisticsChecklist.foto_canhoto_path)}
-                                                                                            target="_blank" 
-                                                                                            rel="noreferrer" 
-                                                                                            className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 font-semibold underline"
-                                                                                        >
-                                                                                            Visualizar Nota Fiscal com Canhoto Assinado
+                                                                                        <a href={getDownloadUrl(logisticsChecklist.foto_canhoto_path)} target="_blank" rel="noreferrer"
+                                                                                            className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 font-semibold underline">
+                                                                                            {getCleanFilename(logisticsChecklist.foto_canhoto_path) || 'NF c/ Canhoto Assinado'}
                                                                                         </a>
                                                                                     )}
                                                                                 </div>
                                                                             </div>
                                                                         ) : (
                                                                             <div className="space-y-4">
-                                                                                {/* Lote Particionado Banner (Ajuste de Frete) */}
                                                                                 {(selectedPO.partition_metadata?.current_phase === 'FASE_A' || selectedPO.extra_metadata?.current_phase === 'FASE_A') && (
                                                                                     <div className="p-4 bg-purple-50 border border-purple-100 rounded-lg space-y-3 shadow-2xs mb-4">
-                                                                                        <h5 className="text-xs font-bold uppercase text-purple-800 tracking-wide flex items-center gap-1.5 font-sans">
-                                                                                            <span>📦</span> Lote Particionado (Ajuste de Frete)
+                                                                                        <h5 className="text-xs font-bold uppercase text-purple-800 tracking-wide flex items-center gap-1.5">
+                                                                                            📦 Lote Particionado — Ajuste de Frete
                                                                                         </h5>
-                                                                                        <p className="text-xs text-purple-950 font-medium font-sans">
+                                                                                        <p className="text-xs text-purple-950 font-medium">
                                                                                             Este pedido é parte de um lote particionado. Antes do despacho, o frete deve ser rateado entre os lotes C1 e C2.
                                                                                         </p>
-                                                                                        <div className="flex items-center gap-4">
-                                                                                            <button
-                                                                                                onClick={() => setShowFreightModal(true)}
-                                                                                                className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer animate-pulse"
-                                                                                            >
-                                                                                                <Percent className="w-3.5 h-3.5" />
-                                                                                                Ratear Frete
-                                                                                            </button>
-                                                                                        </div>
+                                                                                        <button onClick={() => setShowFreightModal(true)}
+                                                                                            className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer animate-pulse">
+                                                                                            Ratear Frete
+                                                                                        </button>
                                                                                     </div>
                                                                                 )}
-
-                                                                                {/* Checklist de Saída */}
                                                                                 <div className="p-4 bg-cyan-50 border border-cyan-100 rounded-lg">
                                                                                     <h5 className="text-xs font-bold uppercase text-cyan-800 mb-3 tracking-wide flex items-center gap-1.5">
-                                                                                        <Truck className="w-4 h-4" /> Checklist Operacional de Saída (Obrigatório)
+                                                                                        🚚 Checklist Operacional de Saída (Obrigatório)
                                                                                     </h5>
                                                                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                                                                                         <label className={`flex items-center gap-3 bg-white p-2.5 border border-cyan-200 rounded-lg shadow-2xs transition-all select-none ${isPhaseADisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:border-cyan-300'}`}>
-                                                                                            <input
-                                                                                                type="checkbox"
-                                                                                                checked={logisticsChecklist.endereco_conferido || false}
+                                                                                            <input type="checkbox" checked={logisticsChecklist.endereco_conferido || false}
                                                                                                 onChange={(e) => handleChecklistChange('endereco_conferido', e.target.checked)}
                                                                                                 className={`w-5 h-5 rounded focus:ring-cyan-500 ${isPhaseADisabled ? 'cursor-not-allowed text-cyan-400' : 'text-cyan-600 cursor-pointer'}`}
-                                                                                                disabled={isPhaseADisabled}
-                                                                                            />
+                                                                                                disabled={isPhaseADisabled} />
                                                                                             <span className="text-xs text-gray-700 font-semibold">Endereço Conferido</span>
-                                                                                            {logisticsChecklist.endereco_conferido && (
-                                                                                                <CheckCircle className="w-4 h-4 text-green-600 ml-auto flex-shrink-0" />
-                                                                                            )}
+                                                                                            {logisticsChecklist.endereco_conferido && <span className="text-green-600 ml-auto text-sm">✓</span>}
                                                                                         </label>
-
                                                                                         <label className={`flex items-center gap-3 bg-white p-2.5 border border-cyan-200 rounded-lg shadow-2xs transition-all select-none ${isPhaseADisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:border-cyan-300'}`}>
-                                                                                            <input
-                                                                                                type="checkbox"
-                                                                                                checked={logisticsChecklist.peso_validado || false}
+                                                                                            <input type="checkbox" checked={logisticsChecklist.peso_validado || false}
                                                                                                 onChange={(e) => handleChecklistChange('peso_validado', e.target.checked)}
                                                                                                 className={`w-5 h-5 rounded focus:ring-cyan-500 ${isPhaseADisabled ? 'cursor-not-allowed text-cyan-400' : 'text-cyan-600 cursor-pointer'}`}
-                                                                                                disabled={isPhaseADisabled}
-                                                                                            />
+                                                                                                disabled={isPhaseADisabled} />
                                                                                             <span className="text-xs text-gray-700 font-semibold">Peso Validado</span>
-                                                                                            {logisticsChecklist.peso_validado && (
-                                                                                                <CheckCircle className="w-4 h-4 text-green-600 ml-auto flex-shrink-0" />
-                                                                                            )}
+                                                                                            {logisticsChecklist.peso_validado && <span className="text-green-600 ml-auto text-sm">✓</span>}
                                                                                         </label>
-
                                                                                         <label className={`flex items-center gap-3 bg-white p-2.5 border border-cyan-200 rounded-lg shadow-2xs transition-all select-none ${isPhaseADisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:border-cyan-300'}`}>
-                                                                                            <input
-                                                                                                type="checkbox"
-                                                                                                checked={logisticsChecklist.etiquetas_impressas || false}
+                                                                                            <input type="checkbox" checked={logisticsChecklist.etiquetas_impressas || false}
                                                                                                 onChange={(e) => handleChecklistChange('etiquetas_impressas', e.target.checked)}
                                                                                                 className={`w-5 h-5 rounded focus:ring-cyan-500 ${isPhaseADisabled ? 'cursor-not-allowed text-cyan-400' : 'text-cyan-600 cursor-pointer'}`}
-                                                                                                disabled={isPhaseADisabled}
-                                                                                            />
+                                                                                                disabled={isPhaseADisabled} />
                                                                                             <span className="text-xs text-gray-700 font-semibold">Etiquetas Impressas</span>
-                                                                                            {logisticsChecklist.etiquetas_impressas && (
-                                                                                                <CheckCircle className="w-4 h-4 text-green-600 ml-auto flex-shrink-0" />
-                                                                                            )}
+                                                                                            {logisticsChecklist.etiquetas_impressas && <span className="text-green-600 ml-auto text-sm">✓</span>}
                                                                                         </label>
                                                                                     </div>
                                                                                 </div>
-
-                                                                                {/* NF and Carrier */}
-                                                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                                                    <div>
-                                                                                        <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
-                                                                                            Número da NF-e <span className="text-red-500">*</span>
-                                                                                        </label>
-                                                                                        <input
-                                                                                            type="text"
-                                                                                            value={localFields.numero_nfe || ''}
-                                                                                            onChange={(e) => handleChangeLocalField('numero_nfe', e.target.value)}
-                                                                                            onBlur={() => handleBlurLocalField('numero_nfe')}
-                                                                                            placeholder="Ex: 004123"
-                                                                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800 font-medium disabled:opacity-60 disabled:cursor-not-allowed"
-                                                                                            disabled={isPhaseADisabled}
-                                                                                        />
-                                                                                    </div>
-
-                                                                                    <div>
-                                                                                        <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
-                                                                                            Transportadora <span className="text-red-500">*</span>
-                                                                                        </label>
-                                                                                        <input
-                                                                                            type="text"
-                                                                                            value={localFields.transportadora || ''}
-                                                                                            onChange={(e) => handleChangeLocalField('transportadora', e.target.value)}
-                                                                                            onBlur={() => handleBlurLocalField('transportadora')}
-                                                                                            placeholder="Ex: Braspress"
-                                                                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800 font-medium disabled:opacity-60 disabled:cursor-not-allowed"
-                                                                                            disabled={isPhaseADisabled}
-                                                                                        />
-                                                                                    </div>
-                                                                                </div>
-
-                                                                                {/* FF-HARDENING-008: Single source-of-truth upload subcomponent */}
                                                                                 <LogisticsUploadSection
                                                                                     poId={selectedPO?.id}
                                                                                     logisticsChecklist={logisticsChecklist}
@@ -2648,7 +2872,7 @@ const KanbanPage = () => {
                                                                         )}
                                                                     </div>
                                                                 )}
-                                                                {stageName === 'Financeiro' && (
+{stageName === 'Financeiro' && (
                                                                     <div className="space-y-4">
                                                                         {isPOBlocked ? (
                                                                             <div className="space-y-4">
@@ -3340,6 +3564,29 @@ const KanbanPage = () => {
                                 </div>
 
                                 <div className="space-y-4 mb-6">
+                                                                                    {/* FF-HARDENING-012.1 [Item 2]: FOB — Customer's own transport checkbox */}
+                                                                                    <label className="flex items-center gap-3 p-3 bg-amber-50 border border-amber-200 rounded-lg cursor-pointer hover:bg-amber-100 transition-colors">
+                                                                                        <input
+                                                                                            type="checkbox"
+                                                                                            checked={isFOBShipping}
+                                                                                            onChange={(e) => {
+                                                                                                setIsFOBShipping(e.target.checked);
+                                                                                                if (e.target.checked) {
+                                                                                                    setFreightC1('0');
+                                                                                                    setFreightC2('0');
+                                                                                                } else {
+                                                                                                    setFreightC1('');
+                                                                                                    setFreightC2('');
+                                                                                                }
+                                                                                            }}
+                                                                                            className="w-4 h-4 text-amber-600 rounded focus:ring-amber-500 cursor-pointer"
+                                                                                        />
+                                                                                        <div>
+                                                                                            <span className="text-xs font-bold text-amber-800 block">🚚 Transporte Próprio do Cliente (FOB)</span>
+                                                                                            <span className="text-[10px] text-amber-700">Se marcado, o frete de C1 e C2 será automaticamente zerado (R$ 0,00).</span>
+                                                                                        </div>
+                                                                                    </label>
+
                                     <div>
                                         <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
                                             {`FRETE DO PEDIDO (C1) DATA PROGRAMADA: ${
@@ -3354,7 +3601,12 @@ const KanbanPage = () => {
                                             value={freightC1}
                                             onChange={(e) => setFreightC1(e.target.value)}
                                             placeholder="Ex: 50.0000"
-                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-800 font-semibold focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                                            disabled={isFOBShipping}
+                                            className={`w-full px-3 py-2 border rounded-lg text-sm font-semibold focus:ring-2 focus:ring-purple-500 focus:outline-none ${
+                                                isFOBShipping
+                                                    ? 'border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed'
+                                                    : 'border-gray-300 text-gray-800'
+                                            }`}
                                         />
                                     </div>
                                     <div>
@@ -3371,7 +3623,12 @@ const KanbanPage = () => {
                                             value={freightC2}
                                             onChange={(e) => setFreightC2(e.target.value)}
                                             placeholder="Ex: 50.0000"
-                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-800 font-semibold focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                                            disabled={isFOBShipping}
+                                            className={`w-full px-3 py-2 border rounded-lg text-sm font-semibold focus:ring-2 focus:ring-purple-500 focus:outline-none ${
+                                                isFOBShipping
+                                                    ? 'border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed'
+                                                    : 'border-gray-300 text-gray-800'
+                                            }`}
                                         />
                                     </div>
 
@@ -3397,6 +3654,7 @@ const KanbanPage = () => {
                                             setShowFreightModal(false);
                                             setFreightC1('');
                                             setFreightC2('');
+                                            setIsFOBShipping(false);
                                         }}
                                         className="px-4 py-2 bg-gray-300 text-gray-700 text-sm font-semibold rounded-lg hover:bg-gray-400 transition-colors"
                                     >
@@ -3415,6 +3673,7 @@ const KanbanPage = () => {
                                                 setShowFreightModal(false);
                                                 setFreightC1('');
                                                 setFreightC2('');
+                                                setIsFOBShipping(false);
                                                 await fetchBoard();
                                                 handleCloseModal();
                                             } catch (err) {
@@ -3602,6 +3861,255 @@ const KanbanPage = () => {
                 )}
             </div>
 
+
+        {/* FF-HARDENING-012.1 [Item 2]: Cancel PO Confirmation Modal */}
+        {showCancelModal && selectedPO && (
+            <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[60] p-4">
+                <div className="bg-white rounded-xl shadow-2xl max-w-md w-full mx-4 overflow-hidden">
+                    {/* Header */}
+                    <div className="bg-red-600 px-6 py-4 flex items-center gap-3">
+                        <span className="text-2xl">🚫</span>
+                        <div>
+                            <h3 className="text-lg font-bold text-white">Cancelar Pedido</h3>
+                            <p className="text-red-200 text-xs font-medium">PO: {selectedPO.po_number}</p>
+                        </div>
+                    </div>
+
+                    {/* Body */}
+                    <div className="p-6">
+                        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+                            <p className="text-xs text-red-800 font-semibold">
+                                ⚠️ <strong>Atenção:</strong> Esta ação é irreversível. O pedido será marcado como <strong>CANCELADO</strong> e removido permanentemente do quadro Kanban. Um registro de auditoria será criado.
+                            </p>
+                        </div>
+
+                        <label className="block text-xs font-bold text-gray-700 uppercase mb-2">
+                            Justificativa de Cancelamento <span className="text-red-500">*</span>
+                            <span className="text-gray-400 font-normal lowercase ml-1">(mínimo 10 caracteres)</span>
+                        </label>
+                        <textarea
+                            value={cancelJustification}
+                            onChange={(e) => setCancelJustification(e.target.value)}
+                            placeholder="Descreva o motivo do cancelamento do pedido (ex: cliente solicitou cancelamento, erro de pedido, etc.)..."
+                            rows={4}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-red-500 focus:outline-none text-gray-800 font-medium resize-none"
+                            autoFocus
+                        />
+                        {cancelJustification.trim().length > 0 && cancelJustification.trim().length < 10 && (
+                            <p className="text-xs text-red-600 mt-1 font-semibold">
+                                {10 - cancelJustification.trim().length} caractere(s) restante(s)
+                            </p>
+                        )}
+                    </div>
+
+                    {/* Footer */}
+                    <div className="bg-gray-50 px-6 py-4 flex justify-end gap-3 border-t border-gray-200">
+                        <button
+                            onClick={() => {
+                                setShowCancelModal(false);
+                                setCancelJustification('');
+                            }}
+                            disabled={cancellingPO}
+                            className="px-4 py-2 bg-gray-300 text-gray-700 text-sm font-semibold rounded-lg hover:bg-gray-400 transition-colors disabled:opacity-50"
+                        >
+                            Voltar
+                        </button>
+                        <button
+                            onClick={async () => {
+                                if (cancelJustification.trim().length < 10) return;
+                                setCancellingPO(true);
+                                try {
+                                    await api.post(`/kanban/pos/${selectedPO.id}/cancel`, {
+                                        justification: cancelJustification.trim()
+                                    });
+                                    showSuccess(`✅ Pedido ${selectedPO.po_number} cancelado com sucesso.`);
+                                    setShowCancelModal(false);
+                                    setCancelJustification('');
+                                    handleCloseModal();
+                                    await fetchBoard();
+                                } catch (err) {
+                                    showError(err.response?.data?.detail || 'Erro ao cancelar pedido');
+                                } finally {
+                                    setCancellingPO(false);
+                                }
+                            }}
+                            disabled={cancelJustification.trim().length < 10 || cancellingPO}
+                            className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors ${
+                                cancelJustification.trim().length >= 10 && !cancellingPO
+                                    ? 'bg-red-600 hover:bg-red-700 text-white'
+                                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                            }`}
+                        >
+                            {cancellingPO ? 'Cancelando...' : '🚫 Confirmar Cancelamento'}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
+
+
+        {/* ── FF-HARDENING-012.2 [Item 2]: Hidden invoice PDF file input ── */}
+        <input
+            ref={globalInvoiceInputRef}
+            type="file"
+            accept=".pdf,.jpg,.jpeg,.png,.webp"
+            style={{ display: 'none' }}
+            onChange={async (e) => {
+                const file = e.target.files?.[0]
+                if (!file || !selectedPO?.id) return
+                const formData = new FormData()
+                formData.append('file', file)
+                const toastId = showLoading('Enviando NF-e...')
+                try {
+                    const res = await api.post(`/kanban/pos/${selectedPO.id}/upload-invoice-pdf`, formData, {
+                        headers: { 'Content-Type': 'multipart/form-data' }
+                    })
+                    dismissToast(toastId)
+                    showSuccess('NF-e enviada com sucesso!')
+                    if (res.data?.po) setSelectedPO(res.data.po)
+                    await fetchBoard()
+                } catch (err) {
+                    dismissToast(toastId)
+                    showError(err.response?.data?.detail || 'Erro ao enviar NF-e')
+                } finally {
+                    e.target.value = ''
+                }
+            }}
+        />
+
+        {/* ── FF-HARDENING-012.3 [Item 2]: Hidden invoice XML file input ── */}
+        <input
+            ref={globalXmlInvoiceInputRef}
+            type="file"
+            accept=".xml"
+            style={{ display: 'none' }}
+            onChange={async (e) => {
+                const file = e.target.files?.[0]
+                if (!file || !selectedPO?.id) return
+                const formData = new FormData()
+                formData.append('file', file)
+                const toastId = showLoading('Enviando XML NF-e...')
+                try {
+                    const res = await api.post(`/kanban/pos/${selectedPO.id}/upload-invoice-xml`, formData, {
+                        headers: { 'Content-Type': 'multipart/form-data' }
+                    })
+                    dismissToast(toastId)
+                    showSuccess('XML NF-e enviado com sucesso!')
+                    if (res.data?.po) setSelectedPO(res.data.po)
+                    await fetchBoard()
+                } catch (err) {
+                    dismissToast(toastId)
+                    showError(err.response?.data?.detail || 'Erro ao enviar XML')
+                } finally {
+                    e.target.value = ''
+                }
+            }}
+        />
+
+        {/* ── FF-HARDENING-012.2 [Item 3]: Exchange/Return Card Modal ── */}
+        {showExchangeModal && (
+            <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
+                <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg">
+                    <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-t-xl">
+                        <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                            <span>🔄</span> Registrar Troca / Devolução
+                        </h2>
+                        <p className="text-xs text-gray-500 mt-1">
+                            Cria um novo card no Comercial com flag de Troca/Devolução.
+                        </p>
+                    </div>
+                    <div className="p-6 space-y-4">
+                        <div>
+                            <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Cliente <span className="text-red-500">*</span></label>
+                            <input type="text" value={exchangeForm.cliente}
+                                onChange={(e) => setExchangeForm(f => ({ ...f, cliente: e.target.value }))}
+                                placeholder="Nome do cliente"
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500" />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Produto <span className="text-red-500">*</span></label>
+                            <input type="text" value={exchangeForm.produto}
+                                onChange={(e) => setExchangeForm(f => ({ ...f, produto: e.target.value }))}
+                                placeholder="Descrição do produto"
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500" />
+                        </div>
+                        <div className="grid grid-cols-3 gap-3">
+                            <div className="col-span-1">
+                                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Qtde <span className="text-red-500">*</span></label>
+                                <input type="number" min="0.01" step="0.01" value={exchangeForm.quantidade}
+                                    onChange={(e) => setExchangeForm(f => ({ ...f, quantidade: e.target.value }))}
+                                    placeholder="0"
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500" />
+                            </div>
+                            <div className="col-span-1">
+                                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Unidade <span className="text-red-500">*</span></label>
+                                <select value={exchangeForm.unidade_medida}
+                                    onChange={(e) => setExchangeForm(f => ({ ...f, unidade_medida: e.target.value }))}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
+                                    <option value="M2">M²</option>
+                                    <option value="KG">KG</option>
+                                    <option value="UN">UN</option>
+                                </select>
+                            </div>
+                            <div className="col-span-1">
+                                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Largura (cm)</label>
+                                <input type="number" min="0" step="0.1" value={exchangeForm.largura}
+                                    onChange={(e) => setExchangeForm(f => ({ ...f, largura: e.target.value }))}
+                                    placeholder="—"
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500" />
+                            </div>
+                        </div>
+                        <div>
+                            <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Comprimento (cm)</label>
+                            <input type="number" min="0" step="0.1" value={exchangeForm.comprimento}
+                                onChange={(e) => setExchangeForm(f => ({ ...f, comprimento: e.target.value }))}
+                                placeholder="—"
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500" />
+                        </div>
+                    </div>
+                    <div className="p-6 border-t border-gray-200 flex items-center justify-end gap-3">
+                        <button onClick={() => { setShowExchangeModal(false); setExchangeForm({ cliente: '', produto: '', quantidade: '', unidade_medida: 'M2', largura: '', comprimento: '' }) }}
+                            className="px-4 py-2 text-sm font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer">
+                            Cancelar
+                        </button>
+                        <button
+                            disabled={!exchangeForm.cliente.trim() || !exchangeForm.produto.trim() || !exchangeForm.quantidade || savingExchange}
+                            onClick={async () => {
+                                setSavingExchange(true)
+                                const toastId = showLoading('Criando card...')
+                                try {
+                                    await api.post('/kanban/exchange-cards', {
+                                        cliente: exchangeForm.cliente,
+                                        produto: exchangeForm.produto,
+                                        quantidade: parseFloat(exchangeForm.quantidade),
+                                        unidade_medida: exchangeForm.unidade_medida,
+                                        largura: exchangeForm.largura ? parseFloat(exchangeForm.largura) : null,
+                                        comprimento: exchangeForm.comprimento ? parseFloat(exchangeForm.comprimento) : null,
+                                    })
+                                    dismissToast(toastId)
+                                    showSuccess('Card de Troca/Devolução criado com sucesso!')
+                                    setShowExchangeModal(false)
+                                    setExchangeForm({ cliente: '', produto: '', quantidade: '', unidade_medida: 'M2', largura: '', comprimento: '' })
+                                    await fetchBoard()
+                                } catch (err) {
+                                    dismissToast(toastId)
+                                    showError(err.response?.data?.detail || 'Erro ao criar card')
+                                } finally {
+                                    setSavingExchange(false)
+                                }
+                            }}
+                            className={`px-5 py-2 text-sm font-bold rounded-lg transition-colors ${
+                                !exchangeForm.cliente.trim() || !exchangeForm.produto.trim() || !exchangeForm.quantidade || savingExchange
+                                    ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                    : 'bg-purple-600 hover:bg-purple-700 text-white cursor-pointer'
+                            }`}
+                        >
+                            {savingExchange ? 'Criando...' : '🔄 Criar Card'}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
 
         </ErrorBoundary>
         </>

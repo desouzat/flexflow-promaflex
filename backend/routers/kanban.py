@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional, Any
 from decimal import Decimal
 from datetime import datetime
+from pydantic import BaseModel, validator
 import uuid
 
 from backend.schemas.kanban_schema import (
@@ -34,19 +35,20 @@ router = APIRouter(prefix="/api/kanban", tags=["Kanban"])
 
 
 # Status mapping: Database status -> Display name (Portuguese)
-# Standardized 5 Column Structure
+# Standardized 6 Column Structure (FF-HARDENING-012.2: BILLING split from SHIPPING)
 STATUS_DISPLAY_MAP = {
     "SUBMITTED": "Comercial",
     "APPROVED": "PCP",
     "MANUFACTURING": "Produção/Embalagem",
-    "SHIPPING": "Faturamento/Expedição",
+    "BILLING": "Faturamento",       # FF-HARDENING-012.2: new Faturamento stage
+    "SHIPPING": "Expedição",        # FF-HARDENING-012.2: Expedição (was Faturamento/Expedição)
     "FINANCE": "Financeiro",
     
     # Legacy compatibility fallbacks
     "DRAFT": "Comercial",
     "WAITING_COMMERCIAL_PARTITION": "Comercial",
     "IN_PROGRESS": "Produção/Embalagem",
-    "WAITING_DISPATCH": "Faturamento/Expedição",
+    "WAITING_DISPATCH": "Expedição",
     "AUDIT_PENDING": "Financeiro",
     "COMPLETED": "Financeiro",
     "ANALISE_CREDITO": "Financeiro",
@@ -55,23 +57,27 @@ STATUS_DISPLAY_MAP = {
     "ARCHIVED_PARTITIONED": "Arquivado"
 }
 
-# Reverse mapping for API compatibility - mapped to primary DB status to avoid fallback duplicates
+# Reverse mapping for API compatibility
 DISPLAY_TO_DB_STATUS = {
     "Comercial": "SUBMITTED",
     "PCP": "APPROVED",
     "Produção/Embalagem": "MANUFACTURING",
-    "Faturamento/Expedição": "SHIPPING",
+    "Faturamento": "BILLING",          # FF-HARDENING-012.2
+    "Expedição": "SHIPPING",           # FF-HARDENING-012.2
+    # Legacy backward compat
+    "Faturamento/Expedição": "BILLING", # old name now maps to Faturamento entry
     "Financeiro": "FINANCE",
     "Cancelado": "CANCELLED",
     "Arquivado": "ARCHIVED_PARTITIONED"
 }
 
-# Status flow for bidirectional movement - Standardized 5 Columns
+# Status flow for bidirectional movement - Standardized 6 Columns (FF-HARDENING-012.2)
 STATUS_FLOW = {
     "SUBMITTED": {"next": "APPROVED", "prev": None},
     "APPROVED": {"next": "MANUFACTURING", "prev": "SUBMITTED"},
-    "MANUFACTURING": {"next": "SHIPPING", "prev": "APPROVED"},
-    "SHIPPING": {"next": "ARCHIVED", "prev": "MANUFACTURING"},
+    "MANUFACTURING": {"next": "BILLING", "prev": "APPROVED"},   # FF-HARDENING-012.2
+    "BILLING": {"next": "SHIPPING", "prev": "MANUFACTURING"},    # FF-HARDENING-012.2
+    "SHIPPING": {"next": "ARCHIVED", "prev": "BILLING"},         # FF-HARDENING-012.2
     "FINANCE": {"next": "COMPLETED", "prev": "SHIPPING"},
     "COMPLETED": {"next": None, "prev": "FINANCE"},
     "ARCHIVED": {"next": None, "prev": "SHIPPING"},
@@ -79,7 +85,7 @@ STATUS_FLOW = {
     # Legacy flow fallbacks
     "DRAFT": {"next": "SUBMITTED", "prev": None},
     "WAITING_COMMERCIAL_PARTITION": {"next": "APPROVED", "prev": None},
-    "IN_PROGRESS": {"next": "SHIPPING", "prev": "APPROVED"},
+    "IN_PROGRESS": {"next": "BILLING", "prev": "APPROVED"},
     "WAITING_DISPATCH": {"next": "FINANCE", "prev": "IN_PROGRESS"},
     "AUDIT_PENDING": {"next": "COMPLETED", "prev": "WAITING_DISPATCH"},
     "ANALISE_CREDITO": {"next": "COMPLETED", "prev": None},
@@ -317,17 +323,19 @@ async def get_kanban_board(
         PurchaseOrder.tenant_id == current_user.tenant_id
     ).all()
     
-    # Define status columns - Standardized 5 Columns
+    # Define status columns - FF-HARDENING-012.2: 6 Columns (Faturamento + Expedição split)
     # Comercial: SUBMITTED (fallback DRAFT, WAITING_COMMERCIAL_PARTITION)
-    # PCP: APPROVED
+    # PCP: APPROVED (fallback WAITING_MATERIAL)
     # Produção/Embalagem: MANUFACTURING (fallback IN_PROGRESS)
-    # Faturamento/Expedição: SHIPPING (fallback WAITING_DISPATCH)
-    # Financeiro: FINANCE (fallback AUDIT_PENDING, COMPLETED, ANALISE_CREDITO)
+    # Faturamento: BILLING (new stage for NF-e emission)
+    # Expedição: SHIPPING (fallback WAITING_DISPATCH) — checklist + uploads
+    # Financeiro: FINANCE (fallback AUDIT_PENDING, ANALISE_CREDITO)
     status_columns = [
         ("Comercial", ["SUBMITTED", "DRAFT", "WAITING_COMMERCIAL_PARTITION"]),
         ("PCP", ["APPROVED", "WAITING_MATERIAL"]),
         ("Produção/Embalagem", ["MANUFACTURING", "IN_PROGRESS"]),
-        ("Faturamento/Expedição", ["SHIPPING", "WAITING_DISPATCH"]),
+        ("Faturamento", ["BILLING"]),
+        ("Expedição", ["SHIPPING", "WAITING_DISPATCH"]),
         ("Financeiro", ["FINANCE", "AUDIT_PENDING", "ANALISE_CREDITO"]),
         ("Concluídos", ["ARCHIVED", "ARCHIVED_PARTITIONED", "COMPLETED"])
     ]
@@ -1124,6 +1132,110 @@ async def update_po_area_fields(
     }
 
 
+# ─── FF-HARDENING-012.1: Cancel PO endpoint ───────────────────────────────
+class CancelPORequest(BaseModel):
+    justification: str
+
+    @validator('justification')
+    def justification_must_be_meaningful(cls, v):
+        if not v or len(v.strip()) < 10:
+            raise ValueError('Justificativa de cancelamento deve ter no mínimo 10 caracteres')
+        return v.strip()
+
+
+@router.post("/pos/{po_id}/cancel")
+async def cancel_purchase_order(
+    po_id: str,
+    body: CancelPORequest,
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    FF-HARDENING-012.1 [Item 1 & 2] — Cancel a Purchase Order with mandatory justification.
+
+    Sets status_macro = "CANCELLED", persists the cancellation justification to
+    sla_justification_text (along with who cancelled and when), and writes an
+    immutable AuditLog entry so the action is fully traceable.
+
+    A cancelled PO will never appear on the Kanban board (board query excludes
+    statuses not in the active column list, and CANCELLED maps to 'Cancelado'
+    which is not rendered as a column).
+
+    Accessible to: all authenticated users (operator, leader, master, admin).
+    """
+    po = db.query(PurchaseOrder).filter(
+        PurchaseOrder.id == po_id,
+        PurchaseOrder.tenant_id == current_user.tenant_id
+    ).first()
+
+    if not po:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Pedido {po_id} não encontrado"
+        )
+
+    if po.status_macro == "CANCELLED":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Este pedido já está cancelado."
+        )
+
+    if po.status_macro in ("ARCHIVED", "ARCHIVED_PARTITIONED", "COMPLETED"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Não é possível cancelar um pedido com status '{po.status_macro}'."
+        )
+
+    from_status = po.status_macro
+
+    # Persist cancellation
+    po.status_macro = "CANCELLED"
+    po.sla_justification_text = body.justification
+    po.sla_justification_user = current_user.name or current_user.email
+    po.sla_justification_at = datetime.utcnow()
+    po.sla_justification_category = "CANCELAMENTO"
+    po.updated_at = datetime.utcnow()
+
+    # Write to partition_metadata for extra auditability
+    from sqlalchemy.orm.attributes import flag_modified as _flag_modified
+    meta = dict(po.partition_metadata or {})
+    meta["cancelled_by"] = current_user.name or current_user.email
+    meta["cancelled_at"] = po.sla_justification_at.isoformat()
+    meta["cancellation_justification"] = body.justification
+    po.partition_metadata = meta
+    _flag_modified(po, "partition_metadata")
+
+    # Audit log
+    log_po_status_transition(
+        db=db,
+        po=po,
+        from_status=from_status,
+        to_status="CANCELLED",
+        current_user=current_user,
+        justification=body.justification,
+        is_exception=False,
+        extra_data={
+            "action_type": "CANCEL_PO",
+            "cancelled_by": current_user.name or current_user.email,
+        }
+    )
+
+    db.commit()
+    db.refresh(po)
+
+    return {
+        "success": True,
+        "message": f"Pedido {po.po_number} cancelado com sucesso.",
+        "po_id": po_id,
+        "po_number": po.po_number,
+        "from_status": from_status,
+        "to_status": "CANCELLED",
+        "justification": body.justification,
+        "cancelled_by": current_user.name or current_user.email,
+        "cancelled_at": po.sla_justification_at.isoformat()
+    }
+
+
 @router.post("/move-status", response_model=MoveStatusResponse)
 async def move_po_status(
     request: MoveStatusRequest,
@@ -1174,11 +1286,14 @@ async def move_po_status(
     valid_transitions = {
         "DRAFT": ["SUBMITTED"],
         "SUBMITTED": ["APPROVED", "DRAFT", "WAITING_COMMERCIAL_PARTITION"],
-        "APPROVED": ["WAITING_DISPATCH", "SUBMITTED"],
+        "APPROVED": ["WAITING_DISPATCH", "SUBMITTED", "MANUFACTURING"],
+        "MANUFACTURING": ["BILLING", "APPROVED"],          # FF-HARDENING-012.2
+        "BILLING": ["SHIPPING", "MANUFACTURING"],           # FF-HARDENING-012.2
+        "SHIPPING": ["ARCHIVED", "BILLING"],                # FF-HARDENING-012.2
         "WAITING_DISPATCH": ["COMPLETED", "APPROVED"],
         "COMPLETED": ["WAITING_DISPATCH"],  # Allow return for corrections
         "CANCELLED": [],
-        "WAITING_COMMERCIAL_PARTITION": ["SUBMITTED", "SHIPPING"]
+        "WAITING_COMMERCIAL_PARTITION": ["SUBMITTED", "BILLING", "SHIPPING"]
     }
     
     is_exception = False
@@ -1713,9 +1828,9 @@ async def advance_po_status(
     current_status = po.status_macro
     # Expedition Dual-Phase Switch (The 'Fabio Monteiro' Rule):
     # Phase A (🚛 AJUSTE DE FRETE): If the PO came from a partition request, transition back to PCP (APPROVED) on advance
-    # ONLY if freight has not been allocated yet
+    # ONLY if freight has not been allocated yet AND the current status is BILLING (Faturamento)
     meta = po.partition_metadata or {}
-    if current_status == "SHIPPING" and po.parent_po_id is not None and not meta.get("freight_allocated"):
+    if current_status == "BILLING" and po.parent_po_id is not None and not meta.get("freight_allocated"):
         next_status = "APPROVED"
     else:
         next_status = STATUS_FLOW.get(current_status, {}).get("next")
@@ -1745,11 +1860,26 @@ async def advance_po_status(
         # Production must have items processed
         pass  # Add production-specific validations if needed
     
+    elif current_status == "BILLING":
+        # FF-HARDENING-012.2: Faturamento must have NF-e number, Transportadora, and emission date
+        meta = po.partition_metadata or {}
+        # Only validate for standard (non-FASE_A partition) flow
+        if po.parent_po_id is None or meta.get("freight_allocated"):
+            nfe = meta.get("numero_nfe") or (po.extra_metadata or {}).get("numero_nfe") or ""
+            carrier = meta.get("transportadora") or (po.extra_metadata or {}).get("transportadora") or ""
+            emission = meta.get("data_emissao_nf") or (po.extra_metadata or {}).get("data_emissao_nf") or ""
+            if not nfe:
+                validation_errors.append("Número NF-e é obrigatório")
+            if not carrier:
+                validation_errors.append("Transportadora é obrigatória")
+            if not emission:
+                validation_errors.append("Data de emissão da NF-e é obrigatória")
+
     elif current_status == "SHIPPING":
-        # Only validate NFE, carrier, and checklist if standard Phase B (parent_po_id is None or freight has been allocated)
+        # Expedição: validate checklist only for standard Phase B
         meta = po.partition_metadata or {}
         if po.parent_po_id is None or meta.get("freight_allocated"):
-            # Expedition must have NFE number, carrier, and checklist complete
+            # Expedition must have logistical checklist complete
             nfe = meta.get("numero_nfe") or ""
             carrier = meta.get("transportadora") or ""
             if not nfe:
@@ -1911,8 +2041,7 @@ async def return_po_status(
     }
 
 
-from pydantic import BaseModel
-from typing import Dict, List
+from typing import Dict
 
 class CreditApprovalBody(BaseModel):
     audit_comment: str
@@ -2099,283 +2228,345 @@ async def suggest_partition(
     db: Session = Depends(get_db)
 ):
     """
-    PCP-specific action: Suggest partition, create child POs, move PO status to WAITING_COMMERCIAL_PARTITION.
+    PCP-specific action: Suggest partition, create child POs, move parent PO status to
+    WAITING_COMMERCIAL_PARTITION. Child POs are created with status_macro=SUBMITTED so
+    they appear in the 'Comercial' column immediately for the commercial team to review
+    and approve the partition (business rule §9.3).
+
+    TRANSACTION SAFETY: The entire operation is wrapped in a try/except block. Any
+    unexpected error after the parent PO has been updated triggers a db.rollback() to
+    prevent corrupted or partial state in the database.
     """
     # Resolve parameters
     resolved_po_id = (payload.po_id if payload else None) or po_id
     resolved_reason = (payload.reason if payload else None) or reason
     qty_splits = payload.qty_splits if payload else None
     new_delivery_date_val = payload.new_delivery_date if payload else None
-    
+
     if not resolved_reason or len(resolved_reason.strip()) < 10:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Motivo da sugestão de partição deve ter pelo menos 10 caracteres"
         )
-        
+
     if not new_delivery_date_val:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Nova data de entrega prevista é obrigatória"
         )
-        
+
     po = db.query(PurchaseOrder).filter(
         PurchaseOrder.id == resolved_po_id,
         PurchaseOrder.tenant_id == current_user.tenant_id
     ).first()
-    
+
     if not po:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Pedido {resolved_po_id} não encontrado"
         )
-        
+
     if po.status_macro != "APPROVED":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Sugestão de partição só pode ser feita no estágio PCP"
         )
-        
+
     total_quantity = sum(item.quantity for item in po.items)
     if total_quantity <= 1:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Não é possível sugerir partição para um pedido com quantidade total menor ou igual a 1"
         )
-        
-    # Update parent status to WAITING_COMMERCIAL_PARTITION
-    from_status = po.status_macro
-    po.status_macro = "WAITING_COMMERCIAL_PARTITION"
-    po.partition_reason = resolved_reason
-    po.updated_at = datetime.utcnow()
 
-    # Store suggested_delivery_date and partition_reason in the parent's partition_metadata
-    if po.partition_metadata is None:
-        po.partition_metadata = {}
-    meta = dict(po.partition_metadata)
-    meta["suggested_delivery_date"] = new_delivery_date_val
-    meta["partition_reason"] = resolved_reason
-    po.partition_metadata = meta
+    # ── STRICT TRANSACTION BLOCK ────────────────────────────────────────────────
+    # All DB mutations below are wrapped so that any failure rolls back everything,
+    # preventing ghost/vanished cards caused by partial writes. [Fix §1, §3]
+    try:
+        from sqlalchemy.orm.attributes import flag_modified
 
-    from sqlalchemy.orm.attributes import flag_modified
-    flag_modified(po, "partition_metadata")
-    
-    # Commit parent PO status change
-    db.commit()
-    db.refresh(po)
-    
-    # Extract expected delivery date of the parent PO
-    parent_delivery_date = po.expected_delivery_date
-    parent_delivery_date_str = parent_delivery_date.isoformat() if parent_delivery_date else None
+        # Update parent status to WAITING_COMMERCIAL_PARTITION
+        from_status = po.status_macro
+        po.status_macro = "WAITING_COMMERCIAL_PARTITION"
+        po.partition_reason = resolved_reason
+        po.updated_at = datetime.utcnow()
 
-    # Extract inherited flags from parent metadata with dynamic fallback to items
-    parent_metadata = po.partition_metadata or {}
-    
-    parent_is_personalized = parent_metadata.get("is_personalized")
-    if parent_is_personalized is None:
-        parent_is_personalized = any(getattr(item, "is_personalized", False) or (item.extra_metadata and item.extra_metadata.get("is_personalized")) for item in po.items)
-        
-    parent_is_export = parent_metadata.get("is_export")
-    if parent_is_export is None:
-        parent_is_export = any(item.extra_metadata and item.extra_metadata.get("is_export") for item in po.items)
-        
-    parent_is_new_client = parent_metadata.get("is_new_client")
-    if parent_is_new_client is None:
-        parent_is_new_client = any(getattr(item, "is_new_client", False) or (item.extra_metadata and item.extra_metadata.get("is_new_client")) for item in po.items)
-        
-    parent_is_replacement = parent_metadata.get("is_replacement")
-    if parent_is_replacement is None:
-        parent_is_replacement = any(item.extra_metadata and item.extra_metadata.get("is_replacement") for item in po.items)
-        
-    parent_customization_notes = parent_metadata.get("customization_notes")
-    if parent_customization_notes is None:
-        notes_list = [getattr(item, "customization_notes", None) or (item.extra_metadata.get("customization_notes") if item.extra_metadata else None) for item in po.items]
-        parent_customization_notes = next((n for n in notes_list if n), None)
-        
-    parent_attachment_path = parent_metadata.get("attachment_path")
-    if parent_attachment_path is None:
-        attachments = [getattr(item, "attachment_path", None) or (item.extra_metadata.get("attachment_path") if item.extra_metadata else None) for item in po.items]
-        parent_attachment_path = next((a for a in attachments if a), None)
-        
-    parent_packaging_type = parent_metadata.get("packaging_type")
-    if parent_packaging_type is None:
-        packagings = [item.extra_metadata.get("packaging_type") if item.extra_metadata else None for item in po.items]
-        parent_packaging_type = next((p for p in packagings if p), None)
-    
-    import math
-    # Precompute split quantities
-    splits = []
-    for idx, item in enumerate(po.items):
-        q1, q2 = 0, 0
-        if qty_splits and (str(item.id) in qty_splits or item.sku in qty_splits):
-            split = qty_splits.get(str(item.id)) or qty_splits.get(item.sku)
-            q1, q2 = int(split[0]), int(split[1])
-            if q1 + q2 != item.quantity:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"A soma das quantidades divididas ({q1} + {q2}) para o item {item.sku} deve ser igual à quantidade original ({item.quantity})"
-                )
-        else:
-            # Fallback auto split
-            if item.quantity > 1:
-                q1 = int(math.ceil(item.quantity / 2.0))
-                q2 = item.quantity - q1
+        # Store suggested_delivery_date and partition_reason in the parent's partition_metadata
+        if po.partition_metadata is None:
+            po.partition_metadata = {}
+        meta = dict(po.partition_metadata)
+        meta["suggested_delivery_date"] = new_delivery_date_val
+        meta["partition_reason"] = resolved_reason
+        po.partition_metadata = meta
+        flag_modified(po, "partition_metadata")
+
+        # Commit parent PO status change
+        db.commit()
+        db.refresh(po)
+
+        # Extract expected delivery date of the parent PO
+        parent_delivery_date = po.expected_delivery_date
+        parent_delivery_date_str = parent_delivery_date.isoformat() if parent_delivery_date else None
+
+        # Extract inherited flags from parent metadata with dynamic fallback to items
+        parent_metadata = po.partition_metadata or {}
+
+        parent_is_personalized = parent_metadata.get("is_personalized")
+        if parent_is_personalized is None:
+            parent_is_personalized = any(
+                getattr(item, "is_personalized", False)
+                or (item.extra_metadata and item.extra_metadata.get("is_personalized"))
+                for item in po.items
+            )
+
+        parent_is_export = parent_metadata.get("is_export")
+        if parent_is_export is None:
+            parent_is_export = any(
+                item.extra_metadata and item.extra_metadata.get("is_export")
+                for item in po.items
+            )
+
+        parent_is_new_client = parent_metadata.get("is_new_client")
+        if parent_is_new_client is None:
+            parent_is_new_client = any(
+                getattr(item, "is_new_client", False)
+                or (item.extra_metadata and item.extra_metadata.get("is_new_client"))
+                for item in po.items
+            )
+
+        parent_is_replacement = parent_metadata.get("is_replacement")
+        if parent_is_replacement is None:
+            parent_is_replacement = any(
+                item.extra_metadata and item.extra_metadata.get("is_replacement")
+                for item in po.items
+            )
+
+        parent_customization_notes = parent_metadata.get("customization_notes")
+        if parent_customization_notes is None:
+            notes_list = [
+                getattr(item, "customization_notes", None)
+                or (item.extra_metadata.get("customization_notes") if item.extra_metadata else None)
+                for item in po.items
+            ]
+            parent_customization_notes = next((n for n in notes_list if n), None)
+
+        parent_attachment_path = parent_metadata.get("attachment_path")
+        if parent_attachment_path is None:
+            attachments = [
+                getattr(item, "attachment_path", None)
+                or (item.extra_metadata.get("attachment_path") if item.extra_metadata else None)
+                for item in po.items
+            ]
+            parent_attachment_path = next((a for a in attachments if a), None)
+
+        parent_packaging_type = parent_metadata.get("packaging_type")
+        if parent_packaging_type is None:
+            packagings = [
+                item.extra_metadata.get("packaging_type") if item.extra_metadata else None
+                for item in po.items
+            ]
+            parent_packaging_type = next((p for p in packagings if p), None)
+
+        import math
+        # Precompute split quantities
+        splits = []
+        for idx, item in enumerate(po.items):
+            q1, q2 = 0, 0
+            if qty_splits and (str(item.id) in qty_splits or item.sku in qty_splits):
+                split = qty_splits.get(str(item.id)) or qty_splits.get(item.sku)
+                q1, q2 = int(split[0]), int(split[1])
+                if q1 + q2 != item.quantity:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=(
+                            f"A soma das quantidades divididas ({q1} + {q2}) para o item "
+                            f"{item.sku} deve ser igual à quantidade original ({item.quantity})"
+                        )
+                    )
             else:
-                if idx % 2 == 0:
-                    q1 = 1
-                    q2 = 0
+                # Fallback auto split
+                if item.quantity > 1:
+                    q1 = int(math.ceil(item.quantity / 2.0))
+                    q2 = item.quantity - q1
                 else:
-                    q1 = 0
-                    q2 = 1
-        splits.append((item, q1, q2))
+                    if idx % 2 == 0:
+                        q1 = 1
+                        q2 = 0
+                    else:
+                        q1 = 0
+                        q2 = 1
+            splits.append((item, q1, q2))
 
-    # Step 1: Create child1 object.
-    child1 = PurchaseOrder(
-        tenant_id=uuid.UUID(str(po.tenant_id)),
-        po_number=f"{po.po_number}-C1",
-        status_macro="WAITING_COMMERCIAL_PARTITION",
-        parent_po_id=uuid.UUID(str(po.id)),
-        shipping_cost=0.0000, # 4-decimal precision internally!
-        is_partitioned=False,
-        partition_reason=resolved_reason,
-        partition_metadata={
-            "client_name": po.client_name,
-            "expected_delivery_date": parent_delivery_date_str,
-            "parent_po_number": po.po_number,
-            "partition_type": "CHILD_1",
-            "is_personalized": parent_is_personalized,
-            "is_export": parent_is_export,
-            "is_new_client": parent_is_new_client,
-            "is_replacement": parent_is_replacement,
-            "customization_notes": parent_customization_notes,
-            "attachment_path": parent_attachment_path,
-            "packaging_type": parent_packaging_type
-        }
-    )
-    
-    # Step 2: db.add(child1) -> db.commit() -> db.refresh(child1).
-    db.add(child1)
-    db.commit()
-    db.refresh(child1)
+        # ── FIX §9.3: Child POs must be created with status_macro="SUBMITTED" ─────
+        # Previously "WAITING_COMMERCIAL_PARTITION" caused both children to be
+        # suppressed by the board query (line 341-343 excludes child POs in that
+        # status), making the cards completely disappear from the Kanban board.
+        # With SUBMITTED they land in the 'Comercial' column immediately, where the
+        # commercial team will see them and can approve or reject the partition.
+        CHILD_STATUS = "SUBMITTED"
 
-    # Step 3: Create items for child1 using the committed child1.id.
-    for item, q1, q2 in splits:
-        if q1 > 0:
-            c1_item_extra = dict(item.extra_metadata or {})
-            if parent_delivery_date_str:
-                c1_item_extra["delivery_date"] = parent_delivery_date_str
-                c1_item_extra["expected_delivery_date"] = parent_delivery_date_str
-                
-            c1_item = OrderItem(
-                po_id=uuid.UUID(str(child1.id)),
-                tenant_id=uuid.UUID(str(po.tenant_id)),
-                sku=item.sku,
-                quantity=q1,
-                price=item.price,
-                status_item=item.status_item,
-                unit_value=item.unit_value,
-                item_total_value=float(item.price) * q1,
-                is_personalized=item.is_personalized,
-                is_new_client=item.is_new_client,
-                customization_notes=item.customization_notes,
-                attachment_path=item.attachment_path,
-                extra_metadata=c1_item_extra
-            )
-            db.add(c1_item)
-    db.commit()
+        # Step 1: Create child1 object.
+        child1 = PurchaseOrder(
+            tenant_id=uuid.UUID(str(po.tenant_id)),
+            po_number=f"{po.po_number}-C1",
+            status_macro=CHILD_STATUS,  # FIX §9.3 — Comercial column
+            parent_po_id=uuid.UUID(str(po.id)),
+            shipping_cost=0.0000,  # 4-decimal precision internally!
+            is_partitioned=False,
+            partition_reason=resolved_reason,
+            partition_metadata={
+                "client_name": po.client_name,
+                "expected_delivery_date": parent_delivery_date_str,
+                "parent_po_number": po.po_number,
+                "partition_type": "CHILD_1",
+                "is_personalized": parent_is_personalized,
+                "is_export": parent_is_export,
+                "is_new_client": parent_is_new_client,
+                "is_replacement": parent_is_replacement,
+                "customization_notes": parent_customization_notes,
+                "attachment_path": parent_attachment_path,
+                "packaging_type": parent_packaging_type
+            }
+        )
 
-    # Step 4: Create child2 object.
-    child2 = PurchaseOrder(
-        tenant_id=uuid.UUID(str(po.tenant_id)),
-        po_number=f"{po.po_number}-C2",
-        status_macro="WAITING_COMMERCIAL_PARTITION",
-        parent_po_id=uuid.UUID(str(po.id)),
-        shipping_cost=0.0000, # 4-decimal precision internally!
-        is_partitioned=False,
-        partition_reason=resolved_reason,
-        partition_metadata={
-            "client_name": po.client_name,
-            "expected_delivery_date": new_delivery_date_val,
-            "parent_po_number": po.po_number,
-            "partition_type": "CHILD_2",
-            "is_personalized": parent_is_personalized,
-            "is_export": parent_is_export,
-            "is_new_client": parent_is_new_client,
-            "is_replacement": parent_is_replacement,
-            "customization_notes": parent_customization_notes,
-            "attachment_path": parent_attachment_path,
-            "packaging_type": parent_packaging_type
-        }
-    )
-    
-    # Step 5: db.add(child2) -> db.commit() -> db.refresh(child2).
-    db.add(child2)
-    db.commit()
-    db.refresh(child2)
+        # Step 2: db.add(child1) -> db.commit() -> db.refresh(child1).
+        db.add(child1)
+        db.commit()
+        db.refresh(child1)
 
-    # Step 6: Create items for child2 using the committed child2.id.
-    for item, q1, q2 in splits:
-        if q2 > 0:
-            c2_item_extra = dict(item.extra_metadata or {})
-            c2_item_extra["delivery_date"] = new_delivery_date_val
-            c2_item_extra["expected_delivery_date"] = new_delivery_date_val
-            
-            c2_item = OrderItem(
-                po_id=uuid.UUID(str(child2.id)),
-                tenant_id=uuid.UUID(str(po.tenant_id)),
-                sku=item.sku,
-                quantity=q2,
-                price=item.price,
-                status_item=item.status_item,
-                unit_value=item.unit_value,
-                item_total_value=float(item.price) * q2,
-                is_personalized=item.is_personalized,
-                is_new_client=item.is_new_client,
-                customization_notes=item.customization_notes,
-                attachment_path=item.attachment_path,
-                extra_metadata=c2_item_extra
-            )
-            db.add(c2_item)
-    db.commit()
+        # Step 3: Create items for child1 using the committed child1.id.
+        for item, q1, q2 in splits:
+            if q1 > 0:
+                c1_item_extra = dict(item.extra_metadata or {})
+                if parent_delivery_date_str:
+                    c1_item_extra["delivery_date"] = parent_delivery_date_str
+                    c1_item_extra["expected_delivery_date"] = parent_delivery_date_str
 
-    # Compute total values after refresh to ensure items are loaded
-    db.refresh(child1)
-    db.refresh(child2)
-    child1.po_total_value = sum(float(it.item_total_value or 0) for it in child1.items)
-    child2.po_total_value = sum(float(it.item_total_value or 0) for it in child2.items)
-    db.add(child1)
-    db.add(child2)
-    db.commit()
-    
-    # Create audit log
-    log_po_status_transition(
-        db=db,
-        po=po,
-        from_status=from_status,
-        to_status="WAITING_COMMERCIAL_PARTITION",
-        current_user=current_user,
-        justification=f"SUGESTÃO DE PARTIÇÃO: {resolved_reason}",
-        is_exception=False,
-        extra_data={
-            "partition_reason": resolved_reason,
-            "action_type": "SUGGEST_PARTITION",
+                c1_item = OrderItem(
+                    po_id=uuid.UUID(str(child1.id)),
+                    tenant_id=uuid.UUID(str(po.tenant_id)),
+                    sku=item.sku,
+                    quantity=q1,
+                    price=item.price,
+                    status_item=item.status_item,
+                    unit_value=item.unit_value,
+                    item_total_value=float(item.price) * q1,
+                    is_personalized=item.is_personalized,
+                    is_new_client=item.is_new_client,
+                    customization_notes=item.customization_notes,
+                    attachment_path=item.attachment_path,
+                    extra_metadata=c1_item_extra
+                )
+                db.add(c1_item)
+        db.commit()
+
+        # Step 4: Create child2 object.
+        child2 = PurchaseOrder(
+            tenant_id=uuid.UUID(str(po.tenant_id)),
+            po_number=f"{po.po_number}-C2",
+            status_macro=CHILD_STATUS,  # FIX §9.3 — Comercial column
+            parent_po_id=uuid.UUID(str(po.id)),
+            shipping_cost=0.0000,  # 4-decimal precision internally!
+            is_partitioned=False,
+            partition_reason=resolved_reason,
+            partition_metadata={
+                "client_name": po.client_name,
+                "expected_delivery_date": new_delivery_date_val,
+                "parent_po_number": po.po_number,
+                "partition_type": "CHILD_2",
+                "is_personalized": parent_is_personalized,
+                "is_export": parent_is_export,
+                "is_new_client": parent_is_new_client,
+                "is_replacement": parent_is_replacement,
+                "customization_notes": parent_customization_notes,
+                "attachment_path": parent_attachment_path,
+                "packaging_type": parent_packaging_type
+            }
+        )
+
+        # Step 5: db.add(child2) -> db.commit() -> db.refresh(child2).
+        db.add(child2)
+        db.commit()
+        db.refresh(child2)
+
+        # Step 6: Create items for child2 using the committed child2.id.
+        for item, q1, q2 in splits:
+            if q2 > 0:
+                c2_item_extra = dict(item.extra_metadata or {})
+                c2_item_extra["delivery_date"] = new_delivery_date_val
+                c2_item_extra["expected_delivery_date"] = new_delivery_date_val
+
+                c2_item = OrderItem(
+                    po_id=uuid.UUID(str(child2.id)),
+                    tenant_id=uuid.UUID(str(po.tenant_id)),
+                    sku=item.sku,
+                    quantity=q2,
+                    price=item.price,
+                    status_item=item.status_item,
+                    unit_value=item.unit_value,
+                    item_total_value=float(item.price) * q2,
+                    is_personalized=item.is_personalized,
+                    is_new_client=item.is_new_client,
+                    customization_notes=item.customization_notes,
+                    attachment_path=item.attachment_path,
+                    extra_metadata=c2_item_extra
+                )
+                db.add(c2_item)
+        db.commit()
+
+        # Compute total values after refresh to ensure items are loaded
+        db.refresh(child1)
+        db.refresh(child2)
+        child1.po_total_value = sum(float(it.item_total_value or 0) for it in child1.items)
+        child2.po_total_value = sum(float(it.item_total_value or 0) for it in child2.items)
+        db.add(child1)
+        db.add(child2)
+        db.commit()
+
+        # Create audit log
+        log_po_status_transition(
+            db=db,
+            po=po,
+            from_status=from_status,
+            to_status="WAITING_COMMERCIAL_PARTITION",
+            current_user=current_user,
+            justification=f"SUGESTÃO DE PARTIÇÃO: {resolved_reason}",
+            is_exception=False,
+            extra_data={
+                "partition_reason": resolved_reason,
+                "action_type": "SUGGEST_PARTITION",
+                "child1_id": str(child1.id),
+                "child2_id": str(child2.id),
+                "child1_status": CHILD_STATUS,
+                "child2_status": CHILD_STATUS
+            }
+        )
+
+        db.commit()
+
+        return {
+            "success": True,
+            "message": "Sugestão de partição enviada para Comercial",
+            "po_id": resolved_po_id,
+            "from_status": STATUS_DISPLAY_MAP.get(from_status, from_status),
+            "to_status": STATUS_DISPLAY_MAP.get("WAITING_COMMERCIAL_PARTITION", "Aguardando Partição"),
+            "reason": resolved_reason,
             "child1_id": str(child1.id),
             "child2_id": str(child2.id)
         }
-    )
-    
-    db.commit()
-    
-    return {
-        "success": True,
-        "message": "Sugestão de partição enviada para Comercial",
-        "po_id": resolved_po_id,
-        "from_status": STATUS_DISPLAY_MAP.get(from_status, from_status),
-        "to_status": STATUS_DISPLAY_MAP.get("WAITING_COMMERCIAL_PARTITION", "Aguardando Partição"),
-        "reason": resolved_reason,
-        "child1_id": str(child1.id),
-        "child2_id": str(child2.id)
-    }
+
+    except HTTPException:
+        # Validation errors — not a DB corruption, re-raise as-is
+        db.rollback()
+        raise
+    except Exception as exc:
+        # Any unexpected error after the parent PO update — rollback everything
+        # to prevent ghost rows and vanished cards. [Fix §3]
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao processar partição. Operação revertida: {str(exc)}"
+        )
 
 
 @router.post("/pos/{po_id}/archive")
@@ -3209,3 +3400,194 @@ async def save_sla_justification(
         sla_justification_at=po.sla_justification_at,
         audit_hash=audit_hash,
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FF-HARDENING-012.2 [Item 2]: Invoice PDF Upload — Faturamento Stage
+# ─────────────────────────────────────────────────────────────────────────────
+@router.post("/pos/{po_id}/upload-invoice-pdf")
+async def upload_invoice_pdf(
+    po_id: str,
+    file: UploadFile = File(..., description="Invoice PDF or image (PDF, JPG, PNG)"),
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Upload the Faturamento NF-e document for a PO. Saves GCS URL to extra_metadata.invoice_pdf_path."""
+    po = db.query(PurchaseOrder).filter(
+        PurchaseOrder.id == po_id,
+        PurchaseOrder.tenant_id == current_user.tenant_id
+    ).first()
+    if not po:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Pedido {po_id} não encontrado")
+
+    from backend.services.gcs_service import GCSService, get_safe_filename
+    from sqlalchemy.orm.attributes import flag_modified
+
+    gcs_service = GCSService()
+    saved_path, attachment_filename = await gcs_service.upload_file(file, po_id)
+    safe_filename = get_safe_filename(file.filename) if file.filename else attachment_filename
+    print(f"[INVOICE-PDF] PO={po.po_number} | GCS path={saved_path}")
+
+    extra = dict(po.extra_metadata or {})
+    extra["invoice_pdf_path"] = saved_path
+    extra["invoice_pdf_filename"] = safe_filename
+    extra["invoice_pdf_uploaded_by"] = str(current_user.id)
+    extra["invoice_pdf_uploaded_at"] = datetime.utcnow().isoformat()
+    po.extra_metadata = extra
+    po.updated_at = datetime.utcnow()
+    db.add(po)
+    flag_modified(po, "extra_metadata")
+    db.commit()
+    db.refresh(po)
+
+    is_privileged = current_user.role.lower() in ["admin", "master"]
+    mapped_po = _map_single_po(po, db, is_privileged)
+    return {"success": True, "invoice_pdf_path": saved_path, "invoice_pdf_filename": safe_filename, "po": mapped_po}
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FF-HARDENING-012.3 [Item 2]: Upload Invoice XML for Faturamento stage
+# Stores path in extra_metadata.invoice_xml_path.
+# Either PDF or XML satisfies the dispatch guardrail (at least one required).
+# ─────────────────────────────────────────────────────────────────────────────
+@router.post("/pos/{po_id}/upload-invoice-xml")
+async def upload_invoice_xml(
+    po_id: str,
+    file: UploadFile = File(..., description="Invoice XML file"),
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Upload the Faturamento NF-e XML for a PO. Saves GCS URL to extra_metadata.invoice_xml_path."""
+    po = db.query(PurchaseOrder).filter(
+        PurchaseOrder.id == po_id,
+        PurchaseOrder.tenant_id == current_user.tenant_id
+    ).first()
+    if not po:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Pedido {po_id} nao encontrado")
+
+    from backend.services.gcs_service import GCSService, get_safe_filename
+    from sqlalchemy.orm.attributes import flag_modified
+
+    gcs_service = GCSService()
+    saved_path, attachment_filename = await gcs_service.upload_file(file, po_id)
+    safe_filename = get_safe_filename(file.filename) if file.filename else attachment_filename
+    print(f"[INVOICE-XML] PO={po.po_number} | GCS path={saved_path}")
+
+    extra = dict(po.extra_metadata or {})
+    extra["invoice_xml_path"] = saved_path
+    extra["invoice_xml_filename"] = safe_filename
+    extra["invoice_xml_uploaded_by"] = str(current_user.id)
+    extra["invoice_xml_uploaded_at"] = datetime.utcnow().isoformat()
+    po.extra_metadata = extra
+    po.updated_at = datetime.utcnow()
+    db.add(po)
+    flag_modified(po, "extra_metadata")
+    db.commit()
+    db.refresh(po)
+
+    is_privileged = current_user.role.lower() in ["admin", "master"]
+    mapped_po = _map_single_po(po, db, is_privileged)
+    return {"success": True, "invoice_xml_path": saved_path, "invoice_xml_filename": safe_filename, "po": mapped_po}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FF-HARDENING-012.2 [Item 3]: Create Manual Exchange/Return Card
+# tenant_id is always extracted from current_user — never accepted from body.
+# ─────────────────────────────────────────────────────────────────────────────
+class ExchangeCardRequest(BaseModel):
+    cliente: str
+    produto: str
+    quantidade: float
+    unidade_medida: str
+    largura: Optional[float] = None
+    comprimento: Optional[float] = None
+
+    @validator("cliente", "produto")
+    def not_empty(cls, v):
+        if not v or not v.strip():
+            raise ValueError("Campo obrigatório não pode estar vazio")
+        return v.strip()
+
+    @validator("unidade_medida")
+    def valid_unit(cls, v):
+        allowed = {"M2", "KG", "UN"}
+        if v.upper() not in allowed:
+            raise ValueError(f"Unidade de medida deve ser um de: {', '.join(allowed)}")
+        return v.upper()
+
+    @validator("quantidade")
+    def positive_qty(cls, v):
+        if v <= 0:
+            raise ValueError("Quantidade deve ser maior que zero")
+        return v
+
+
+@router.post("/exchange-cards")
+async def create_exchange_card(
+    request: ExchangeCardRequest,
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Create a manual Troca/Devoluçao PO in the Comercial column.
+    tenant_id is always from current_user to prevent cross-tenant data leaks.
+    """
+    import uuid as _uuid
+
+    po_number = f"TR-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{str(_uuid.uuid4())[:6].upper()}"
+
+    new_po = PurchaseOrder(
+        id=_uuid.uuid4(),
+        tenant_id=current_user.tenant_id,
+        po_number=po_number,
+        status_macro="SUBMITTED",
+        created_by=current_user.id,
+        shipping_cost=0.0,
+        is_partitioned=False,
+        partition_metadata={"client_name": request.cliente},
+    )
+    db.add(new_po)
+    db.flush()
+
+    sku_code = request.produto[:50].upper().replace(" ", "_")
+    new_item = OrderItem(
+        id=_uuid.uuid4(),
+        po_id=new_po.id,
+        tenant_id=current_user.tenant_id,
+        sku=sku_code,
+        quantity=request.quantidade,
+        price=0.0,
+        status_item="PENDING",
+        is_personalized=False,
+        is_new_client=False,
+        extra_metadata={
+            "is_exchange_return": True,
+            "client_name": request.cliente,
+            "description": request.produto,
+            "unit": request.unidade_medida,
+            "largura": request.largura,
+            "comprimento": request.comprimento,
+            "created_by_name": getattr(current_user, "name", str(current_user.id)),
+            "created_at_manual": datetime.utcnow().isoformat(),
+        },
+    )
+    db.add(new_item)
+
+    try:
+        db.commit()
+        db.refresh(new_po)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao criar card de troca/devolucao: {str(exc)}"
+        ) from exc
+
+    is_privileged = current_user.role.lower() in ["admin", "master"]
+    mapped_po = _map_single_po(new_po, db, is_privileged)
+    return {
+        "success": True,
+        "message": f"Card de Troca/Devolucao '{po_number}' criado com sucesso no Comercial.",
+        "po_number": po_number,
+        "po": mapped_po
+    }

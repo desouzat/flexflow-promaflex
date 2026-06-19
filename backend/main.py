@@ -32,6 +32,7 @@ from contextlib import asynccontextmanager
 import time
 
 from backend.routers import auth, import_router, kanban, dashboard, costs, workshop, partition, users, support, dashboard_router, settings
+from backend.routers import reports  # FF-HARDENING-012.2: CSV export router
 from backend.database import engine, Base
 from backend.middleware import AuthenticationMiddleware, TenantIsolationMiddleware
 
@@ -433,6 +434,7 @@ app.include_router(partition.router)
 app.include_router(users.router)
 app.include_router(support.router)
 app.include_router(settings.router)
+app.include_router(reports.router)   # FF-HARDENING-012.2: CSV report export
 
 
 # ============================================================================

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { Upload, FileSpreadsheet, AlertCircle, CheckCircle, X, HelpCircle, Paperclip, Trash2, Cloud, ChevronLeft, ChevronRight, Globe, RefreshCw, DollarSign, CheckSquare, Square, Lock, Unlock, Package, Briefcase } from 'lucide-react'
+import { Upload, FileSpreadsheet, AlertCircle, CheckCircle, X, HelpCircle, Paperclip, Trash2, Cloud, ChevronLeft, ChevronRight, Globe, RefreshCw, DollarSign, CheckSquare, Square, Lock, Unlock, Package, Briefcase, Ban } from 'lucide-react'
 import api from '../utils/api'
 import { showSuccess, showError, showLoading, dismissToast } from '../utils/toast'
 import { useNotifications } from '../context/NotificationContext'
@@ -111,6 +111,10 @@ const ImportPage = () => {
     const [overrideAprovado, setOverrideAprovado] = useState(false)
     const [financeSubmitting, setFinanceSubmitting] = useState(false)
     const [sessionChecked, setSessionChecked] = useState(false) // Race-condition guard for session restoration
+    // FF-HARDENING-012.1 [Item 1]: Cancel PO from ImportPage (Mesa de Conferência)
+    const [showCancelImportModal, setShowCancelImportModal] = useState(false)
+    const [cancelImportJustification, setCancelImportJustification] = useState('')
+    const [cancellingImport, setCancellingImport] = useState(false)
     const fileInputRef = useRef(null)
     const { refreshNotifications } = useNotifications()
     const { user } = useAuth()
@@ -2117,6 +2121,17 @@ const ImportPage = () => {
                                 >
                                     Cancelar
                                 </button>
+                            <button
+                                    onClick={() =>
+                                        setCancelImportJustification('') || setShowCancelImportModal(true)
+                                    }
+                                    disabled={!stagingData}
+                                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-semibold transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    title="Cancelar o pedido atual e removê-lo da fila de conferência"
+                                >
+                                    <Ban className="w-4 h-4" />
+                                    Cancelar PO
+                                </button>
                                 <button
                                     onClick={handleConfirmPO}
                                     disabled={!canCommit()}
@@ -2355,6 +2370,106 @@ const ImportPage = () => {
                         setFinanceJustification('');
                     }}
                 />
+            )}
+
+            {/* FF-HARDENING-012.1 [Item 1]: Cancel PO Confirmation Modal (Mesa de Conferência) */}
+            {showCancelImportModal && currentPO && (
+                <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-xl shadow-2xl max-w-md w-full mx-4 overflow-hidden">
+                        {/* Header */}
+                        <div className="bg-red-600 px-6 py-4 flex items-center gap-3">
+                            <span className="text-2xl">🚫</span>
+                            <div>
+                                <h3 className="text-lg font-bold text-white">Cancelar Pedido</h3>
+                                <p className="text-red-200 text-xs font-medium">PO: {currentPO.po_number}</p>
+                            </div>
+                        </div>
+
+                        {/* Body */}
+                        <div className="p-6">
+                            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+                                <p className="text-xs text-red-800 font-semibold">
+                                    ⚠️ <strong>Atenção:</strong> O pedido será removido da fila de conferência e marcado como <strong>CANCELADO</strong>. Essa ação é irreversível.
+                                </p>
+                            </div>
+
+                            <label className="block text-xs font-bold text-gray-700 uppercase mb-2">
+                                Justificativa de Cancelamento <span className="text-red-500">*</span>
+                                <span className="text-gray-400 font-normal lowercase ml-1">(mínimo 10 caracteres)</span>
+                            </label>
+                            <textarea
+                                value={cancelImportJustification}
+                                onChange={(e) => setCancelImportJustification(e.target.value)}
+                                placeholder="Ex: Pedido duplicado, cliente solicitou cancelamento, erro de importação..."
+                                rows={4}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-red-500 focus:outline-none text-gray-800 font-medium resize-none"
+                                autoFocus
+                            />
+                            {cancelImportJustification.trim().length > 0 && cancelImportJustification.trim().length < 10 && (
+                                <p className="text-xs text-red-600 mt-1 font-semibold">
+                                    {10 - cancelImportJustification.trim().length} caractere(s) restante(s)
+                                </p>
+                            )}
+                        </div>
+
+                        {/* Footer */}
+                        <div className="bg-gray-50 px-6 py-4 flex justify-end gap-3 border-t border-gray-200">
+                            <button
+                                onClick={() => {
+                                    setShowCancelImportModal(false);
+                                    setCancelImportJustification('');
+                                }}
+                                disabled={cancellingImport}
+                                className="px-4 py-2 bg-gray-300 text-gray-700 text-sm font-semibold rounded-lg hover:bg-gray-400 transition-colors disabled:opacity-50"
+                            >
+                                Voltar
+                            </button>
+                            <button
+                                onClick={async () => {
+                                    if (cancelImportJustification.trim().length < 10) return;
+                                    setCancellingImport(true);
+                                    try {
+                                        // If the PO already has a DB id, call the cancel endpoint
+                                        if (currentPO.id) {
+                                            await api.post(`/kanban/pos/${currentPO.id}/cancel`, {
+                                                justification: cancelImportJustification.trim()
+                                            });
+                                        }
+                                        // Remove this PO from the staging list regardless
+                                        setStagingData(prev => {
+                                            if (!prev || !prev.po_list) return prev;
+                                            const updatedList = prev.po_list.filter((_, idx) => idx !== selectedPOIndex);
+                                            if (updatedList.length === 0) return null; // All POs cancelled — clear staging
+                                            return {
+                                                ...prev,
+                                                po_list: updatedList,
+                                                total_pos: updatedList.length
+                                            };
+                                        });
+                                        // Adjust selected index
+                                        setSelectedPOIndex(prev => Math.max(0, prev > 0 ? prev - 1 : 0));
+                                        setCurrentPage(1);
+                                        showSuccess(`✅ Pedido ${currentPO.po_number} cancelado e removido da fila.`);
+                                        setShowCancelImportModal(false);
+                                        setCancelImportJustification('');
+                                    } catch (err) {
+                                        showError(err.response?.data?.detail || 'Erro ao cancelar pedido');
+                                    } finally {
+                                        setCancellingImport(false);
+                                    }
+                                }}
+                                disabled={cancelImportJustification.trim().length < 10 || cancellingImport}
+                                className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors ${
+                                    cancelImportJustification.trim().length >= 10 && !cancellingImport
+                                        ? 'bg-red-600 hover:bg-red-700 text-white'
+                                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                }`}
+                            >
+                                {cancellingImport ? 'Cancelando...' : '🚫 Confirmar Cancelamento'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     )

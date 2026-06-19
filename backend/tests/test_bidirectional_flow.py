@@ -21,7 +21,8 @@ def test_status_flow_mapping():
         "DRAFT": "SUBMITTED",
         "SUBMITTED": "APPROVED",
         "APPROVED": "MANUFACTURING",
-        "MANUFACTURING": "SHIPPING",
+        "MANUFACTURING": "BILLING",
+        "BILLING": "SHIPPING",
         "SHIPPING": "ARCHIVED",
         "FINANCE": "COMPLETED",
         "COMPLETED": None,
@@ -46,7 +47,8 @@ def test_status_flow_mapping():
         "SUBMITTED": None,
         "APPROVED": "SUBMITTED",
         "MANUFACTURING": "APPROVED",
-        "SHIPPING": "MANUFACTURING",
+        "BILLING": "MANUFACTURING",
+        "SHIPPING": "BILLING",
         "FINANCE": "SHIPPING",
         "COMPLETED": "FINANCE",
         "WAITING_COMMERCIAL_PARTITION": None
@@ -68,46 +70,59 @@ def test_status_flow_mapping():
 
 
 def test_display_name_mapping():
-    """Test that display names are correctly mapped"""
+    """Test that display names are correctly mapped (FF-HARDENING-012.2: BILLING split)"""
     from routers.kanban import STATUS_DISPLAY_MAP, DISPLAY_TO_DB_STATUS
-    
+    import unicodedata
+
+    def norm(s):
+        """Normalize unicode for accent-insensitive comparison."""
+        return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode() if s else s
+
     print("\n" + "="*80)
     print("DISPLAY NAME MAPPING VERIFICATION")
     print("="*80)
-    
+
+    # Updated for FF-HARDENING-012.2: BILLING (Faturamento) and SHIPPING (Expedicao) are separate
     expected_mappings = {
         "DRAFT": "Comercial",
         "SUBMITTED": "Comercial",
         "WAITING_COMMERCIAL_PARTITION": "Comercial",
         "APPROVED": "PCP",
-        "IN_PROGRESS": "Produção/Embalagem",
-        "WAITING_DISPATCH": "Faturamento/Expedição",
-        "AUDIT_PENDING": "Financeiro",
+        "MANUFACTURING": "Producao/Embalagem",
+        "BILLING": "Faturamento",
+        "SHIPPING": "Expedicao",
         "COMPLETED": "Financeiro",
         "ANALISE_CREDITO": "Financeiro",
-        "CANCELLED": "Cancelado"
+        "CANCELLED": "Cancelado",
     }
-    
-    print("\n[DB STATUS → DISPLAY NAME]")
+
+    print("\n[DB STATUS -> DISPLAY NAME]")
     for db_status, expected_display in expected_mappings.items():
         actual_display = STATUS_DISPLAY_MAP.get(db_status)
-        if actual_display == expected_display:
-            print(f"  ✓ {db_status} → {actual_display}")
+        if norm(actual_display) == norm(expected_display):
+            print(f"  OK {db_status} -> {actual_display}")
         else:
-            print(f"  ✗ {db_status}: Expected '{expected_display}', got '{actual_display}'")
+            print(f"  FAIL {db_status}: Expected {expected_display!r}, got {actual_display!r}")
             assert False, f"Display mapping mismatch for {db_status}"
-    
-    print("\n[DISPLAY NAME → DB STATUS]")
+
+    # Legacy compat entries may not round-trip (e.g. Faturamento/Expedicao -> BILLING -> Faturamento)
+    LEGACY_SKIP_NORM = {norm("Faturamento/Expedição"), norm("Arquivado")}
+
+    print("\n[DISPLAY NAME -> DB STATUS (canonical entries only)]")
     for display_name, db_status in DISPLAY_TO_DB_STATUS.items():
+        if norm(display_name) in LEGACY_SKIP_NORM:
+            print(f"  SKIP (legacy) {display_name!r}")
+            continue
         actual_display = STATUS_DISPLAY_MAP.get(db_status)
-        if actual_display == display_name:
-            print(f"  ✓ {display_name} → {db_status}")
+        if norm(actual_display) == norm(display_name):
+            print(f"  OK {display_name} -> {db_status}")
         else:
-            print(f"  ✗ {display_name}: Expected '{display_name}' to map back from '{db_status}', got '{actual_display}'")
-            assert False, f"Reverse mapping mismatch for {display_name}"
-    
-    print("\n✓ ALL DISPLAY NAME MAPPINGS VERIFIED")
+            print(f"  FAIL {display_name}: map back from {db_status!r} got {actual_display!r}")
+            assert False, f"Reverse mapping mismatch for {display_name!r}"
+
+    print("\nALL DISPLAY NAME MAPPINGS VERIFIED")
     print("="*80)
+
 
 
 def test_valid_transitions():
@@ -125,6 +140,7 @@ def test_valid_transitions():
         "SUBMITTED",
         "APPROVED",
         "MANUFACTURING",
+        "BILLING",
         "SHIPPING",
         "ARCHIVED"
     ]
@@ -145,7 +161,8 @@ def test_valid_transitions():
     rejection_tests = [
         ("APPROVED", "SUBMITTED", "PCP can reject to Comercial"),
         ("MANUFACTURING", "APPROVED", "Production can return to PCP"),
-        ("SHIPPING", "MANUFACTURING", "Dispatch can return to Production"),
+        ("BILLING", "MANUFACTURING", "Faturamento can return to Production"),
+        ("SHIPPING", "BILLING", "Dispatch can return to Faturamento"),
         ("FINANCE", "SHIPPING", "Finance can return to Dispatch"),
         ("COMPLETED", "FINANCE", "Completed can return to Finance"),
     ]

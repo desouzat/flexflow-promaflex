@@ -252,16 +252,13 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
         return Math.max(0, Math.min(100, percent))
     }, [safepo.created_at, safepo.expected_delivery_date, safepo.data_limite, isReplacement])
 
-    // Check if this PO is waiting for partition decision - excluded if waiting material, shipping, or archived
-    const isWaitingPartition = safepo.status_macro !== 'WAITING_MATERIAL' &&
-        safepo.status_macro !== 'SHIPPING' &&
-        !['ARCHIVED', 'ARCHIVED_PARTITIONED', 'COMPLETED'].includes(safepo.status_macro) &&
-        safepo.status !== 'Faturamento/Expedição' &&
-        safepo.status !== 'Concluídos' && (
-            safepo.extra_metadata?.waiting_partition ||
-            safepo.status_macro === 'WAITING_COMMERCIAL_PARTITION' ||
-            safepo.partition_reason
-        )
+    // Check if this PO is waiting for partition decision.
+    // FIX [§2]: Only trigger when status_macro is strictly 'WAITING_COMMERCIAL_PARTITION'.
+    // Previously, the loose `safepo.partition_reason` fallback caused child POs (which
+    // inherit partition_reason from the parent) to display the badge even after they were
+    // approved and routed to the PCP column — this was the spurious "Aguardando aprovação
+    // da partição" label that appeared in the wrong column.
+    const isWaitingPartition = safepo.status_macro === 'WAITING_COMMERCIAL_PARTITION'
 
     if (compactView) {
         return (
