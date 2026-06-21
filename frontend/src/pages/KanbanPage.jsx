@@ -1291,11 +1291,13 @@ const KanbanPage = () => {
         )
     }
 
-    // FF-HARDENING-012.3 [Item 2]: Either PDF or XML satisfies the Faturamento guardrail
+    // FF-HARDENING-012.3 [Item 2 / UAT-FIX]: Either PDF slot satisfies the Faturamento guardrail.
+    // Checks invoice_pdf_path (primary), invoice_pdf_path_2 (secondary slot), or invoice_xml_path (legacy).
     const isBillingDocReady = () => {
-        const hasPdf = !!(selectedPO?.extra_metadata?.invoice_pdf_path)
-        const hasXml = !!(selectedPO?.extra_metadata?.invoice_xml_path)
-        return hasPdf || hasXml
+        const hasPdf  = !!(selectedPO?.extra_metadata?.invoice_pdf_path)
+        const hasPdf2 = !!(selectedPO?.extra_metadata?.invoice_pdf_path_2)
+        const hasXml  = !!(selectedPO?.extra_metadata?.invoice_xml_path)
+        return hasPdf || hasPdf2 || hasXml
     }
 
     const canAdvanceCurrentArea = () => {
@@ -1310,10 +1312,15 @@ const KanbanPage = () => {
         if (selectedPO.status === 'PCP') {
             const packaging = meta.packaging_type || ''
             const deliveryDate = meta.data_programada || '' // Explicit data_programada (no fallback)
-            const allItemsLinked = selectedPO.items && selectedPO.items.length > 0 && selectedPO.items.every(item => {
-                const unitCost = parseFloat(item.total_cost) || parseFloat(item.cost_mp) || parseFloat(item.extra_metadata?.total_cost) || parseFloat(item.extra_metadata?.cost_mp) || 0;
-                return unitCost > 0;
-            });
+            // UAT-FIX-4: Exchange/Return cards skip the cost-link check — PCP only requires
+            // packaging type + data_programada before advancing to Produção.
+            const isExchangeCard = !!(meta.is_exchange_return || selectedPO.items?.[0]?.extra_metadata?.is_exchange_return || (selectedPO.po_number || '').startsWith('TR-'))
+            const allItemsLinked = isExchangeCard
+                ? true  // exchange/return cards are pre-approved by PCP — no cost link required
+                : selectedPO.items && selectedPO.items.length > 0 && selectedPO.items.every(item => {
+                    const unitCost = parseFloat(item.total_cost) || parseFloat(item.cost_mp) || parseFloat(item.extra_metadata?.total_cost) || parseFloat(item.extra_metadata?.cost_mp) || 0;
+                    return unitCost > 0;
+                });
             return packaging !== '' && deliveryDate !== '' && allItemsLinked
         }
 
@@ -2812,7 +2819,7 @@ const KanbanPage = () => {
                                                                                     </div>
                                                                                     {!isBillingDocReady() && (
                                                                                         <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 mt-1">
-                                                                                            Pelo menos um documento fiscal (PDF ou XML) é obrigatório para avançar o card.
+                                                                                            Pelo menos um documento fiscal é obrigatório para avançar o card.
                                                                                         </p>
                                                                                     )}
                                                                                 </div>

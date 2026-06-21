@@ -66,10 +66,16 @@ async def export_pos_csv(
     ])
 
     for po in pos:
-        # Client name — resolved from partition_metadata or item metadata
+        # Client name — resolved from partition_metadata, po model column, or first-item metadata
         client_name = ""
         if po.partition_metadata and "client_name" in po.partition_metadata:
             client_name = po.partition_metadata["client_name"] or ""
+        if not client_name:
+            # Standard ONET POs store client_name directly on the PurchaseOrder row
+            client_name = getattr(po, 'client_name', '') or ""
+        if not client_name and po.items:
+            # Manual exchange cards may store it in item metadata
+            client_name = po.items[0].extra_metadata.get('client_name', '') if po.items[0].extra_metadata else ""
 
         # Date received (created_at formatted as dd/mm/yyyy)
         date_received = ""
@@ -120,20 +126,25 @@ async def export_pos_csv(
             # Personalized
             personalizado = "Sim" if item.is_personalized else "Não"
 
-            # Dimensions — standard POs use "width"/"length"; manual cards use "largura"/"comprimento"
-            largura = (
-                meta.get("largura") or meta.get("Largura")
-                or meta.get("width") or meta.get("Width") or ""
-            )
-            comprimento = (
-                meta.get("comprimento") or meta.get("Comprimento")
-                or meta.get("length") or meta.get("Length") or ""
-            )
-            # Format as string if Decimal
-            if largura and largura != "":
-                largura = str(largura)
-            if comprimento and comprimento != "":
-                comprimento = str(comprimento)
+            # Dimensions — ordered fallback chain for both PO types:
+            # 1. Direct ORM columns item.width / item.length (standard ONET POs via import_service)
+            # 2. JSONB extra_metadata keys: largura/Largura/width/Width
+            # 3. Blank string if not found
+            raw_largura = getattr(item, 'width', None) or getattr(item, 'largura', None)
+            if raw_largura is None:
+                raw_largura = (
+                    meta.get("largura") or meta.get("Largura")
+                    or meta.get("width") or meta.get("Width")
+                )
+            largura = str(raw_largura) if raw_largura not in (None, "") else ""
+
+            raw_comprimento = getattr(item, 'length', None) or getattr(item, 'comprimento', None)
+            if raw_comprimento is None:
+                raw_comprimento = (
+                    meta.get("comprimento") or meta.get("Comprimento")
+                    or meta.get("length") or meta.get("Length")
+                )
+            comprimento = str(raw_comprimento) if raw_comprimento not in (None, "") else ""
 
             writer.writerow([
                 po.po_number,
