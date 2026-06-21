@@ -226,10 +226,15 @@ const KanbanPage = () => {
     const [showExchangeModal, setShowExchangeModal] = useState(false)
     const [exchangeForm, setExchangeForm] = useState({ po_original: '', cliente: '', produto: '', quantidade: '', unidade_medida: 'M2', largura: '', comprimento: '' })
     const [savingExchange, setSavingExchange] = useState(false)
-    // FF-HARDENING-012.2 [Item 2]: Invoice PDF upload ref
-    const globalInvoiceInputRef = useRef(null)
-    // FF-HARDENING-012.3 [Item 2]: Invoice XML upload ref
+    // FF-HARDENING-012.2 [Item 2]: Invoice PDF upload refs — Callback Ref architecture
+    // globalInvoiceInputRef / globalXmlInvoiceInputRef are kept as useRef so the
+    // callback ref can also assign .current for any imperative .click() consumers.
+    const globalInvoiceInputRef    = useRef(null)
     const globalXmlInvoiceInputRef = useRef(null)
+    // activeUploadPoIdRef: written synchronously by the button onClick BEFORE calling
+    // .click() on the hidden input.  The native node.onchange handler reads it to
+    // know which PO to upload to — bypassing any stale selectedPO closure risk.
+    const activeUploadPoIdRef = useRef(null)
     const isPhaseADisabled = selectedPO?.partition_metadata?.current_phase === 'FASE_A' || selectedPO?.extra_metadata?.current_phase === 'FASE_A';
     const [editingCommission, setEditingCommission] = useState(false)
     const [commissionValue, setCommissionValue] = useState('')
@@ -973,6 +978,47 @@ const KanbanPage = () => {
             dismissToast(toastId)
             console.error('Failed to upload evidence:', error)
             showError(error.response?.data?.detail || 'Erro ao enviar evidência')
+        }
+    }
+
+    // FF-HARDENING-INV: Shared invoice upload handler (Callback Ref pattern).
+    // Called directly from native node.onchange — no React synthetic event involved.
+    // field: 'invoice_pdf' | 'invoice_pdf_2'
+    // inputRef: the useRef whose .current points to the hidden <input> (for .value reset)
+    const handleInvoiceUpload = async (field, file, poId, inputNode) => {
+        console.log('[F12 TRACE INV-3] Entered handleInvoiceUpload. field:', field, '| file:', file?.name, '| poId:', poId)
+        if (!file || !poId) return
+
+        // Reset the input immediately so the same file can be re-selected after an error.
+        if (inputNode) inputNode.value = ''
+
+        const isSecondary = field === 'invoice_pdf_2'
+        const endpoint    = isSecondary
+            ? `/kanban/pos/${poId}/upload-invoice-xml`
+            : `/kanban/pos/${poId}/upload-invoice-pdf`
+        const label = isSecondary ? 'NF-e (PDF Secundário)' : 'NF-e'
+
+        const toastId = showLoading(`Enviando ${label}...`)
+        try {
+            const formData = new FormData()
+            formData.append('file', file)
+            console.log('[F12 TRACE INV-4] Dispatched Axios POST. endpoint:', endpoint, '| poId:', poId, '| filename:', file.name)
+            const res = await api.post(endpoint, formData, {
+                headers: { 'Content-Type': 'multipart/form-data' }
+            })
+            console.log('[F12 TRACE INV-5] Upload success. Response:', res.data)
+            dismissToast(toastId)
+            showSuccess(`${label} enviada com sucesso!`)
+            // Sync selectedPO state from response BEFORE board refresh to avoid stale state on advance.
+            if (res.data?.po) setSelectedPO(res.data.po)
+            await fetchBoard()
+        } catch (err) {
+            console.log('[F12 TRACE INV-ERR] Upload failed:', err)
+            dismissToast(toastId)
+            showError(err.response?.data?.detail || `Erro ao enviar ${label}`)
+        } finally {
+            // Clear the activeUploadPoIdRef so it cannot be reused by a stale handler.
+            activeUploadPoIdRef.current = null
         }
     }
 
@@ -2784,19 +2830,19 @@ const KanbanPage = () => {
                                                                                                     className="text-xs text-blue-600 hover:text-blue-800 font-semibold underline flex items-center gap-1">
                                                                                                     📄 {getCleanFilename(selectedPO.extra_metadata.invoice_pdf_filename || selectedPO.extra_metadata.invoice_pdf_path) || 'NF-e PDF'}
                                                                                                 </a>
-                                                                                                <button onClick={() => globalInvoiceInputRef.current?.click()}
+                                                                                                <button onClick={() => { activeUploadPoIdRef.current = selectedPO.id; globalInvoiceInputRef.current?.click(); }}
                                                                                                     className="text-xs text-gray-500 hover:text-gray-700 underline cursor-pointer">
                                                                                                     Substituir
                                                                                                 </button>
                                                                                             </div>
                                                                                         ) : (
-                                                                                            <button onClick={() => globalInvoiceInputRef.current?.click()}
+                                                                                            <button onClick={() => { activeUploadPoIdRef.current = selectedPO.id; globalInvoiceInputRef.current?.click(); }}
                                                                                                 className="flex items-center gap-2 px-3 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer border-0">
                                                                                                 📎 Anexar NF (PDF)
                                                                                             </button>
                                                                                         )}
                                                                                     </div>
-                                                                                    {/* Slot XML - FF-HARDENING-012.3 Item 2 */}
+                                                                                    {/* Slot PDF Secundário - Callback Ref pattern */}
                                                                                     <div>
                                                                                         <span className="text-xs font-semibold text-gray-600 uppercase block mb-1">Anexar NF (PDF Secundário) <span className="text-gray-400 normal-case font-normal">(opcional)</span></span>
                                                                                         {selectedPO.extra_metadata?.invoice_xml_path ? (
@@ -2805,13 +2851,13 @@ const KanbanPage = () => {
                                                                                                     className="text-xs text-green-600 hover:text-green-800 font-semibold underline flex items-center gap-1">
                                                                                                     🗃️ {getCleanFilename(selectedPO.extra_metadata.invoice_xml_filename || selectedPO.extra_metadata.invoice_xml_path) || 'NF-e XML'}
                                                                                                 </a>
-                                                                                                <button onClick={() => globalXmlInvoiceInputRef.current?.click()}
+                                                                                                <button onClick={() => { activeUploadPoIdRef.current = selectedPO.id; globalXmlInvoiceInputRef.current?.click(); }}
                                                                                                     className="text-xs text-gray-500 hover:text-gray-700 underline cursor-pointer">
                                                                                                     Substituir
                                                                                                 </button>
                                                                                             </div>
                                                                                         ) : (
-                                                                                            <button onClick={() => globalXmlInvoiceInputRef.current?.click()}
+                                                                                            <button onClick={() => { activeUploadPoIdRef.current = selectedPO.id; globalXmlInvoiceInputRef.current?.click(); }}
                                                                                                 className="flex items-center gap-2 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer border-0">
                                                                                                 📄 Anexar NF (PDF Secundário)
                                                                                             </button>
@@ -3988,64 +4034,51 @@ const KanbanPage = () => {
         )}
 
 
-        {/* ── FF-HARDENING-012.2 [Item 2]: Hidden invoice PDF file input ── */}
+        {/* ── FF-HARDENING-012.2 [Item 2]: Hidden invoice PDF input — Callback Ref pattern.
+             Uses native node.onchange (NOT React onChange) so the handler always fires
+             even when React's synthetic event system misses a re-render cycle.
+             activeUploadPoIdRef.current is set synchronously by the button onClick
+             BEFORE .click() is called, so the closure captures the correct PO id. ── */}
         <input
-            ref={globalInvoiceInputRef}
+            ref={(node) => {
+                // Keep the useRef current so any imperative .click() consumers still work.
+                globalInvoiceInputRef.current = node
+                if (node) {
+                    node.onchange = (e) => {
+                        const file  = e.target.files[0]    // read before reset
+                        e.target.value = ''
+                        const poId = activeUploadPoIdRef.current
+                        console.log('[F12 TRACE INV-2] Primary invoice input onChange. file:', file?.name, '| poId:', poId)
+                        if (file && poId) {
+                            handleInvoiceUpload('invoice_pdf', file, poId, node)
+                        }
+                    }
+                }
+            }}
             type="file"
             accept=".pdf,.jpg,.jpeg,.png,.webp"
             style={{ display: 'none' }}
-            onChange={async (e) => {
-                const file = e.target.files?.[0]
-                if (!file || !selectedPO?.id) return
-                const formData = new FormData()
-                formData.append('file', file)
-                const toastId = showLoading('Enviando NF-e...')
-                try {
-                    const res = await api.post(`/kanban/pos/${selectedPO.id}/upload-invoice-pdf`, formData, {
-                        headers: { 'Content-Type': 'multipart/form-data' }
-                    })
-                    dismissToast(toastId)
-                    showSuccess('NF-e enviada com sucesso!')
-                    // UAT-FIX-2d: sync selectedPO state BEFORE fetchBoard — prevents stale state on advance-status
-                    if (res.data?.po) setSelectedPO(res.data.po)
-                    await fetchBoard()
-                } catch (err) {
-                    dismissToast(toastId)
-                    showError(err.response?.data?.detail || 'Erro ao enviar NF-e')
-                } finally {
-                    e.target.value = ''
-                }
-            }}
         />
 
-        {/* ── UAT-FIX-2: Hidden PDF Secundario file input (accepts same formats as primary) ── */}
+        {/* ── Secondary PDF invoice input — Callback Ref pattern (identical architecture) ── */}
         <input
-            ref={globalXmlInvoiceInputRef}
+            ref={(node) => {
+                globalXmlInvoiceInputRef.current = node
+                if (node) {
+                    node.onchange = (e) => {
+                        const file  = e.target.files[0]    // read before reset
+                        e.target.value = ''
+                        const poId = activeUploadPoIdRef.current
+                        console.log('[F12 TRACE INV-2B] Secondary invoice input onChange. file:', file?.name, '| poId:', poId)
+                        if (file && poId) {
+                            handleInvoiceUpload('invoice_pdf_2', file, poId, node)
+                        }
+                    }
+                }
+            }}
             type="file"
             accept=".pdf,.jpg,.jpeg,.png,.webp"
             style={{ display: 'none' }}
-            onChange={async (e) => {
-                const file = e.target.files?.[0]
-                if (!file || !selectedPO?.id) return
-                const formData = new FormData()
-                formData.append('file', file)
-                const toastId = showLoading('Enviando NF-e (PDF Secundário)...')
-                try {
-                    const res = await api.post(`/kanban/pos/${selectedPO.id}/upload-invoice-xml`, formData, {
-                        headers: { 'Content-Type': 'multipart/form-data' }
-                    })
-                    dismissToast(toastId)
-                    showSuccess('NF-e (PDF Secundário) enviado com sucesso!')
-                    // UAT-FIX-2d: sync selectedPO state BEFORE fetchBoard to prevent stale state on advance
-                    if (res.data?.po) setSelectedPO(res.data.po)
-                    await fetchBoard()
-                } catch (err) {
-                    dismissToast(toastId)
-                    showError(err.response?.data?.detail || 'Erro ao enviar NF-e secundário')
-                } finally {
-                    e.target.value = ''
-                }
-            }}
         />
 
         {/* ── FF-HARDENING-012.2 [Item 3]: Exchange/Return Card Modal ── */}
