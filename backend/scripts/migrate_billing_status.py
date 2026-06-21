@@ -33,21 +33,13 @@ except ImportError:
 import psycopg2
 
 # ── Build connection string ───────────────────────────────────────────────────
-DB_HOST     = os.getenv("DB_HOST", "localhost")
-DB_PORT     = os.getenv("DB_PORT", "5434")          # Cloud SQL Auth Proxy default
-DB_NAME     = os.getenv("DB_NAME") or os.getenv("POSTGRES_DB", "flexflow")
-DB_USER     = os.getenv("DB_USER") or os.getenv("POSTGRES_USER", "postgres")
-DB_PASSWORD = os.getenv("DB_PASSWORD") or os.getenv("POSTGRES_PASSWORD", "")
-
-DATABASE_URL = os.getenv("DATABASE_URL")
-if DATABASE_URL and DATABASE_URL.startswith("postgresql"):
-    import urllib.parse
-    parsed = urllib.parse.urlparse(DATABASE_URL)
-    DB_HOST     = parsed.hostname or DB_HOST
-    DB_PORT     = str(parsed.port or 5434)
-    DB_NAME     = parsed.path.lstrip("/") or DB_NAME
-    DB_USER     = parsed.username or DB_USER
-    DB_PASSWORD = urllib.parse.unquote(parsed.password) if parsed.password else DB_PASSWORD
+# UAT-FIX-1: Hardcoded to flexflow_prod on the Cloud SQL Auth Proxy port.
+# This MUST always connect to flexflow_prod — never the default "postgres" DB.
+DB_HOST     = "localhost"
+DB_PORT     = "5434"
+DB_NAME     = "flexflow_prod"
+DB_USER     = "flexflow_app"
+DB_PASSWORD = "Souza@123"
 
 print(f"[migrate_billing_status] Connecting to {DB_HOST}:{DB_PORT}/{DB_NAME} as {DB_USER}...")
 

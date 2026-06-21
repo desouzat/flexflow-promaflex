@@ -224,7 +224,7 @@ const KanbanPage = () => {
     const [showFilters, setShowFilters] = useState(false)
     // FF-HARDENING-012.2 [Item 3]: Exchange/Return card modal state
     const [showExchangeModal, setShowExchangeModal] = useState(false)
-    const [exchangeForm, setExchangeForm] = useState({ cliente: '', produto: '', quantidade: '', unidade_medida: 'M2', largura: '', comprimento: '' })
+    const [exchangeForm, setExchangeForm] = useState({ po_original: '', cliente: '', produto: '', quantidade: '', unidade_medida: 'M2', largura: '', comprimento: '' })
     const [savingExchange, setSavingExchange] = useState(false)
     // FF-HARDENING-012.2 [Item 2]: Invoice PDF upload ref
     const globalInvoiceInputRef = useRef(null)
@@ -2328,6 +2328,27 @@ const KanbanPage = () => {
                                                                             );
                                                                         })()}
 
+                                                                        {/* UAT-FIX-3b: Exchange/Return card — "Avançar para PCP" button [9.3] */}
+                                                                        {(selectedPO.items?.[0]?.extra_metadata?.is_exchange_return || selectedPO.extra_metadata?.is_exchange_return) &&
+                                                                            ['SUBMITTED', 'DRAFT'].includes(selectedPO.status_macro) && isActive && (
+                                                                            <div className="mt-4 p-4 bg-emerald-50 border border-emerald-200 rounded-lg shadow-2xs">
+                                                                                <div className="flex items-center justify-between">
+                                                                                    <div>
+                                                                                        <span className="text-sm font-bold text-emerald-900 flex items-center gap-1.5">
+                                                                                            🔄 Troca / Devolução
+                                                                                        </span>
+                                                                                        <p className="text-xs text-emerald-700 mt-0.5">Card aprovado pelo Comercial. Avance para o PCP iniciar o planejamento.</p>
+                                                                                    </div>
+                                                                                    <button
+                                                                                        onClick={handleAdvanceStatus}
+                                                                                        className="inline-flex items-center justify-center px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg cursor-pointer transition-colors shadow-2xs"
+                                                                                    >
+                                                                                        Avançar para PCP →
+                                                                                    </button>
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
+
                                                                         {/* Commercial Partition Approval or Material Pause Panel */}
                                                                         {((selectedPO.status_macro === 'WAITING_COMMERCIAL_PARTITION') || (['DRAFT', 'SUBMITTED'].includes(selectedPO.status_macro) && (selectedPO.partition_reason || selectedPO.extra_metadata?.partition_reason))) && (
                                                                             <div className="mt-4 p-4 bg-purple-50 border border-purple-200 rounded-lg shadow-2xs">
@@ -2700,7 +2721,7 @@ const KanbanPage = () => {
                                                                                 {selectedPO.extra_metadata?.invoice_xml_path && (
                                                                                     <a href={getDownloadUrl(selectedPO.extra_metadata.invoice_xml_path)} target="_blank" rel="noreferrer"
                                                                                         className="text-xs text-green-600 hover:text-green-800 flex items-center gap-1 font-semibold underline">
-                                                                                        🗃️ {getCleanFilename(selectedPO.extra_metadata.invoice_xml_filename || selectedPO.extra_metadata.invoice_xml_path) || 'NF-e XML'}
+                                                                                        🗃️ {getCleanFilename(selectedPO.extra_metadata.invoice_xml_filename || selectedPO.extra_metadata.invoice_xml_path) || 'NF-e PDF 2'}
                                                                                     </a>
                                                                                 )}
                                                                             </div>
@@ -2764,7 +2785,7 @@ const KanbanPage = () => {
                                                                                     </div>
                                                                                     {/* Slot XML - FF-HARDENING-012.3 Item 2 */}
                                                                                     <div>
-                                                                                        <span className="text-xs font-semibold text-gray-600 uppercase block mb-1">Anexar NF (XML) <span className="text-gray-400 normal-case font-normal">(opcional)</span></span>
+                                                                                        <span className="text-xs font-semibold text-gray-600 uppercase block mb-1">Anexar NF (PDF Secundário) <span className="text-gray-400 normal-case font-normal">(opcional)</span></span>
                                                                                         {selectedPO.extra_metadata?.invoice_xml_path ? (
                                                                                             <div className="flex items-center gap-3">
                                                                                                 <a href={getDownloadUrl(selectedPO.extra_metadata.invoice_xml_path)} target="_blank" rel="noreferrer"
@@ -2779,7 +2800,7 @@ const KanbanPage = () => {
                                                                                         ) : (
                                                                                             <button onClick={() => globalXmlInvoiceInputRef.current?.click()}
                                                                                                 className="flex items-center gap-2 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer border-0">
-                                                                                                🗃️ Anexar NF (XML)
+                                                                                                📄 Anexar NF (PDF Secundário)
                                                                                             </button>
                                                                                         )}
                                                                                     </div>
@@ -3966,6 +3987,7 @@ const KanbanPage = () => {
                     })
                     dismissToast(toastId)
                     showSuccess('NF-e enviada com sucesso!')
+                    // UAT-FIX-2d: sync selectedPO state BEFORE fetchBoard — prevents stale state on advance-status
                     if (res.data?.po) setSelectedPO(res.data.po)
                     await fetchBoard()
                 } catch (err) {
@@ -3977,29 +3999,30 @@ const KanbanPage = () => {
             }}
         />
 
-        {/* ── FF-HARDENING-012.3 [Item 2]: Hidden invoice XML file input ── */}
+        {/* ── UAT-FIX-2: Hidden PDF Secundario file input (accepts same formats as primary) ── */}
         <input
             ref={globalXmlInvoiceInputRef}
             type="file"
-            accept=".xml"
+            accept=".pdf,.jpg,.jpeg,.png,.webp"
             style={{ display: 'none' }}
             onChange={async (e) => {
                 const file = e.target.files?.[0]
                 if (!file || !selectedPO?.id) return
                 const formData = new FormData()
                 formData.append('file', file)
-                const toastId = showLoading('Enviando XML NF-e...')
+                const toastId = showLoading('Enviando NF-e (PDF Secundário)...')
                 try {
                     const res = await api.post(`/kanban/pos/${selectedPO.id}/upload-invoice-xml`, formData, {
                         headers: { 'Content-Type': 'multipart/form-data' }
                     })
                     dismissToast(toastId)
-                    showSuccess('XML NF-e enviado com sucesso!')
+                    showSuccess('NF-e (PDF Secundário) enviado com sucesso!')
+                    // UAT-FIX-2d: sync selectedPO state BEFORE fetchBoard to prevent stale state on advance
                     if (res.data?.po) setSelectedPO(res.data.po)
                     await fetchBoard()
                 } catch (err) {
                     dismissToast(toastId)
-                    showError(err.response?.data?.detail || 'Erro ao enviar XML')
+                    showError(err.response?.data?.detail || 'Erro ao enviar NF-e secundário')
                 } finally {
                     e.target.value = ''
                 }
@@ -4019,6 +4042,15 @@ const KanbanPage = () => {
                         </p>
                     </div>
                     <div className="p-6 space-y-4">
+                        {/* UAT-FIX-3a: Nº da PO Original — mandatory */}
+                        <div>
+                            <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Nº da PO Original <span className="text-red-500">*</span></label>
+                            <input type="text" value={exchangeForm.po_original}
+                                onChange={(e) => setExchangeForm(f => ({ ...f, po_original: e.target.value }))}
+                                placeholder="Ex: 209870"
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500" />
+                            <p className="text-[10px] text-gray-400 mt-0.5">O card será criado com o número "TR-[Nº Original]"</p>
+                        </div>
                         <div>
                             <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Cliente <span className="text-red-500">*</span></label>
                             <input type="text" value={exchangeForm.cliente}
@@ -4068,17 +4100,18 @@ const KanbanPage = () => {
                         </div>
                     </div>
                     <div className="p-6 border-t border-gray-200 flex items-center justify-end gap-3">
-                        <button onClick={() => { setShowExchangeModal(false); setExchangeForm({ cliente: '', produto: '', quantidade: '', unidade_medida: 'M2', largura: '', comprimento: '' }) }}
+                        <button onClick={() => { setShowExchangeModal(false); setExchangeForm({ po_original: '', cliente: '', produto: '', quantidade: '', unidade_medida: 'M2', largura: '', comprimento: '' }) }}
                             className="px-4 py-2 text-sm font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer">
                             Cancelar
                         </button>
                         <button
-                            disabled={!exchangeForm.cliente.trim() || !exchangeForm.produto.trim() || !exchangeForm.quantidade || savingExchange}
+                            disabled={!exchangeForm.po_original.trim() || !exchangeForm.cliente.trim() || !exchangeForm.produto.trim() || !exchangeForm.quantidade || savingExchange}
                             onClick={async () => {
                                 setSavingExchange(true)
                                 const toastId = showLoading('Criando card...')
                                 try {
                                     await api.post('/kanban/exchange-cards', {
+                                        po_original: exchangeForm.po_original.trim(),
                                         cliente: exchangeForm.cliente,
                                         produto: exchangeForm.produto,
                                         quantidade: parseFloat(exchangeForm.quantidade),
@@ -4089,7 +4122,7 @@ const KanbanPage = () => {
                                     dismissToast(toastId)
                                     showSuccess('Card de Troca/Devolução criado com sucesso!')
                                     setShowExchangeModal(false)
-                                    setExchangeForm({ cliente: '', produto: '', quantidade: '', unidade_medida: 'M2', largura: '', comprimento: '' })
+                                    setExchangeForm({ po_original: '', cliente: '', produto: '', quantidade: '', unidade_medida: 'M2', largura: '', comprimento: '' })
                                     await fetchBoard()
                                 } catch (err) {
                                     dismissToast(toastId)
@@ -4099,7 +4132,7 @@ const KanbanPage = () => {
                                 }
                             }}
                             className={`px-5 py-2 text-sm font-bold rounded-lg transition-colors ${
-                                !exchangeForm.cliente.trim() || !exchangeForm.produto.trim() || !exchangeForm.quantidade || savingExchange
+                                !exchangeForm.po_original.trim() || !exchangeForm.cliente.trim() || !exchangeForm.produto.trim() || !exchangeForm.quantidade || savingExchange
                                     ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                                     : 'bg-purple-600 hover:bg-purple-700 text-white cursor-pointer'
                             }`}

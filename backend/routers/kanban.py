@@ -3496,12 +3496,19 @@ async def upload_invoice_xml(
 # tenant_id is always extracted from current_user — never accepted from body.
 # ─────────────────────────────────────────────────────────────────────────────
 class ExchangeCardRequest(BaseModel):
+    po_original: str  # [9.3] mandatory original PO ref; card named TR-[po_original]
     cliente: str
     produto: str
     quantidade: float
     unidade_medida: str
     largura: Optional[float] = None
     comprimento: Optional[float] = None
+
+    @validator("po_original")
+    def po_original_not_empty(cls, v):
+        if not v or not v.strip():
+            raise ValueError("Nº da PO Original é obrigatório")
+        return v.strip()
 
     @validator("cliente", "produto")
     def not_empty(cls, v):
@@ -3533,8 +3540,11 @@ async def create_exchange_card(
     tenant_id is always from current_user to prevent cross-tenant data leaks.
     """
     import uuid as _uuid
+    # UAT-FIX-1: Import Decimal early — needed for both PO and OrderItem Numeric fields
+    from decimal import Decimal as _Decimal
 
-    po_number = f"TR-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{str(_uuid.uuid4())[:6].upper()}"
+    # UAT-FIX-3: PO number uses original PO reference (9.3) + SLA 50% flag (9.1)
+    po_number = f"TR-{request.po_original.strip()}"
 
     new_po = PurchaseOrder(
         id=_uuid.uuid4(),
@@ -3542,7 +3552,7 @@ async def create_exchange_card(
         po_number=po_number,
         status_macro="SUBMITTED",
         created_by=current_user.id,
-        shipping_cost=0.0,
+        shipping_cost=_Decimal('0'),
         is_partitioned=False,
         partition_metadata={"client_name": request.cliente},
     )
@@ -3550,23 +3560,30 @@ async def create_exchange_card(
     db.flush()
 
     sku_code = request.produto[:50].upper().replace(" ", "_")
+    # UAT-FIX-1: Convert float inputs to Decimal to avoid TypeError with Numeric DB columns
+    _qty = _Decimal(str(request.quantidade))
+    _largura = _Decimal(str(request.largura)) if request.largura is not None else None
+    _comprimento = _Decimal(str(request.comprimento)) if request.comprimento is not None else None
+
     new_item = OrderItem(
         id=_uuid.uuid4(),
         po_id=new_po.id,
         tenant_id=current_user.tenant_id,
         sku=sku_code,
-        quantity=request.quantidade,
-        price=0.0,
+        quantity=_qty,
+        price=_Decimal('0'),
         status_item="PENDING",
         is_personalized=False,
         is_new_client=False,
         extra_metadata={
             "is_exchange_return": True,
+            "po_original": request.po_original.strip(),  # [9.3] Original PO reference
+            "sla_50pct": True,                           # [9.1] Flag for 50% SLA reduction
             "client_name": request.cliente,
             "description": request.produto,
             "unit": request.unidade_medida,
-            "largura": request.largura,
-            "comprimento": request.comprimento,
+            "largura": str(_largura) if _largura is not None else None,
+            "comprimento": str(_comprimento) if _comprimento is not None else None,
             "created_by_name": getattr(current_user, "name", str(current_user.id)),
             "created_at_manual": datetime.utcnow().isoformat(),
         },

@@ -1756,28 +1756,10 @@ const ImportPage = () => {
                                                             Exportação?
                                                         </span>
                                                     </label>
-                                                    <label className="flex items-center gap-3 cursor-pointer">
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={item.is_replacement}
-                                                            onChange={() => handleToggleReplacement(item.id)}
-                                                            className="w-5 h-5 text-purple-600 rounded focus:ring-purple-500"
-                                                        />
-                                                        <span className="text-sm font-medium text-gray-700 flex items-center gap-1">
-                                                            <RefreshCw className="w-4 h-4" />
-                                                            Troca/Reposição?
-                                                        </span>
-                                                    </label>
+                                                    {/* UAT-FIX-4: Troca/Reposição checkbox removed — exchange cards are created via Kanban manual card flow */}
                                                 </div>
 
-                                                {/* SLA Reduction Notice */}
-                                                {item.is_replacement && (
-                                                    <div className="mb-4 p-3 bg-purple-50 border border-purple-200 rounded-lg animate-pulse">
-                                                        <p className="text-sm text-purple-800">
-                                                            <strong>⚡ SLA Reduzido:</strong> Este item terá o prazo de entrega reduzido em 50% (Troca/Reposição)
-                                                        </p>
-                                                    </div>
-                                                )}
+                                                {/* UAT-FIX-4: SLA notice removed with checkbox */}
 
                                                 {/* Detalhes do Item: Dt.Entrega, Vl.Frete, % ICMS, Dt.Faturamento, Vendedor e Vl. IPI */}
                                                 <div className="mb-4 p-3.5 bg-gray-50 border border-gray-200 rounded-lg grid grid-cols-2 md:grid-cols-6 gap-4 shadow-3xs animate-fade-in">

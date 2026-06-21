@@ -120,9 +120,20 @@ async def export_pos_csv(
             # Personalized
             personalizado = "Sim" if item.is_personalized else "Não"
 
-            # Dimensions
-            largura = meta.get("largura") or meta.get("Largura") or ""
-            comprimento = meta.get("comprimento") or meta.get("Comprimento") or ""
+            # Dimensions — standard POs use "width"/"length"; manual cards use "largura"/"comprimento"
+            largura = (
+                meta.get("largura") or meta.get("Largura")
+                or meta.get("width") or meta.get("Width") or ""
+            )
+            comprimento = (
+                meta.get("comprimento") or meta.get("Comprimento")
+                or meta.get("length") or meta.get("Length") or ""
+            )
+            # Format as string if Decimal
+            if largura and largura != "":
+                largura = str(largura)
+            if comprimento and comprimento != "":
+                comprimento = str(comprimento)
 
             writer.writerow([
                 po.po_number,
