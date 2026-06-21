@@ -2337,7 +2337,7 @@ const KanbanPage = () => {
                                                                                         <span className="text-sm font-bold text-emerald-900 flex items-center gap-1.5">
                                                                                             🔄 Troca / Devolução
                                                                                         </span>
-                                                                                        <p className="text-xs text-emerald-700 mt-0.5">Card aprovado pelo Comercial. Avance para o PCP iniciar o planejamento.</p>
+                                                                                        <p className="text-xs text-emerald-700 mt-0.5">Card criado manualmente pelo PCP (PO original) para tratar troca/devolução, SLA 50% do padrão</p>
                                                                                     </div>
                                                                                     <button
                                                                                         onClick={handleAdvanceStatus}
@@ -2651,9 +2651,15 @@ const KanbanPage = () => {
                                                                                 </div>
 
                                                                                 <div>
-                                                                                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
-                                                                                        Quantidade Real Produzida <span className="text-red-500">*</span>
-                                                                                    </label>
+                                                                                    {/* FF-HARDENING-012.3: Dynamic unit label next to Quantidade Real Produzida */}
+                                                                                    {(() => {
+                                                                                        const poUnit = (selectedPO.items?.[0]?.extra_metadata?.unit || selectedPO.items?.[0]?.unit || 'UN').toUpperCase();
+                                                                                        return (
+                                                                                            <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                                                                                Quantidade Real Produzida ({poUnit}) <span className="text-red-500">*</span>
+                                                                                            </label>
+                                                                                        );
+                                                                                    })()}
                                                                                     <input
                                                                                         type="number"
                                                                                         step="1"
@@ -3274,7 +3280,13 @@ const KanbanPage = () => {
                                     )}
 
                                     {/* Advance Button - enabled only if mandatory fields are filled */}
-                                    {canAdvance(selectedPO) && !isArchived && !isPOBlocked && (
+                                    {/* UAT-FIX-3: Hide for exchange/return cards in Comercial (SUBMITTED) — use green "Avançar para PCP" panel instead */}
+                                    {canAdvance(selectedPO) && !isArchived && !isPOBlocked &&
+                                     !(selectedPO.status_macro === 'SUBMITTED' && (
+                                         selectedPO.items?.[0]?.extra_metadata?.is_exchange_return ||
+                                         selectedPO.extra_metadata?.is_exchange_return ||
+                                         (selectedPO.po_number || '').startsWith('TR-')
+                                     )) && (
                                         selectedPO.status_macro === 'SHIPPING' ? (
                                             selectedPO.parent_po_id && isPhaseADisabled ? (
                                                 <button

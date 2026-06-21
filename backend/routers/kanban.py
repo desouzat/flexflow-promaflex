@@ -1927,7 +1927,17 @@ async def advance_po_status(
         po.partition_metadata = meta
     
     # Log status transition
-    justification = "FINALIZADO" if next_status == "ARCHIVED" else None
+    # UAT-FIX-4: Log "CONFERIDO (TROCA/DEVOLUÇÃO)" for manual exchange/return card advances [5, 9.3]
+    is_exchange = (
+        any(item.extra_metadata and item.extra_metadata.get("is_exchange_return") for item in po.items)
+        if po.items else False
+    )
+    if next_status == "ARCHIVED":
+        justification = "FINALIZADO"
+    elif is_exchange and current_status == "SUBMITTED":
+        justification = "CONFERIDO (TROCA/DEVOLU\u00c7\u00c3O)"
+    else:
+        justification = None
     log_po_status_transition(
         db=db,
         po=po,

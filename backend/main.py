@@ -194,6 +194,32 @@ async def lifespan(app: FastAPI):
             ]
         )
 
+        # Step 5 — FF-HARDENING-012.2: Recreate check_po_status_macro to include BILLING
+        # The two ALTER TABLE statements are wrapped individually so that if the DROP
+        # fails for any reason, the connection is rolled back before the ADD is attempted.
+        # On re-deploy (constraint already correct) the DROP succeeds silently and the
+        # ADD also succeeds — total operation is fully idempotent.
+        _run_ddl_step(
+            "alter_status_constraint_billing: dropped old check_po_status_macro constraint",
+            [
+                "ALTER TABLE purchase_orders DROP CONSTRAINT IF EXISTS check_po_status_macro"
+            ]
+        )
+        _run_ddl_step(
+            "alter_status_constraint_billing: recreated check_po_status_macro with BILLING",
+            [
+                """ALTER TABLE purchase_orders ADD CONSTRAINT check_po_status_macro CHECK (
+                    status_macro IN (
+                        'DRAFT', 'SUBMITTED', 'PCP', 'APPROVED', 'MANUFACTURING',
+                        'BILLING', 'SHIPPING', 'WAITING_DISPATCH',
+                        'ARCHIVED', 'ARCHIVED_PARTITIONED', 'COMPLETED', 'CANCELLED',
+                        'WAITING_COMMERCIAL_PARTITION', 'WAITING_MATERIAL', 'ANALISE_CREDITO',
+                        'FINANCE'
+                    )
+                )"""
+            ]
+        )
+
         print("[DEBUG] Background DB schema initialization completed.")
 
     async def init_db_background():

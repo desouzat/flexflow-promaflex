@@ -85,6 +85,12 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
     }
 
     const isReplacement = safepo.is_replacement || safepo.extra_metadata?.is_replacement || false
+    // UAT-FIX-2: Manual exchange/return card detection [9.3]
+    const isExchangeReturn = (
+        safepo.items?.[0]?.extra_metadata?.is_exchange_return ||
+        safepo.extra_metadata?.is_exchange_return ||
+        (safepo.po_number || '').startsWith('TR-')
+    ) || false
 
     const marginInfo = useMemo(() => {
         if (safepo.margin_percentage === '***' || safepo.margin_global === '***') {
@@ -321,6 +327,15 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
                     </div>
                 )}
 
+                {/* UAT-FIX-2: Exchange/Return card badge (compact) */}
+                {isExchangeReturn && (
+                    <div className="mb-2">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-orange-100 text-orange-800 border border-orange-400">
+                            🔄 TROCA/DEVOLUÇÃO
+                        </span>
+                    </div>
+                )}
+
                 <p className="font-bold text-gray-800 mb-2" style={{ fontSize: '12px' }}>
                     Cliente: {safepo.client_name}
                 </p>
@@ -416,6 +431,19 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
                     <RefreshCw className="w-4 h-4 text-cyan-600 animate-spin-slow" />
                     <span className="text-xs font-extrabold text-cyan-700">
                         🔥 SLA DE TROCA ATIVO
+                    </span>
+                </div>
+            )}
+
+            {/* UAT-FIX-2: Orange/Red Badge for Exchange/Return card (manual, TR-prefixed) */}
+            {isExchangeReturn && (
+                <div className="mb-3 px-3 py-2 bg-orange-50 border-2 border-orange-400 rounded-lg flex items-center gap-2" title="🔄 TROCA/DEVOLUÇÃO — SLA 50% do padrão">
+                    <RefreshCw className="w-4 h-4 text-orange-600" />
+                    <span className="text-xs font-extrabold text-orange-700">
+                        🔄 TROCA/DEVOLUÇÃO
+                    </span>
+                    <span className="ml-auto text-[9px] font-bold text-orange-500 bg-orange-100 border border-orange-300 rounded px-1.5 py-0.5">
+                        SLA 50%
                     </span>
                 </div>
             )}
