@@ -318,14 +318,19 @@ const ImportPage = () => {
                     { column_name: 'Cliente', field_type: 'client_name' },
                     { column_name: 'Id Produto', field_type: 'sku' },
                     { column_name: 'Qtd', field_type: 'quantity' },
-                    // Optional ONET fields (22-field structure)
-                    { column_name: 'Descr. Produto', field_type: 'description' },
+                    // Optional ONET fields — FINAL PRODUCTION SCHEMA (Ewaldo 2026-07-01)
+                    // Primary column name changed from 'Descr. Produto' → 'Produto'
+                    { column_name: 'Produto', field_type: 'description' },
                     { column_name: 'Unidade', field_type: 'unit' },
                     { column_name: 'Largura', field_type: 'width' },
                     { column_name: 'Comprimento', field_type: 'length' },
                     { column_name: 'Lead Time', field_type: 'lead_time' },
-                    { column_name: 'Data Entrega', field_type: 'delivery_date' },
-                    { column_name: 'Data Faturamento', field_type: 'billing_date' },
+                    // Dt.Entrega  → order entry/receipt date
+                    { column_name: 'Dt.Entrega', field_type: 'delivery_date' },
+                    // Dt.Faturamento → SLA base / expected_delivery_date [9.1]
+                    { column_name: 'Dt.Faturamento', field_type: 'billing_date' },
+                    // Data do Pedido → original PO creation date
+                    { column_name: 'Data do Pedido', field_type: 'order_date' },
                     { column_name: '% ICMS', field_type: 'icms_percent' },
                     { column_name: 'Bloqueio Faturamento', field_type: 'block_status' },
                     { column_name: 'Saldo', field_type: 'balance' },
@@ -334,10 +339,14 @@ const ImportPage = () => {
                     { column_name: 'Frete', field_type: 'freight' },
                     { column_name: 'Vendedor', field_type: 'salesperson' },
                     { column_name: 'IPI', field_type: 'ipi' },
-                    // NEW: Financial value fields
+                    // Financial value fields
                     { column_name: 'VlUnit', field_type: 'unit_value' },
                     { column_name: 'Total Item', field_type: 'item_total_value' },
-                    { column_name: 'Vl.Pedido', field_type: 'po_total_value' }
+                    { column_name: 'Vl.Pedido', field_type: 'po_total_value' },
+                    // NEW: ONET final production schema — carrier & structured code
+                    { column_name: 'Codigo Estruturado', field_type: 'codigo_estruturado' },
+                    { column_name: 'Cod. Transportadora', field_type: 'carrier_code' },
+                    { column_name: 'Nome Transportadora', field_type: 'carrier_name' }
                 ]
             }
             formData.append('mapping_json', JSON.stringify(defaultMapping))
@@ -372,8 +381,8 @@ const ImportPage = () => {
                             description: item.description || null,
                             quantity: item.quantity,
                             price_unit: item.price_unit || 0,
-                            unit_value: item.unit_value || null,  // Vl.Unit from ONET
-                            item_total_value: item.item_total_value || null,  // Total Item from ONET
+                            unit_value: item.unit_value || null,
+                            item_total_value: item.item_total_value || null,
                             // Risk fields from ONET
                             block_status: item.block_status || null,
                             balance: item.balance || null,
@@ -389,6 +398,11 @@ const ImportPage = () => {
                             freight: item.freight || null,
                             salesperson: item.salesperson || null,
                             ipi: item.ipi || null,
+                            // ONET final schema — new fields (2026-07-01)
+                            order_date: item.order_date || null,
+                            codigo_estruturado: item.codigo_estruturado || null,
+                            carrier_code: item.carrier_code || null,
+                            carrier_name: item.carrier_name || null,
                             // Metadata flags
                             is_personalized: false,
                             is_new_client: false,
@@ -397,7 +411,7 @@ const ImportPage = () => {
                             customization_notes: '',
                             attachment_path: null,
                             needs_mapping: false,
-                            is_checked: false,  // Default to unchecked so the user is forced to check each SKU manually
+                            is_checked: false,
                             extra_metadata: {
                                 finance_justification: null
                             }
@@ -454,6 +468,11 @@ const ImportPage = () => {
                                 freight: item.freight || null,
                                 salesperson: item.salesperson || null,
                                 ipi: item.ipi || null,
+                                // ONET final schema — new fields (2026-07-01)
+                                order_date: item.order_date || null,
+                                codigo_estruturado: item.codigo_estruturado || null,
+                                carrier_code: item.carrier_code || null,
+                                carrier_name: item.carrier_name || null,
                                 // Metadata flags
                                 is_personalized: false,
                                 is_new_client: false,
@@ -462,7 +481,7 @@ const ImportPage = () => {
                                 customization_notes: '',
                                 attachment_path: null,
                                 needs_mapping: false,
-                                is_checked: false,  // Default to unchecked so the user is forced to check each SKU manually
+                                is_checked: false,
                                 extra_metadata: {
                                     finance_justification: null
                                 }
@@ -895,6 +914,11 @@ const ImportPage = () => {
                             lead_time: item.lead_time !== null && item.lead_time !== undefined ? parseInt(item.lead_time, 10) : null,
                             delivery_date: item.delivery_date || null,
                             billing_date: item.billing_date || null,
+                            // ONET final schema — new fields forwarded to backend (2026-07-01)
+                            order_date: item.order_date || null,
+                            codigo_estruturado: item.codigo_estruturado || null,
+                            carrier_code: item.carrier_code || null,
+                            carrier_name: item.carrier_name || null,
                             icms_percent: item.icms_percent !== null && item.icms_percent !== undefined ? parseBRL(item.icms_percent) : null,
                             freight: item.freight !== null && item.freight !== undefined ? parseBRL(item.freight) : null,
                             salesperson: item.salesperson || null,
@@ -1512,6 +1536,12 @@ const ImportPage = () => {
                                                                 <p className="font-semibold text-gray-900 text-sm truncate" title={item.description || 'N/A'}>
                                                                     {item.description || 'N/A'}
                                                                 </p>
+                                                                {/* ONET 2026-07-01: Código Estruturado — primary product code reference */}
+                                                                {item.codigo_estruturado && (
+                                                                    <span className="inline-flex items-center mt-0.5 px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 font-mono tracking-wide">
+                                                                        🔖 {item.codigo_estruturado}
+                                                                    </span>
+                                                                )}
                                                             </div>
                                                             <div>
                                                                 <label className="text-xs font-medium text-gray-600">Quantidade</label>
@@ -1761,8 +1791,8 @@ const ImportPage = () => {
 
                                                 {/* UAT-FIX-4: SLA notice removed with checkbox */}
 
-                                                {/* Detalhes do Item: Dt.Entrega, Vl.Frete, % ICMS, Dt.Faturamento, Vendedor e Vl. IPI */}
-                                                <div className="mb-4 p-3.5 bg-gray-50 border border-gray-200 rounded-lg grid grid-cols-2 md:grid-cols-6 gap-4 shadow-3xs animate-fade-in">
+                                                {/* Detalhes do Item: Dt.Entrega, Vl.Frete, % ICMS, Dt.Faturamento, Vendedor, Vl. IPI, Data do Pedido */}
+                                                <div className="mb-4 p-3.5 bg-gray-50 border border-gray-200 rounded-lg grid grid-cols-2 md:grid-cols-7 gap-4 shadow-3xs animate-fade-in">
                                                     <div>
                                                         <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-0.5">Dt. Entrega</label>
                                                         <p className="text-xs font-semibold text-gray-850 font-sans">{formatDate(item.delivery_date)}</p>
@@ -1801,6 +1831,13 @@ const ImportPage = () => {
                                                                 : 'R$ 0,00'}
                                                         </p>
                                                     </div>
+                                                    {/* ONET 2026-07-01: Data do Pedido */}
+                                                    {item.order_date && (
+                                                        <div>
+                                                            <label className="text-[10px] font-bold text-blue-500 uppercase tracking-wider block mb-0.5">Data do Pedido</label>
+                                                            <p className="text-xs font-semibold text-blue-800 font-sans">{formatDate(item.order_date)}</p>
+                                                        </div>
+                                                    )}
                                                 </div>
 
                                                 {/* Personalizado: Shows BOTH textarea AND upload */}

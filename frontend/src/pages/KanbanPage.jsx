@@ -633,7 +633,13 @@ const KanbanPage = () => {
             }
             setLocalFields({
                 ...meta,
-                production_impediment: impediment
+                production_impediment: impediment,
+                // ONET 2026-07-01: pre-seed transportadora from carrier_name in partition_metadata
+                // (exposed as extra_metadata in the API response, since extra_metadata = partition_metadata)
+                // Only pre-fill if the operator has not already manually saved a transportadora value
+                transportadora: meta.transportadora ||
+                    (selectedPO.partition_metadata?.carrier_name || '') ||
+                    (selectedPO.extra_metadata?.carrier_name || '')
             })
             const pMeta = selectedPO.partition_metadata || {}
             const checklist = pMeta.logistics_checklist || meta.logistics_checklist || {}
@@ -1864,8 +1870,8 @@ const KanbanPage = () => {
 
                             {/* Modal Content */}
                             <div className="flex-1 overflow-y-auto p-6">
-                                {/* PO Summary */}
-                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                                {/* PO Summary — 5-card header: Vl.Pedido | SLA Entrega | Itens | Status | Data Pedido */}
+                                <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
                                     <div className="bg-gray-50 p-4 rounded-lg">
                                         <div className="flex items-center gap-2 text-gray-600 mb-1">
                                             <DollarSign className="w-4 h-4" />
@@ -1878,7 +1884,7 @@ const KanbanPage = () => {
                                     <div className="bg-gray-50 p-4 rounded-lg">
                                         <div className="flex items-center gap-2 text-gray-600 mb-1">
                                             <Calendar className="w-4 h-4" />
-                                            <span className="text-xs font-medium">Dt.Entrega</span>
+                                            <span className="text-xs font-medium">Dt.Entrega (SLA)</span>
                                         </div>
                                         <p className="text-lg font-bold text-gray-900">
                                             {formatDate(selectedPO.expected_delivery_date)}
@@ -1900,6 +1906,21 @@ const KanbanPage = () => {
                                         </div>
                                         <p className="text-lg font-bold text-gray-900 capitalize">
                                             {selectedPO.status || 'N/A'}
+                                        </p>
+                                    </div>
+                                    {/* ONET 2026-07-01: Data do Pedido — original order creation date
+                                         partition_metadata.order_date is exposed as extra_metadata.order_date by the API */}
+                                    <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
+                                        <div className="flex items-center gap-2 text-blue-600 mb-1">
+                                            <Calendar className="w-4 h-4" />
+                                            <span className="text-xs font-medium">Data do Pedido</span>
+                                        </div>
+                                        <p className="text-lg font-bold text-blue-900">
+                                            {formatDate(
+                                                selectedPO.extra_metadata?.order_date ||
+                                                selectedPO.partition_metadata?.order_date ||
+                                                selectedPO.order_date
+                                            ) || '—'}
                                         </p>
                                     </div>
                                 </div>
@@ -2533,7 +2554,8 @@ const KanbanPage = () => {
                                                                                     <table className="w-full text-xs text-left text-gray-500 border border-gray-200 rounded-lg overflow-hidden">
                                                                                         <thead className="text-[10px] text-gray-700 uppercase bg-gray-100 border-b border-gray-200">
                                                                                             <tr>
-                                                                                                <th scope="col" className="px-3 py-2 font-bold">SKU</th>
+                                                                                                <th scope="col" className="px-3 py-2 font-bold">SKU / Produto</th>
+                                                                                                <th scope="col" className="px-3 py-2 font-bold">Cód. Estruturado</th>
                                                                                                 <th scope="col" className="px-3 py-2 font-bold text-center">Quantidade</th>
                                                                                                 <th scope="col" className="px-3 py-2 font-bold text-center">Status de Custo</th>
                                                                                                 <th scope="col" className="px-3 py-2 font-bold text-center">Ações</th>
@@ -2569,6 +2591,16 @@ const KanbanPage = () => {
                                                                                                                     </span>
                                                                                                                 )}
                                                                                                             </td>
+                                                                                                            {/* ONET 2026-07-01: Código Estruturado column */}
+                                                                                                            <td className="px-3 py-2">
+                                                                                                                {(item.extra_metadata?.codigo_estruturado || item.codigo_estruturado) ? (
+                                                                                                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 font-mono tracking-wide">
+                                                                                                                        {item.extra_metadata?.codigo_estruturado || item.codigo_estruturado}
+                                                                                                                    </span>
+                                                                                                                ) : (
+                                                                                                                    <span className="text-[10px] text-gray-400">—</span>
+                                                                                                                )}
+                                                                                                            </td>
                                                                                                             <td className="px-3 py-2 text-center text-gray-700 font-medium">{item.quantity}</td>
                                                                                                             <td className="px-3 py-2 text-center">
                                                                                                                 {hasCost ? (
@@ -2599,7 +2631,7 @@ const KanbanPage = () => {
                                                                                                 })
                                                                                             ) : (
                                                                                                 <tr>
-                                                                                                    <td colSpan="4" className="px-3 py-4 text-center text-gray-400 italic">
+                                                                                                    <td colSpan="5" className="px-3 py-4 text-center text-gray-400 italic">
                                                                                                         Nenhum item cadastrado neste pedido
                                                                                                     </td>
                                                                                                 </tr>

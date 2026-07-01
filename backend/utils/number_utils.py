@@ -66,6 +66,11 @@ def clean_brazilian_number(value: Any) -> float:
     if isinstance(value, (int, float)):
         if math.isnan(value) or math.isinf(value):
             return 0.0
+        # ERP NOISE GUARD (Item 13 / 8.3):
+        # ONET legacy systems encode NULL as a large negative sentinel (e.g. -3.35565E+17).
+        # Any float below -9_999_999 is treated as corrupt system noise and coerced to 0.0.
+        if value < -9_999_999.0:
+            return 0.0
         return float(value) if value >= 0.0 else 0.0
 
     from decimal import Decimal
@@ -73,6 +78,9 @@ def clean_brazilian_number(value: Any) -> float:
         try:
             f = float(value)
             if math.isnan(f) or math.isinf(f):
+                return 0.0
+            # ERP NOISE GUARD: same sentinel check for Decimal inputs
+            if f < -9_999_999.0:
                 return 0.0
             return f if f >= 0.0 else 0.0
         except (ValueError, TypeError):
