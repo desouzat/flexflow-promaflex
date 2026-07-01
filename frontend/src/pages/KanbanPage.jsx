@@ -1916,11 +1916,12 @@ const KanbanPage = () => {
                                             <span className="text-xs font-medium">Data do Pedido</span>
                                         </div>
                                         <p className="text-lg font-bold text-blue-900">
-                                            {formatDate(
+                                            {(
                                                 selectedPO.extra_metadata?.order_date ||
                                                 selectedPO.partition_metadata?.order_date ||
-                                                selectedPO.order_date
-                                            ) || '—'}
+                                                selectedPO.order_date ||
+                                                'N/A'
+                                            )}
                                         </p>
                                     </div>
                                 </div>
