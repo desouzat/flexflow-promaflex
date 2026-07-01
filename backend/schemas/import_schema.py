@@ -10,43 +10,54 @@ from enum import Enum
 
 
 class ImportFieldType(str, Enum):
-    """Types of fields that can be imported - 22-field ONET structure"""
+    """Types of fields that can be imported - ONET final production schema"""
     # Core identification fields
     PO_NUMBER = "po_number"  # Pedido
     CLIENT_NAME = "client_name"  # Cliente
     SKU = "sku"  # SKU
-    DESCRIPTION = "description"  # Descrição
-    
+    DESCRIPTION = "description"  # Produto (renamed from "Descr. Produto")
+
     # Quantity and unit fields
     QUANTITY = "quantity"  # Qtd
     UNIT = "unit"  # Unidade
-    
+
     # Dimensional fields
     WIDTH = "width"  # Largura
     LENGTH = "length"  # Comprimento
-    
+
     # Timeline fields
     LEAD_TIME = "lead_time"  # Lead Time
-    DELIVERY_DATE = "delivery_date"  # Data Entrega
-    BILLING_DATE = "billing_date"  # Data Faturamento
-    
+    # Dt.Entrega  → order entry/receipt date (stored in extra_metadata["delivery_date"])
+    DELIVERY_DATE = "delivery_date"
+    # Dt.Faturamento → contractual delivery = SLA base / expected_delivery_date [9.1]
+    BILLING_DATE = "billing_date"
+    # Data do Pedido → original order/creation date
+    ORDER_DATE = "order_date"
+
     # Financial/Tax fields
     ICMS_PERCENT = "icms_percent"  # % ICMS
     IPI = "ipi"  # IPI
     FREIGHT = "freight"  # Frete
     PAYMENT_TERMS = "payment_terms"  # Condição Pagamento
-    
+
     # NEW: Financial value fields (22-field structure)
     UNIT_VALUE = "unit_value"  # Vl.Unit
     ITEM_TOTAL_VALUE = "item_total_value"  # Total Item
     PO_TOTAL_VALUE = "po_total_value"  # Valor Total do Pedido
-    
+
     # Status/Control fields
     BLOCK_STATUS = "block_status"  # Bloqueio
     BALANCE = "balance"  # Saldo
     DELAY = "delay"  # Atraso
     SALESPERSON = "salesperson"  # Vendedor
-    
+
+    # NEW: ONET final production schema fields
+    # Ewaldo 2026-07-01: Codigo Estruturado → primary product code reference
+    CODIGO_ESTRUTURADO = "codigo_estruturado"
+    # Ewaldo 2026-07-01: Carrier fields → default Faturamento transportadora
+    CARRIER_CODE = "carrier_code"   # Cod. Transportadora
+    CARRIER_NAME = "carrier_name"   # Nome Transportadora
+
     # Legacy cost fields (kept for backward compatibility)
     PRICE_UNIT = "price_unit"
     COST_MP = "cost_mp"  # Matéria Prima
@@ -154,24 +165,33 @@ class ImportItemData(BaseModel):
     
     # Timeline fields
     lead_time: Optional[int] = Field(None, description="Lead time in days")
-    delivery_date: Optional[str] = Field(None, description="Delivery date (DD/MM/YYYY)")
-    billing_date: Optional[str] = Field(None, description="Billing date (DD/MM/YYYY)")
-    
+    # delivery_date = Dt.Entrega (order entry/receipt date)
+    delivery_date: Optional[str] = Field(None, description="Order entry date Dt.Entrega (DD/MM/YYYY)")
+    # billing_date = Dt.Faturamento → SLA base / expected delivery date [9.1]
+    billing_date: Optional[str] = Field(None, description="Contractual delivery date Dt.Faturamento (DD/MM/YYYY) — SLA base")
+    # order_date = Data do Pedido (original PO creation/order date)
+    order_date: Optional[str] = Field(None, description="Original order date Data do Pedido (DD/MM/YYYY)")
+
     # Financial/Tax fields
     icms_percent: Optional[Decimal] = Field(None, ge=0, le=100, description="ICMS percentage")
     ipi: Optional[Decimal] = Field(None, ge=0, description="IPI value")
     freight: Optional[Decimal] = Field(None, ge=0, description="Freight cost")
     payment_terms: Optional[str] = Field(None, max_length=100, description="Payment terms")
-    
+
     # NEW: Financial value fields (22-field structure)
     unit_value: Optional[Decimal] = Field(None, ge=0, description="Unit value (Vl.Unit)")
     item_total_value: Optional[Decimal] = Field(None, ge=0, description="Item total value (Total Item)")
-    
+
     # Status/Control fields
     block_status: Optional[str] = Field(None, max_length=50, description="Block/Hold status")
     balance: Optional[Decimal] = Field(None, description="Balance amount")
     delay: Optional[int] = Field(None, description="Delay in days")
     salesperson: Optional[str] = Field(None, max_length=100, description="Salesperson name")
+
+    # NEW: ONET final production schema fields (Ewaldo 2026-07-01)
+    codigo_estruturado: Optional[str] = Field(None, max_length=100, description="Codigo Estruturado — primary product code reference")
+    carrier_code: Optional[str] = Field(None, max_length=50, description="Cod. Transportadora")
+    carrier_name: Optional[str] = Field(None, max_length=200, description="Nome Transportadora")
     
     # Legacy cost fields (optional for backward compatibility)
     price_unit: Optional[float] = None
@@ -553,10 +573,15 @@ class ConfirmStagingItem(BaseModel):
     lead_time: Optional[int] = None
     delivery_date: Optional[str] = None
     billing_date: Optional[str] = None
+    order_date: Optional[str] = None          # Data do Pedido
     icms_percent: Optional[float] = None
     freight: Optional[float] = None
     salesperson: Optional[str] = None
     ipi: Optional[float] = None
+    # NEW: ONET final production schema fields
+    codigo_estruturado: Optional[str] = None  # Codigo Estruturado
+    carrier_code: Optional[str] = None        # Cod. Transportadora
+    carrier_name: Optional[str] = None        # Nome Transportadora
     extra_metadata: ConfirmStagingItemExtra
 
 

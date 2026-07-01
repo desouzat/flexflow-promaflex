@@ -990,7 +990,10 @@ async def get_handoff_history(
         elif std_from == "COMERCIAL" and std_to == "FINANCEIRO":
             mapped_reason = "ENVIO ANÁLISE DE CRÉDITO"
         
-        # Force "CONFERIDO" for all forward transitions and eliminate "[Outros]" for standard movements
+        # Force "CONFERIDO" for all forward transitions and eliminate "[Outros]" for standard movements.
+        # EXCEPTION: If the stored justification is already "CONFERIDO (TROCA/DEVOLUÇÃO)", preserve it
+        # exactly — do NOT overwrite with plain "CONFERIDO". This flag is written by advance_po_status
+        # for exchange/return cards and must surface unchanged in the timeline UI.
         is_forward_transition = False
         if std_from == "COMERCIAL" and std_to == "PCP":
             is_forward_transition = True
@@ -1002,10 +1005,14 @@ async def get_handoff_history(
             is_forward_transition = True
         elif std_from == "FINANCEIRO" and std_to == "ARQUIVADO":
             is_forward_transition = True
-            
+
+        EXCHANGE_LABEL = "CONFERIDO (TROCA/DEVOLU\u00c7\u00c3O)"
         if is_forward_transition:
-            if mapped_reason != "CONFERIDO FRETE":
+            if mapped_reason != "CONFERIDO FRETE" and log.justification != EXCHANGE_LABEL:
                 mapped_reason = "CONFERIDO"
+            elif log.justification == EXCHANGE_LABEL:
+                # Preserve the exchange/return label verbatim
+                mapped_reason = EXCHANGE_LABEL
 
         if mapped_reason:
             reason = mapped_reason
@@ -1927,14 +1934,25 @@ async def advance_po_status(
         po.partition_metadata = meta
     
     # Log status transition
-    # UAT-FIX-4: Log "CONFERIDO (TROCA/DEVOLUÇÃO)" for manual exchange/return card advances [5, 9.3]
+    # UAT-FIX-4 (extended): Log "CONFERIDO (TROCA/DEVOLUÇÃO)" for ALL forward advances of
+    # exchange/return cards, not just the first Comercial→PCP hop.
+    # Detection order:
+    #   1. Any OrderItem has is_exchange_return flag in extra_metadata
+    #   2. partition_metadata has is_exchange_return flag (set by ExchangeCard endpoint)
+    #   3. po_number starts with "TR-" (naming convention for manual exchange cards)
     is_exchange = (
         any(item.extra_metadata and item.extra_metadata.get("is_exchange_return") for item in po.items)
         if po.items else False
     )
+    if not is_exchange:
+        is_exchange = bool(po.partition_metadata and po.partition_metadata.get("is_exchange_return"))
+    if not is_exchange:
+        is_exchange = (po.po_number or "").startswith("TR-")
+
     if next_status == "ARCHIVED":
         justification = "FINALIZADO"
-    elif is_exchange and current_status == "SUBMITTED":
+    elif is_exchange:
+        # All forward transitions of exchange/return cards use this label
         justification = "CONFERIDO (TROCA/DEVOLU\u00c7\u00c3O)"
     else:
         justification = None
@@ -3422,7 +3440,12 @@ async def upload_invoice_pdf(
     current_user: UserInfo = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Upload the Faturamento NF-e document for a PO. Saves GCS URL to extra_metadata.invoice_pdf_path."""
+    """Upload the Faturamento NF-e document for a PO.
+    Saves GCS path to partition_metadata.invoice_pdf_path.
+    NOTE: PurchaseOrder has no extra_metadata column — all PO-level metadata
+    lives in partition_metadata (JSONB). The frontend mapper exposes
+    partition_metadata as selectedPO.extra_metadata, so frontend reads are
+    already correct."""
     po = db.query(PurchaseOrder).filter(
         PurchaseOrder.id == po_id,
         PurchaseOrder.tenant_id == current_user.tenant_id
@@ -3438,15 +3461,18 @@ async def upload_invoice_pdf(
     safe_filename = get_safe_filename(file.filename) if file.filename else attachment_filename
     print(f"[INVOICE-PDF] PO={po.po_number} | GCS path={saved_path}")
 
-    extra = dict(po.extra_metadata or {})
-    extra["invoice_pdf_path"] = saved_path
-    extra["invoice_pdf_filename"] = safe_filename
-    extra["invoice_pdf_uploaded_by"] = str(current_user.id)
-    extra["invoice_pdf_uploaded_at"] = datetime.utcnow().isoformat()
-    po.extra_metadata = extra
+    # PurchaseOrder stores all metadata in partition_metadata (JSONB).
+    # The frontend mapper returns partition_metadata as selectedPO.extra_metadata,
+    # so selectedPO.extra_metadata.invoice_pdf_path resolves correctly in the UI.
+    pmeta = dict(po.partition_metadata or {})
+    pmeta["invoice_pdf_path"] = saved_path
+    pmeta["invoice_pdf_filename"] = safe_filename
+    pmeta["invoice_pdf_uploaded_by"] = str(current_user.id)
+    pmeta["invoice_pdf_uploaded_at"] = datetime.utcnow().isoformat()
+    po.partition_metadata = pmeta
     po.updated_at = datetime.utcnow()
     db.add(po)
-    flag_modified(po, "extra_metadata")
+    flag_modified(po, "partition_metadata")  # mandatory: tells SQLAlchemy the JSONB dict changed
     db.commit()
     db.refresh(po)
 
@@ -3464,11 +3490,15 @@ async def upload_invoice_pdf(
 @router.post("/pos/{po_id}/upload-invoice-xml")
 async def upload_invoice_xml(
     po_id: str,
-    file: UploadFile = File(..., description="Invoice XML file"),
+    file: UploadFile = File(..., description="Invoice PDF (secondary slot) or image"),
     current_user: UserInfo = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Upload the Faturamento NF-e XML for a PO. Saves GCS URL to extra_metadata.invoice_xml_path."""
+    """Upload the secondary Faturamento document (PDF Secundário) for a PO.
+    Saves GCS path to partition_metadata.invoice_xml_path.
+    NOTE: Despite the endpoint name containing 'xml', this slot accepts PDF/images
+    and is displayed as 'NF-e PDF Secundário' in the UI. The path key
+    invoice_xml_path is kept for backward DB compatibility."""
     po = db.query(PurchaseOrder).filter(
         PurchaseOrder.id == po_id,
         PurchaseOrder.tenant_id == current_user.tenant_id
@@ -3484,15 +3514,16 @@ async def upload_invoice_xml(
     safe_filename = get_safe_filename(file.filename) if file.filename else attachment_filename
     print(f"[INVOICE-XML] PO={po.po_number} | GCS path={saved_path}")
 
-    extra = dict(po.extra_metadata or {})
-    extra["invoice_xml_path"] = saved_path
-    extra["invoice_xml_filename"] = safe_filename
-    extra["invoice_xml_uploaded_by"] = str(current_user.id)
-    extra["invoice_xml_uploaded_at"] = datetime.utcnow().isoformat()
-    po.extra_metadata = extra
+    # PurchaseOrder stores all metadata in partition_metadata (JSONB).
+    pmeta = dict(po.partition_metadata or {})
+    pmeta["invoice_xml_path"] = saved_path
+    pmeta["invoice_xml_filename"] = safe_filename
+    pmeta["invoice_xml_uploaded_by"] = str(current_user.id)
+    pmeta["invoice_xml_uploaded_at"] = datetime.utcnow().isoformat()
+    po.partition_metadata = pmeta
     po.updated_at = datetime.utcnow()
     db.add(po)
-    flag_modified(po, "extra_metadata")
+    flag_modified(po, "partition_metadata")  # mandatory: tells SQLAlchemy the JSONB dict changed
     db.commit()
     db.refresh(po)
 

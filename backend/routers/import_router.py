@@ -835,12 +835,28 @@ def confirm_staging(
                 po_status_macro = PurchaseOrder.STATUS_APPROVED
 
             # 3. Create new PurchaseOrder
-            first_item_delivery = None
+            # ONET 2026-07-01 DATE ROLE ALIGNMENT:
+            #   billing_date (Dt.Faturamento) → contractual delivery = SLA base = expected_delivery_date [9.1]
+            #   delivery_date (Dt.Entrega)    → order entry/receipt date (stored separately)
+            #   order_date (Data do Pedido)   → original order creation date
+            first_item_sla_delivery = None  # Dt.Faturamento → expected_delivery_date
+            first_item_entry_date = None    # Dt.Entrega    → order entry date
+            first_item_order_date = None    # Data do Pedido → original order date
+            # Carrier fields → from first item that has them, promoted to PO level
+            po_carrier_code = None
+            po_carrier_name = None
             if po.items:
                 for item in po.items:
-                    if item.delivery_date:
-                        first_item_delivery = item.delivery_date
-                        break
+                    if first_item_sla_delivery is None and item.billing_date:
+                        first_item_sla_delivery = item.billing_date
+                    if first_item_entry_date is None and item.delivery_date:
+                        first_item_entry_date = item.delivery_date
+                    if first_item_order_date is None and item.order_date:
+                        first_item_order_date = item.order_date
+                    if po_carrier_code is None and item.carrier_code:
+                        po_carrier_code = item.carrier_code
+                    if po_carrier_name is None and item.carrier_name:
+                        po_carrier_name = item.carrier_name
 
             # Extract fields from staging items payload
             is_personalized = any(item.extra_metadata.is_personalized for item in po.items if item.extra_metadata)
@@ -893,7 +909,11 @@ def confirm_staging(
                 po_total_value=po.po_total_value,
                 partition_metadata={
                     "client_name": po.client_name,
-                    "expected_delivery_date": first_item_delivery,
+                    # SLA base: Dt.Faturamento (billing_date) → expected_delivery_date [9.1]
+                    "expected_delivery_date": first_item_sla_delivery,
+                    # Supplementary dates stored for reference / audit
+                    "order_entry_date": first_item_entry_date,    # Dt.Entrega
+                    "order_date": first_item_order_date,           # Data do Pedido
                     "packaging_type": po.packaging_type,
                     "is_personalized": is_personalized,
                     "is_new_client": is_new_client,
@@ -902,7 +922,10 @@ def confirm_staging(
                     "customization_notes": customization_notes,
                     "attachment_path": attachment_path,
                     "additional_costs": po.additional_costs,
-                    "business_unit": po.business_unit
+                    "business_unit": po.business_unit,
+                    # Carrier fields → default Faturamento stage carrier dropdown in UI
+                    "carrier_code": po_carrier_code,
+                    "carrier_name": po_carrier_name,
                 }
             )
             db.add(new_po)
@@ -950,12 +973,19 @@ def confirm_staging(
                     "width": item.width,
                     "length": item.length,
                     "lead_time": item.lead_time,
+                    # Dt.Entrega → order entry/receipt date
                     "delivery_date": item.delivery_date,
+                    # Dt.Faturamento → SLA contractual delivery date [9.1]
                     "billing_date": item.billing_date,
+                    # Data do Pedido → original order creation date
+                    "order_date": item.order_date,
                     "icms_percent": item.icms_percent,
                     "freight": item.freight,
                     "salesperson": item.salesperson,
                     "ipi": item.ipi,
+
+                    # ONET 2026-07-01: new structured code field
+                    "codigo_estruturado": item.codigo_estruturado,
 
                     "client_name": po.client_name
                 }

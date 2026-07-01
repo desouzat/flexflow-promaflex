@@ -84,6 +84,8 @@ const LogisticsUploadSection = ({
         }
     }
 
+    // MOBILE-FIX: UploadSlot uses block-level layout that never overflows.
+    // Buttons have min-height 44px to meet iOS/Android tap-target guidelines.
     const UploadSlot = ({ field, label, path }) => (
         <div style={{
             border: '2px dashed #a5f3fc',
@@ -92,7 +94,9 @@ const LogisticsUploadSection = ({
             background: 'rgba(6,182,212,0.04)',
             display: 'flex',
             flexDirection: 'column',
-            gap: '10px',
+            gap: '12px',
+            width: '100%',
+            boxSizing: 'border-box',
         }}>
             {/* Label + status pill */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
@@ -122,8 +126,8 @@ const LogisticsUploadSection = ({
 
             {/* Action area */}
             {path ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#059669', fontSize: '13px', fontWeight: 600 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#059669', fontSize: '13px', fontWeight: 600, flexWrap: 'wrap' }}>
                         <CheckCircle style={{ width: 16, height: 16, flexShrink: 0 }} />
                         Evidência salva com sucesso!
                     </div>
@@ -140,10 +144,15 @@ const LogisticsUploadSection = ({
                             type="button"
                             onClick={() => triggerUpload(field)}
                             style={{
-                                fontSize: '10px', color: '#6b7280',
+                                fontSize: '12px', color: '#6b7280',
                                 background: '#f3f4f6', border: '1px solid #d1d5db',
-                                borderRadius: '6px', padding: '3px 10px',
-                                cursor: 'pointer', alignSelf: 'flex-start',
+                                borderRadius: '8px',
+                                // MOBILE-FIX: generous tap target — min 44px height
+                                padding: '10px 16px',
+                                minHeight: '44px',
+                                cursor: 'pointer',
+                                alignSelf: 'stretch',
+                                fontWeight: 600,
                             }}
                         >
                             Substituir arquivo
@@ -158,21 +167,24 @@ const LogisticsUploadSection = ({
                     style={{
                         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                         gap: '8px',
-                        padding: '9px 18px',
+                        // MOBILE-FIX: full width + min 48px height for comfortable tap
+                        width: '100%',
+                        padding: '12px 18px',
+                        minHeight: '48px',
                         background: isDisabled ? '#fdba74' : '#ea580c',
                         color: '#fff',
                         border: 'none',
-                        borderRadius: '8px',
-                        fontSize: '13px', fontWeight: 700,
+                        borderRadius: '10px',
+                        fontSize: '14px', fontWeight: 700,
                         cursor: isDisabled ? 'not-allowed' : 'pointer',
                         opacity: isDisabled ? 0.6 : 1,
                         transition: 'background 0.15s',
-                        alignSelf: 'flex-start',
+                        boxSizing: 'border-box',
                     }}
                     onMouseEnter={e => { if (!isDisabled) e.currentTarget.style.background = '#c2410c' }}
                     onMouseLeave={e => { if (!isDisabled) e.currentTarget.style.background = '#ea580c' }}
                 >
-                    <Upload style={{ width: 15, height: 15 }} />
+                    <Upload style={{ width: 16, height: 16 }} />
                     Enviar Foto
                 </button>
             )}
@@ -180,14 +192,16 @@ const LogisticsUploadSection = ({
     )
 
     return (
-        <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: '16px', marginTop: '8px' }}>
+        // MOBILE-FIX: overflow-hidden prevents horizontal scroll on narrow screens.
+        // auto-fit + minmax(0, 1fr) ensures slots collapse to single column on mobile.
+        <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: '16px', marginTop: '8px', overflowX: 'hidden' }}>
             <h5 style={{
                 fontSize: '11px', fontWeight: 700, textTransform: 'uppercase',
-                letterSpacing: '0.08em', color: '#374151', marginBottom: '12px',
+                letterSpacing: '0.08em', color: '#374151', marginBottom: '14px',
             }}>
                 Upload de Evidências Logísticas (Obrigatório)
             </h5>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(0, 1fr))', gap: '14px' }}>
                 <UploadSlot
                     field="foto_carga_path"
                     label="Foto da Carga Carregada"
@@ -2913,30 +2927,33 @@ const KanbanPage = () => {
                                                                                     <h5 className="text-xs font-bold uppercase text-cyan-800 mb-3 tracking-wide flex items-center gap-1.5">
                                                                                         🚚 Checklist Operacional de Saída (Obrigatório)
                                                                                     </h5>
-                                                                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                                                                        <label className={`flex items-center gap-3 bg-white p-2.5 border border-cyan-200 rounded-lg shadow-2xs transition-all select-none ${isPhaseADisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:border-cyan-300'}`}>
+                                                                                    {/* MOBILE-FIX: checklist collapses to single column on small screens.
+                                                                                         Labels and checkboxes have generous padding for easy tapping.
+                                                                                         grid-cols-1 always on mobile, md:grid-cols-3 on tablet+ */}
+                                                                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                                                                        <label className={`flex items-center gap-3 bg-white py-3 px-4 border border-cyan-200 rounded-lg shadow-2xs transition-all select-none ${isPhaseADisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:border-cyan-300'}`}>
                                                                                             <input type="checkbox" checked={logisticsChecklist.endereco_conferido || false}
                                                                                                 onChange={(e) => handleChecklistChange('endereco_conferido', e.target.checked)}
-                                                                                                className={`w-5 h-5 rounded focus:ring-cyan-500 ${isPhaseADisabled ? 'cursor-not-allowed text-cyan-400' : 'text-cyan-600 cursor-pointer'}`}
+                                                                                                className={`w-6 h-6 rounded focus:ring-cyan-500 ${isPhaseADisabled ? 'cursor-not-allowed text-cyan-400' : 'text-cyan-600 cursor-pointer'}`}
                                                                                                 disabled={isPhaseADisabled} />
-                                                                                            <span className="text-xs text-gray-700 font-semibold">Endereço Conferido</span>
-                                                                                            {logisticsChecklist.endereco_conferido && <span className="text-green-600 ml-auto text-sm">✓</span>}
+                                                                                            <span className="text-sm text-gray-700 font-semibold">Endereço Conferido</span>
+                                                                                            {logisticsChecklist.endereco_conferido && <span className="text-green-600 ml-auto text-base">✓</span>}
                                                                                         </label>
-                                                                                        <label className={`flex items-center gap-3 bg-white p-2.5 border border-cyan-200 rounded-lg shadow-2xs transition-all select-none ${isPhaseADisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:border-cyan-300'}`}>
+                                                                                        <label className={`flex items-center gap-3 bg-white py-3 px-4 border border-cyan-200 rounded-lg shadow-2xs transition-all select-none ${isPhaseADisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:border-cyan-300'}`}>
                                                                                             <input type="checkbox" checked={logisticsChecklist.peso_validado || false}
                                                                                                 onChange={(e) => handleChecklistChange('peso_validado', e.target.checked)}
-                                                                                                className={`w-5 h-5 rounded focus:ring-cyan-500 ${isPhaseADisabled ? 'cursor-not-allowed text-cyan-400' : 'text-cyan-600 cursor-pointer'}`}
+                                                                                                className={`w-6 h-6 rounded focus:ring-cyan-500 ${isPhaseADisabled ? 'cursor-not-allowed text-cyan-400' : 'text-cyan-600 cursor-pointer'}`}
                                                                                                 disabled={isPhaseADisabled} />
-                                                                                            <span className="text-xs text-gray-700 font-semibold">Peso Validado</span>
-                                                                                            {logisticsChecklist.peso_validado && <span className="text-green-600 ml-auto text-sm">✓</span>}
+                                                                                            <span className="text-sm text-gray-700 font-semibold">Peso Validado</span>
+                                                                                            {logisticsChecklist.peso_validado && <span className="text-green-600 ml-auto text-base">✓</span>}
                                                                                         </label>
-                                                                                        <label className={`flex items-center gap-3 bg-white p-2.5 border border-cyan-200 rounded-lg shadow-2xs transition-all select-none ${isPhaseADisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:border-cyan-300'}`}>
+                                                                                        <label className={`flex items-center gap-3 bg-white py-3 px-4 border border-cyan-200 rounded-lg shadow-2xs transition-all select-none ${isPhaseADisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:border-cyan-300'}`}>
                                                                                             <input type="checkbox" checked={logisticsChecklist.etiquetas_impressas || false}
                                                                                                 onChange={(e) => handleChecklistChange('etiquetas_impressas', e.target.checked)}
-                                                                                                className={`w-5 h-5 rounded focus:ring-cyan-500 ${isPhaseADisabled ? 'cursor-not-allowed text-cyan-400' : 'text-cyan-600 cursor-pointer'}`}
+                                                                                                className={`w-6 h-6 rounded focus:ring-cyan-500 ${isPhaseADisabled ? 'cursor-not-allowed text-cyan-400' : 'text-cyan-600 cursor-pointer'}`}
                                                                                                 disabled={isPhaseADisabled} />
-                                                                                            <span className="text-xs text-gray-700 font-semibold">Etiquetas Impressas</span>
-                                                                                            {logisticsChecklist.etiquetas_impressas && <span className="text-green-600 ml-auto text-sm">✓</span>}
+                                                                                            <span className="text-sm text-gray-700 font-semibold">Etiquetas Impressas</span>
+                                                                                            {logisticsChecklist.etiquetas_impressas && <span className="text-green-600 ml-auto text-base">✓</span>}
                                                                                         </label>
                                                                                     </div>
                                                                                 </div>

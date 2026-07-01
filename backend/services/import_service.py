@@ -48,13 +48,19 @@ FIELD_ALIASES = {
     ImportFieldType.CLIENT_NAME: ["Cliente", "Nome Cliente", "Client Name", "Client"],
     ImportFieldType.SKU: ["Id Produto", "SKU", "Código", "Cod", "Product SKU", "Item SKU"],
     ImportFieldType.QUANTITY: ["Qtd", "Quantidade", "Qty", "Quantity"],
-    ImportFieldType.DESCRIPTION: ["Descr. Produto", "Descrição", "Descricao", "Description", "Desc"],
+    # ONET 2026-07-01: primary column renamed from "Descr. Produto" to "Produto".
+    # Both aliases kept for backward compatibility with older spreadsheet versions.
+    ImportFieldType.DESCRIPTION: ["Produto", "Descr. Produto", "Descrição", "Descricao", "Description", "Desc"],
     ImportFieldType.UNIT: ["Unidade", "Un", "Unit"],
     ImportFieldType.WIDTH: ["Largura", "Width"],
     ImportFieldType.LENGTH: ["Comprimento", "Length"],
     ImportFieldType.LEAD_TIME: ["Lead Time", "LeadTime", "Prazo"],
+    # Dt.Entrega → order entry/receipt date (kept in extra_metadata["delivery_date"])
     ImportFieldType.DELIVERY_DATE: ["Data Entrega", "Delivery Date", "Dt Entrega", "Dt.Entrega"],
+    # Dt.Faturamento → contractual delivery = SLA base / expected_delivery_date [9.1]
     ImportFieldType.BILLING_DATE: ["Data Faturamento", "Billing Date", "Dt Faturamento", "Dt.Faturamento"],
+    # Data do Pedido → original order/creation date
+    ImportFieldType.ORDER_DATE: ["Data do Pedido", "Dt.Pedido", "Dt Pedido", "Order Date"],
     ImportFieldType.ICMS_PERCENT: ["% ICMS", "ICMS", "ICMS%"],
     ImportFieldType.IPI: ["IPI", "Vl. IPI"],
     ImportFieldType.FREIGHT: ["Frete", "Freight", "Vl.Frete"],
@@ -65,7 +71,11 @@ FIELD_ALIASES = {
     ImportFieldType.BLOCK_STATUS: ["Bloqueio Faturamento", "Bloqueio", "Status Bloqueio", "Block Status", "Block"],
     ImportFieldType.BALANCE: ["Saldo", "Balance", "Saldo Devedor"],
     ImportFieldType.DELAY: ["Atraso", "Delay", "Dias Médio Atraso"],
-    ImportFieldType.SALESPERSON: ["Vendedor", "Salesperson", "Sales Person"]
+    ImportFieldType.SALESPERSON: ["Vendedor", "Salesperson", "Sales Person"],
+    # ONET 2026-07-01: new carrier and structured-code columns
+    ImportFieldType.CODIGO_ESTRUTURADO: ["Codigo Estruturado", "Código Estruturado", "Cod Estruturado", "Cod. Estruturado"],
+    ImportFieldType.CARRIER_CODE: ["Cod. Transportadora", "Cod Transportadora", "Cód. Transportadora", "Carrier Code"],
+    ImportFieldType.CARRIER_NAME: ["Nome Transportadora", "Transportadora", "Carrier Name", "Carrier"],
 }
 
 
@@ -594,7 +604,7 @@ class ImportService:
             sales_col = field_to_column[ImportFieldType.SALESPERSON]
             if not pd.isna(row[sales_col]):
                 data['salesperson'] = str(row[sales_col]).strip()
-        
+
         # IPI
         if ImportFieldType.IPI in field_to_column:
             ipi_col = field_to_column[ImportFieldType.IPI]
@@ -607,6 +617,42 @@ class ImportService:
                         data['ipi'] = Decimal(str(row[ipi_col]))
                 except (InvalidOperation, ValueError):
                     pass
+
+        # ============================================================
+        # ONET FINAL PRODUCTION SCHEMA FIELDS (Ewaldo 2026-07-01)
+        # ============================================================
+
+        # Order Date (Data do Pedido) → original PO creation/order date
+        if ImportFieldType.ORDER_DATE in field_to_column:
+            order_date_col = field_to_column[ImportFieldType.ORDER_DATE]
+            if not pd.isna(row[order_date_col]):
+                data['order_date'] = str(row[order_date_col]).strip()
+
+        # Codigo Estruturado → primary product code reference (stored in item.extra_metadata)
+        if ImportFieldType.CODIGO_ESTRUTURADO in field_to_column:
+            ce_col = field_to_column[ImportFieldType.CODIGO_ESTRUTURADO]
+            if not pd.isna(row[ce_col]):
+                val = str(row[ce_col]).strip()
+                # Remove trailing ".0" from numeric codes parsed as float by pandas
+                if val.endswith('.0') and val[:-2].isdigit():
+                    val = val[:-2]
+                data['codigo_estruturado'] = val
+
+        # Cod. Transportadora → carrier code (stored in po.partition_metadata)
+        if ImportFieldType.CARRIER_CODE in field_to_column:
+            cc_col = field_to_column[ImportFieldType.CARRIER_CODE]
+            if not pd.isna(row[cc_col]):
+                val = str(row[cc_col]).strip()
+                if val.endswith('.0') and val[:-2].isdigit():
+                    val = val[:-2]
+                data['carrier_code'] = val
+
+        # Nome Transportadora → carrier name (stored in po.partition_metadata;
+        # also defaults the Faturamento stage carrier dropdown in the UI)
+        if ImportFieldType.CARRIER_NAME in field_to_column:
+            cn_col = field_to_column[ImportFieldType.CARRIER_NAME]
+            if not pd.isna(row[cn_col]):
+                data['carrier_name'] = str(row[cn_col]).strip()
         
         # ============================================================
         # NEW: FINANCIAL VALUE FIELDS (22-field structure)
@@ -792,6 +838,7 @@ class ImportService:
                     lead_time=row_data.get('lead_time'),
                     delivery_date=row_data.get('delivery_date'),
                     billing_date=row_data.get('billing_date'),
+                    order_date=row_data.get('order_date'),
                     icms_percent=row_data.get('icms_percent'),
                     block_status=row_data.get('block_status'),
                     balance=row_data.get('balance'),
@@ -802,7 +849,11 @@ class ImportService:
                     ipi=row_data.get('ipi'),
                     # NEW: Financial value fields
                     unit_value=row_data.get('unit_value'),
-                    item_total_value=row_data.get('item_total_value')
+                    item_total_value=row_data.get('item_total_value'),
+                    # NEW: ONET final production schema fields
+                    codigo_estruturado=row_data.get('codigo_estruturado'),
+                    carrier_code=row_data.get('carrier_code'),
+                    carrier_name=row_data.get('carrier_name'),
                 )
                 po_groups[po_number]['items'].append(item)
             except Exception as e:
