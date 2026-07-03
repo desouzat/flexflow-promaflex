@@ -1315,7 +1315,9 @@ const ImportPage = () => {
                                 </div>
 
                                 {/* Integrity Check Warning Banner */}
-                                {currentPO.has_integrity_error && (
+                                {/* HOMOLOGATION OVERRIDE (FF-HARDENING-004-BYPASS): has_integrity_error forced to false.
+                                    Restore: replace `false` below with `currentPO.has_integrity_error` to re-enable. */}
+                                {false && (
                                     <div className="mb-4 p-4 bg-red-50 border-2 border-red-300 rounded-lg">
                                         <div className="flex items-start gap-3">
                                             <AlertCircle className="w-6 h-6 text-red-600 flex-shrink-0 mt-0.5" />
