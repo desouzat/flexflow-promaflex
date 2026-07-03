@@ -238,7 +238,8 @@ async def lifespan(app: FastAPI):
                     status_macro IN (
                         'DRAFT', 'SUBMITTED', 'PCP', 'APPROVED', 'MANUFACTURING',
                         'BILLING', 'SHIPPING', 'WAITING_DISPATCH',
-                        'ARCHIVED', 'ARCHIVED_PARTITIONED', 'COMPLETED', 'CANCELLED'
+                        'ARCHIVED', 'ARCHIVED_PARTITIONED', 'COMPLETED', 'CANCELLED',
+                        'WAITING_COMMERCIAL_PARTITION'
                     )
                 )"""
             ]

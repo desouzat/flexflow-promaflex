@@ -1915,9 +1915,9 @@ async def advance_po_status(
         meta = po.partition_metadata or {}
         # Only validate for standard (non-FASE_A partition) flow
         if po.parent_po_id is None or meta.get("freight_allocated"):
-            nfe = meta.get("numero_nfe") or (po.extra_metadata or {}).get("numero_nfe") or ""
-            carrier = meta.get("transportadora") or (po.extra_metadata or {}).get("transportadora") or ""
-            emission = meta.get("data_emissao_nf") or (po.extra_metadata or {}).get("data_emissao_nf") or ""
+            nfe = meta.get("numero_nfe") or (po.partition_metadata or {}).get("numero_nfe") or ""
+            carrier = meta.get("transportadora") or (po.partition_metadata or {}).get("transportadora") or ""
+            emission = meta.get("data_emissao_nf") or (po.partition_metadata or {}).get("data_emissao_nf") or ""
             if not nfe:
                 validation_errors.append("Número NF-e é obrigatório")
             if not carrier:
