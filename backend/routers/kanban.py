@@ -337,7 +337,7 @@ async def get_kanban_board(
         ("Faturamento", ["BILLING"]),
         ("Expedição", ["SHIPPING", "WAITING_DISPATCH"]),
         ("Financeiro", ["FINANCE", "AUDIT_PENDING", "ANALISE_CREDITO"]),
-        ("Concluídos", ["ARCHIVED", "ARCHIVED_PARTITIONED", "COMPLETED"])
+        ("Concluídos", ["ARCHIVED", "ARCHIVED_PARTITIONED", "COMPLETED", "CANCELLED"])  # FF-HARDENING-013: cancelled cards render in Concluídos
     ]
     
     # Group POs by status
@@ -1136,6 +1136,105 @@ async def update_po_area_fields(
     return {
         "success": True,
         "partition_metadata": po.partition_metadata
+    }
+
+
+# ─── FF-HARDENING-013 Issue B: Per-SKU production metrics endpoint ──────────
+
+class ItemProductionUpdate(BaseModel):
+    """Per-item production metrics for a single SKU."""
+    item_id: str
+    status_producao: Optional[str] = None
+    qtd_real_produzida: Optional[float] = None
+    perda_tecnica: Optional[float] = None
+
+
+class ProductionUpdateBody(BaseModel):
+    """Body for the bulk per-SKU production update endpoint."""
+    items: List[ItemProductionUpdate]
+
+
+@router.post("/pos/{po_id}/production")
+async def save_production_per_sku(
+    po_id: str,
+    body: ProductionUpdateBody,
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    FF-HARDENING-013 [Issue B]: Save per-SKU production metrics.
+
+    Receives an array of item updates and writes status_producao,
+    qtd_real_produzida, and perda_tecnica into each OrderItem.extra_metadata.
+    This keeps production data at the item level for fine-grained per-SKU
+    reporting, rather than aggregating at the PO level.
+
+    No schema migrations required — values are stored inside the existing
+    OrderItem.extra_metadata JSONB column.
+    """
+    import uuid as _uuid
+    try:
+        _uuid.UUID(po_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Purchase Order {po_id} not found")
+
+    po = db.query(PurchaseOrder).filter(
+        PurchaseOrder.id == po_id,
+        PurchaseOrder.tenant_id == current_user.tenant_id
+    ).first()
+
+    if not po:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Purchase Order {po_id} not found")
+
+    if po.status_macro in ("ARCHIVED", "ARCHIVED_PARTITIONED", "COMPLETED", "CANCELLED"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Não é permitido editar produção de um pedido finalizado/cancelado."
+        )
+
+    from sqlalchemy.orm.attributes import flag_modified as _flag_modified_prod
+
+    # Build a fast lookup of item_id → item ORM object
+    item_map = {str(item.id): item for item in po.items}
+    updated_items = []
+
+    for update in body.items:
+        item = item_map.get(update.item_id)
+        if not item:
+            continue  # skip unknown item IDs gracefully
+
+        if item.extra_metadata is None:
+            item.extra_metadata = {}
+
+        item_meta = dict(item.extra_metadata)
+
+        if update.status_producao is not None:
+            item_meta["status_producao"] = update.status_producao
+        if update.qtd_real_produzida is not None:
+            item_meta["qtd_real_produzida"] = update.qtd_real_produzida
+        if update.perda_tecnica is not None:
+            item_meta["perda_tecnica"] = update.perda_tecnica
+
+        item_meta["production_updated_at"] = datetime.utcnow().isoformat()
+        item_meta["production_updated_by"] = current_user.name or current_user.email
+
+        item.extra_metadata = item_meta
+        _flag_modified_prod(item, "extra_metadata")
+        item.updated_at = datetime.utcnow()
+
+        updated_items.append({
+            "item_id": str(item.id),
+            "sku": item.sku,
+            "extra_metadata": item_meta
+        })
+
+    po.updated_at = datetime.utcnow()
+    db.commit()
+
+    return {
+        "success": True,
+        "updated_count": len(updated_items),
+        "items": updated_items
     }
 
 
@@ -2251,35 +2350,74 @@ async def commercial_reject(
         )
         
     from_status = po.status_macro
-    po.status_macro = "ARCHIVED"
+    po.status_macro = "CANCELLED"
     po.updated_at = datetime.utcnow()
-    
+
     if po.partition_metadata is None:
         po.partition_metadata = {}
     meta = dict(po.partition_metadata)
     meta["rejection_flag"] = "REJEITADO COMERCIAL"
     meta["commercial_rejection_reason"] = body.justification
+    meta["cancelled_by"] = current_user.name or current_user.email
+    meta["cancelled_at"] = datetime.utcnow().isoformat()
     po.partition_metadata = meta
-    
-    # Log status transition
+
+    # FF-HARDENING-013 Issue A: Log with the canonical CONFERIDO action text
     log_po_status_transition(
         db=db,
         po=po,
         from_status=from_status,
-        to_status="ARCHIVED",
+        to_status="CANCELLED",
         current_user=current_user,
-        justification=f"REJEITADO COMERCIAL: {body.justification}",
-        extra_data={"action_type": "COMMERCIAL_REJECT", "rejection_flag": "REJEITADO COMERCIAL"}
+        justification="CONFERIDO - NÃO APROVADO PARTIÇÃO (CANCELADO)",
+        extra_data={
+            "action_type": "COMMERCIAL_REJECT",
+            "rejection_flag": "REJEITADO COMERCIAL",
+            "rejection_reason": body.justification
+        }
     )
-    
+
+    # FF-HARDENING-013 Issue A: Cascade CANCELLED to child POs (e.g. C1/C2 in SUBMITTED)
+    child_pos = db.query(PurchaseOrder).filter(
+        PurchaseOrder.parent_po_id == po.id,
+        PurchaseOrder.tenant_id == current_user.tenant_id
+    ).all()
+    cancelled_at_str = datetime.utcnow().isoformat()
+    for child in child_pos:
+        if child.status_macro not in ("CANCELLED", "ARCHIVED", "ARCHIVED_PARTITIONED", "COMPLETED"):
+            child_from_status = child.status_macro
+            child.status_macro = "CANCELLED"
+            child.updated_at = datetime.utcnow()
+            child_meta = dict(child.partition_metadata or {})
+            child_meta["rejection_flag"] = "REJEITADO COMERCIAL"
+            child_meta["commercial_rejection_reason"] = body.justification
+            child_meta["cancelled_with_parent"] = str(po.id)
+            child_meta["cancelled_at"] = cancelled_at_str
+            child.partition_metadata = child_meta
+            from sqlalchemy.orm.attributes import flag_modified as _flag_child
+            _flag_child(child, "partition_metadata")
+            log_po_status_transition(
+                db=db,
+                po=child,
+                from_status=child_from_status,
+                to_status="CANCELLED",
+                current_user=current_user,
+                justification="CONFERIDO - NÃO APROVADO PARTIÇÃO (CANCELADO)",
+                extra_data={
+                    "action_type": "COMMERCIAL_REJECT_CASCADE",
+                    "parent_po_id": str(po.id),
+                    "parent_po_number": po.po_number,
+                }
+            )
+
     from sqlalchemy.orm.attributes import flag_modified
     flag_modified(po, "partition_metadata")
     db.commit()
     db.refresh(po)
-    
+
     return {
         "success": True,
-        "message": "Pedido rejeitado e arquivado pelo Comercial com sucesso",
+        "message": "Partição rejeitada e cancelada pelo Comercial com sucesso",
         "po_id": po_id,
         "status": po.status_macro
     }

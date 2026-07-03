@@ -63,6 +63,9 @@ async def export_pos_csv(
         "PERSONALIZADO",
         "LARGURA",
         "COMPRIMENTO",
+        "STATUS PRODUÇÃO",
+        "QTD REAL PRODUZIDA",
+        "PERDA TÉCNICA",
     ])
 
     for po in pos:
@@ -94,6 +97,9 @@ async def export_pos_csv(
                 "",
                 "",
                 "",
+                "",  # STATUS PRODUÇÃO
+                "",  # QTD REAL PRODUZIDA
+                "",  # PERDA TÉCNICA
             ])
             continue
 
@@ -146,6 +152,13 @@ async def export_pos_csv(
                 )
             comprimento = str(raw_comprimento) if raw_comprimento not in (None, "") else ""
 
+            # FF-HARDENING-013 Item 13A: per-SKU production metrics from item.extra_metadata
+            status_producao = meta.get("status_producao") or ""
+            qtd_real_produzida = meta.get("qtd_real_produzida")
+            qtd_real_str = str(qtd_real_produzida) if qtd_real_produzida is not None else ""
+            perda_tecnica = meta.get("perda_tecnica")
+            perda_str = str(perda_tecnica) if perda_tecnica is not None else ""
+
             writer.writerow([
                 po.po_number,
                 item_client,
@@ -156,6 +169,9 @@ async def export_pos_csv(
                 personalizado,
                 largura,
                 comprimento,
+                status_producao,
+                qtd_real_str,
+                perda_str,
             ])
 
     # ── Stream response with BOM for Excel UTF-8 compatibility ───────────────

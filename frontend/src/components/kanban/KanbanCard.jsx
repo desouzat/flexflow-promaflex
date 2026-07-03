@@ -319,6 +319,15 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
                     </div>
                 )}
 
+                {/* FF-HARDENING-013 Issue A: Red badge for CANCELLED status */}
+                {safepo.status_macro === 'CANCELLED' && (
+                    <div className="mb-2">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-red-100 text-red-800 border border-red-400">
+                            ❌ CANCELADO
+                        </span>
+                    </div>
+                )}
+
                 {isReplacement && (
                     <div className="mb-2">
                         <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold bg-cyan-100 text-cyan-800 border border-cyan-300">
@@ -423,6 +432,15 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
                         </span>
                     </div>
                 )
+            )}
+
+            {/* FF-HARDENING-013 Issue A: Red badge for CANCELLED status (full view) */}
+            {safepo.status_macro === 'CANCELLED' && (
+                <div className="mb-3 px-3 py-2 bg-red-50 border-2 border-red-400 rounded-lg flex items-center gap-2">
+                    <span className="text-xs font-extrabold text-red-700 flex items-center gap-1.5">
+                        <span>❌</span> CANCELADO
+                    </span>
+                </div>
             )}
 
             {/* Cyan Badge for Replacement (Troca/Reposição) */}

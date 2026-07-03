@@ -349,6 +349,9 @@ const KanbanPage = () => {
 
     const [savingFields, setSavingFields] = useState(false)
     const [localFields, setLocalFields] = useState({})
+    // FF-HARDENING-013 Issue B: per-item production metrics map { itemId: {status_producao, qtd_real_produzida, perda_tecnica} }
+    const [itemProductionFields, setItemProductionFields] = useState({})
+    const [savingProduction, setSavingProduction] = useState(false)
 
     // FF-HARDENING-008: File input refs — kept as useRef so LogisticsUploadSection
     // can call .click() via the passed ref props. The actual change listener is
@@ -653,6 +656,19 @@ const KanbanPage = () => {
             // FF-HARDENING-006: Restore previously saved SLA justification values
             setSlaJustificationCategory(selectedPO.sla_justification_category || '')
             setSlaJustificationText(selectedPO.sla_justification_text || '')
+            // FF-HARDENING-013 Issue B: Seed per-item production fields from each item's extra_metadata
+            const initItemProd = {}
+            if (selectedPO.items && selectedPO.items.length > 0) {
+                selectedPO.items.forEach(item => {
+                    const im = item.extra_metadata || {}
+                    initItemProd[item.id] = {
+                        status_producao: im.status_producao || '',
+                        qtd_real_produzida: im.qtd_real_produzida != null ? String(im.qtd_real_produzida) : '',
+                        perda_tecnica: im.perda_tecnica != null ? String(im.perda_tecnica) : ''
+                    }
+                })
+            }
+            setItemProductionFields(initItemProd)
         } else {
             setLocalFields({})
             setLogisticsChecklist({
@@ -664,6 +680,7 @@ const KanbanPage = () => {
             })
             setSlaJustificationCategory('')
             setSlaJustificationText('')
+            setItemProductionFields({})
         }
     }, [selectedPO])
 
@@ -774,6 +791,40 @@ const KanbanPage = () => {
             showError('Falha ao salvar as alterações do setor.')
         } finally {
             setSavingFields(false)
+        }
+    }
+
+    // FF-HARDENING-013 Issue B: Save per-SKU production metrics to backend
+    const handleSaveProductionItems = async () => {
+        if (!selectedPO) return
+        const items = Object.entries(itemProductionFields).map(([item_id, fields]) => ({
+            item_id,
+            status_producao: fields.status_producao || null,
+            qtd_real_produzida: fields.qtd_real_produzida !== '' ? parseFloat(fields.qtd_real_produzida) : null,
+            perda_tecnica: fields.perda_tecnica !== '' ? parseFloat(fields.perda_tecnica) : null
+        }))
+        if (items.length === 0) return
+        setSavingProduction(true)
+        try {
+            const response = await api.post(`/kanban/pos/${selectedPO.id}/production`, { items })
+            if (response.data.success) {
+                // Reflect updated extra_metadata back into selectedPO.items for display consistency
+                setSelectedPO(prev => ({
+                    ...prev,
+                    items: (prev.items || []).map(item => {
+                        const updated = response.data.items?.find(u => u.item_id === item.id)
+                        if (updated) {
+                            return { ...item, extra_metadata: updated.extra_metadata }
+                        }
+                        return item
+                    })
+                }))
+            }
+        } catch (err) {
+            console.error('Error saving production items:', err)
+            showError('Falha ao salvar dados de produção por SKU.')
+        } finally {
+            setSavingProduction(false)
         }
     }
 
@@ -1216,7 +1267,8 @@ const KanbanPage = () => {
             'WAITING_MATERIAL': 'PCP',
             'ARCHIVED_PARTITIONED': 'Concluídos',
             'ARCHIVED': 'Concluídos',
-            'COMPLETED': 'Concluídos'
+            'COMPLETED': 'Concluídos',
+            'CANCELLED': 'Concluídos'  // FF-HARDENING-013 Issue 1: cancelled partition cards render in Concluídos
         };
         const upper = String(status).toUpperCase();
         return statusMap[status] || statusMap[upper] || status || 'Comercial';
@@ -1391,13 +1443,20 @@ const KanbanPage = () => {
         }
 
         if (selectedPO.status === 'Produção/Embalagem') {
-            const statusProd = meta.status_producao || ''
-            const qReal = parseFloat(meta.qtd_real_produzida)
-            
-            return (
-                (statusProd === 'Finalizado' || statusProd === 'FINISH' || statusProd === 'Concluído') &&
-                !isNaN(qReal) && qReal > 0
-            )
+            // FF-HARDENING-013 Issue B: validate ALL items have Concluído + qtd_real_produzida > 0
+            const items = selectedPO.items || []
+            if (items.length === 0) return false
+            return items.every(item => {
+                const iProd = itemProductionFields[item.id] || {}
+                const iMeta = item.extra_metadata || {}
+                const statusProd = iProd.status_producao || iMeta.status_producao || ''
+                const qRealStr = iProd.qtd_real_produzida !== undefined ? iProd.qtd_real_produzida : (iMeta.qtd_real_produzida != null ? String(iMeta.qtd_real_produzida) : '')
+                const qReal = parseFloat(qRealStr)
+                return (
+                    (statusProd === 'Finalizado' || statusProd === 'FINISH' || statusProd === 'Concluído') &&
+                    !isNaN(qReal) && qReal > 0
+                )
+            })
         }
 
         // FF-HARDENING-012.2: Faturamento (BILLING) — NF-e, Transportadora, emission date required
@@ -1455,11 +1514,22 @@ const KanbanPage = () => {
         }
 
         if (selectedPO.status === 'Produção/Embalagem') {
-            const statusProd = meta.status_producao || '';
-            const qReal = parseFloat(meta.qtd_real_produzida);
-            
-            if (statusProd !== 'Finalizado' && statusProd !== 'FINISH' && statusProd !== 'Concluído') missing.push('Status de Produção (Concluído)');
-            if (isNaN(qReal) || qReal <= 0) missing.push('Quantidade Real Produzida (>0)');
+            // FF-HARDENING-013 Issue B: check ALL items for production completion
+            const items = selectedPO.items || []
+            const incompleteItems = items.filter(item => {
+                const iProd = itemProductionFields[item.id] || {}
+                const iMeta = item.extra_metadata || {}
+                const statusProd = iProd.status_producao || iMeta.status_producao || ''
+                const qRealStr = iProd.qtd_real_produzida !== undefined ? iProd.qtd_real_produzida : (iMeta.qtd_real_produzida != null ? String(iMeta.qtd_real_produzida) : '')
+                const qReal = parseFloat(qRealStr)
+                return !(
+                    (statusProd === 'Finalizado' || statusProd === 'FINISH' || statusProd === 'Concluído') &&
+                    !isNaN(qReal) && qReal > 0
+                )
+            })
+            if (incompleteItems.length > 0) {
+                missing.push(`Produção incompleta em ${incompleteItems.length} SKU(s): ${incompleteItems.map(i => i.sku).join(', ')}`)
+            }
         }
 
         // FF-HARDENING-012.2: Faturamento stage missing fields
@@ -1539,7 +1609,7 @@ const KanbanPage = () => {
         )
     }
 
-    const isArchived = selectedPO ? (['ARCHIVED', 'ARCHIVED_PARTITIONED', 'COMPLETED'].includes(selectedPO.status_macro) || selectedPO.status === 'Concluídos') : false;
+    const isArchived = selectedPO ? (['ARCHIVED', 'ARCHIVED_PARTITIONED', 'COMPLETED', 'CANCELLED'].includes(selectedPO.status_macro) || selectedPO.status === 'Concluídos') : false;
 
     return (
         <>
@@ -2717,84 +2787,121 @@ const KanbanPage = () => {
                                                                 {stageName === 'Produção/Embalagem' && (
                                                                     <div className="space-y-4">
                                                                         {!isActive ? (
-                                                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                                                                                <div>
-                                                                                    <span className="text-xs text-gray-500 font-semibold uppercase block">Status de Produção</span>
-                                                                                    <span className="font-semibold text-gray-850">
-                                                                                        {['FINISH', 'Finalizado', 'Concluído'].includes(selectedPO.extra_metadata?.status_producao) ? 'Concluído (FINISH)' : 'Em andamento (START)'}
-                                                                                    </span>
-                                                                                </div>
-                                                                                <div>
-                                                                                    <span className="text-xs text-gray-500 font-semibold uppercase block">Quantidade Real Produzida</span>
-                                                                                    <span className="font-semibold text-gray-855">{selectedPO.extra_metadata?.qtd_real_produzida || '0'} {(selectedPO.items?.[0]?.extra_metadata?.unit || selectedPO.items?.[0]?.unit || 'UN').toUpperCase()}</span>
-                                                                                </div>
-                                                                                <div>
-                                                                                    <span className="text-xs text-gray-500 font-semibold uppercase block">Perda Técnica</span>
-                                                                                    <span className="font-semibold text-gray-850">{selectedPO.extra_metadata?.perda_tecnica || '0'} {(selectedPO.items?.[0]?.extra_metadata?.unit || selectedPO.items?.[0]?.unit || 'un').toUpperCase()}</span>
-                                                                                </div>
+                                                                            // Read-only view: show per-SKU production summary
+                                                                            <div className="space-y-3">
+                                                                                {(selectedPO.items && selectedPO.items.length > 0) ? selectedPO.items.map(item => {
+                                                                                    const iMeta = item.extra_metadata || {}
+                                                                                    const poUnit = (iMeta.unit || item.unit || 'UN').toUpperCase()
+                                                                                    const statusProd = iMeta.status_producao || ''
+                                                                                    return (
+                                                                                        <div key={item.id} className="p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm">
+                                                                                            <div className="text-xs font-bold text-gray-700 uppercase mb-2">{item.sku}{iMeta.description ? ` — ${iMeta.description}` : ''}</div>
+                                                                                            <div className="grid grid-cols-3 gap-3">
+                                                                                                <div>
+                                                                                                    <span className="text-xs text-gray-500 font-semibold uppercase block">Status Produção</span>
+                                                                                                    <span className="font-semibold text-gray-850">{['FINISH', 'Finalizado', 'Concluído'].includes(statusProd) ? 'Concluído (FINISH)' : (statusProd || 'Em andamento')}</span>
+                                                                                                </div>
+                                                                                                <div>
+                                                                                                    <span className="text-xs text-gray-500 font-semibold uppercase block">Qtd Real ({poUnit})</span>
+                                                                                                    <span className="font-semibold text-gray-855">{iMeta.qtd_real_produzida != null ? iMeta.qtd_real_produzida : '—'}</span>
+                                                                                                </div>
+                                                                                                <div>
+                                                                                                    <span className="text-xs text-gray-500 font-semibold uppercase block">Perda Técnica ({poUnit})</span>
+                                                                                                    <span className="font-semibold text-gray-850">{iMeta.perda_tecnica != null ? iMeta.perda_tecnica : '—'}</span>
+                                                                                                </div>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    )
+                                                                                }) : (
+                                                                                    <p className="text-xs text-gray-500">Nenhum item cadastrado.</p>
+                                                                                )}
                                                                             </div>
                                                                         ) : (
-                                                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                                                                <div>
-                                                                                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
-                                                                                        Status da Produção <span className="text-red-500">*</span>
-                                                                                    </label>
-                                                                                    <select
-                                                                                        value={localFields.status_producao || ''}
-                                                                                        onChange={(e) => handleSelectField('status_producao', e.target.value)}
-                                                                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-semibold text-gray-800"
-                                                                                    >
-                                                                                        <option value="">Selecione...</option>
-                                                                                        <option value="START">Em Andamento (START)</option>
-                                                                                        <option value="Concluído">Concluído (FINISH)</option>
-                                                                                    </select>
-                                                                                </div>
+                                                                            // Edit view: per-SKU inputs
+                                                                            // FF-HARDENING-013 fix Issue 2.a: SkuProductionRow is a self-contained sub-component
+                                                                            // with its own local useState for status_producao. This prevents the parent
+                                                                            // re-render cycle (triggered by itemProductionFields state update) from
+                                                                            // overwriting the select's value with a stale prop before React commits the new state.
+                                                                            <div className="space-y-4">
+                                                                                {(selectedPO.items && selectedPO.items.length > 0) ? selectedPO.items.map(item => {
+                                                                                    // Capture stable values for closure
+                                                                                    const iMeta = item.extra_metadata || {}
+                                                                                    const poUnit = (iMeta.unit || item.unit || 'UN').toUpperCase()
+                                                                                    const iProd = itemProductionFields[item.id] || {}
+                                                                                    // FF-HARDENING-013 Issue 2.b: Código Estruturado instead of description
+                                                                                    const codigoEstruturado = iMeta.codigo_estruturado || item.codigo_estruturado || iMeta.description || ''
 
-                                                                                <div>
-                                                                                    {/* FF-HARDENING-012.3: Dynamic unit label next to Quantidade Real Produzida */}
-                                                                                    {(() => {
-                                                                                        const poUnit = (selectedPO.items?.[0]?.extra_metadata?.unit || selectedPO.items?.[0]?.unit || 'UN').toUpperCase();
-                                                                                        return (
-                                                                                            <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
-                                                                                                Quantidade Real Produzida ({poUnit}) <span className="text-red-500">*</span>
-                                                                                            </label>
-                                                                                        );
-                                                                                    })()}
-                                                                                    <input
-                                                                                        type="number"
-                                                                                        step="1"
-                                                                                        min="1"
-                                                                                        value={localFields.qtd_real_produzida || ''}
-                                                                                        onChange={(e) => handleChangeLocalField('qtd_real_produzida', e.target.value)}
-                                                                                        onBlur={() => handleBlurLocalField('qtd_real_produzida')}
-                                                                                        placeholder="Ex: 500"
-                                                                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800 font-medium"
-                                                                                    />
-                                                                                </div>
+                                                                                    // Inner row component with local state to avoid select-reset race
+                                                                                    const SkuRow = () => {
+                                                                                        const [localStatus, setLocalStatus] = React.useState(iProd.status_producao || '')
 
-                                                                                <div>
-                                                                                    {/* FF-HARDENING-012.1 [Item 3]: Dynamic unit derived from PO items */}
-                                                                                    {(() => {
-                                                                                        const poUnit = (selectedPO.items?.[0]?.extra_metadata?.unit || selectedPO.items?.[0]?.unit || 'UN').toUpperCase();
+                                                                                        const handleStatusChange = (e) => {
+                                                                                            const val = e.target.value
+                                                                                            setLocalStatus(val)
+                                                                                            // Update parent state and immediately trigger save with the new value
+                                                                                            setItemProductionFields(prev => {
+                                                                                                const updated = { ...prev, [item.id]: { ...(prev[item.id] || {}), status_producao: val } }
+                                                                                                // Schedule save after state is committed
+                                                                                                setTimeout(() => handleSaveProductionItems(), 0)
+                                                                                                return updated
+                                                                                            })
+                                                                                        }
+
                                                                                         return (
-                                                                                            <>
-                                                                                                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
-                                                                                                    Perda Técnica ({poUnit}) <span className="text-red-500">*</span>
-                                                                                                </label>
-                                                                                                <input
-                                                                                                    type="number"
-                                                                                                    step="1"
-                                                                                                    min="0"
-                                                                                                    value={localFields.perda_tecnica || ''}
-                                                                                                    onChange={(e) => handleChangeLocalField('perda_tecnica', e.target.value)}
-                                                                                                    onBlur={() => handleBlurLocalField('perda_tecnica')}
-                                                                                                    placeholder={`Ex: 12 ${poUnit}`}
-                                                                                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800 font-medium"
-                                                                                                />
-                                                                                            </>
-                                                                                        );
-                                                                                    })()}
-                                                                                </div>
+                                                                                            <div className="p-4 bg-blue-50 border border-blue-100 rounded-lg space-y-3">
+                                                                                                <div className="text-xs font-bold text-blue-800 uppercase tracking-wide">
+                                                                                                    SKU: {item.sku}{codigoEstruturado ? ` — ${codigoEstruturado}` : ''}
+                                                                                                </div>
+                                                                                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                                                                                    <div>
+                                                                                                        <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                                                                                            Status da Produção <span className="text-red-500">*</span>
+                                                                                                        </label>
+                                                                                                        <select
+                                                                                                            value={localStatus}
+                                                                                                            onChange={handleStatusChange}
+                                                                                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-semibold text-gray-800"
+                                                                                                        >
+                                                                                                            <option value="">Selecione...</option>
+                                                                                                            <option value="START">Em Andamento (START)</option>
+                                                                                                            <option value="Concluído">Concluído (FINISH)</option>
+                                                                                                        </select>
+                                                                                                    </div>
+                                                                                                    <div>
+                                                                                                        <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                                                                                            Qtd Real Produzida ({poUnit}) <span className="text-red-500">*</span>
+                                                                                                        </label>
+                                                                                                        <input
+                                                                                                            type="number" step="1" min="1"
+                                                                                                            value={iProd.qtd_real_produzida || ''}
+                                                                                                            onChange={(e) => setItemProductionFields(prev => ({ ...prev, [item.id]: { ...(prev[item.id] || {}), qtd_real_produzida: e.target.value } }))}
+                                                                                                            onBlur={handleSaveProductionItems}
+                                                                                                            placeholder="Ex: 500"
+                                                                                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800 font-medium"
+                                                                                                        />
+                                                                                                    </div>
+                                                                                                    <div>
+                                                                                                        <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                                                                                                            Perda Técnica ({poUnit}) <span className="text-red-500">*</span>
+                                                                                                        </label>
+                                                                                                        <input
+                                                                                                            type="number" step="1" min="0"
+                                                                                                            value={iProd.perda_tecnica || ''}
+                                                                                                            onChange={(e) => setItemProductionFields(prev => ({ ...prev, [item.id]: { ...(prev[item.id] || {}), perda_tecnica: e.target.value } }))}
+                                                                                                            onBlur={handleSaveProductionItems}
+                                                                                                            placeholder={`Ex: 12 ${poUnit}`}
+                                                                                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800 font-medium"
+                                                                                                        />
+                                                                                                    </div>
+                                                                                                </div>
+                                                                                            </div>
+                                                                                        )
+                                                                                    }
+                                                                                    return <SkuRow key={item.id} />
+                                                                                }) : (
+                                                                                    <p className="text-xs text-gray-500">Nenhum item para preencher.</p>
+                                                                                )}
+                                                                                {savingProduction && <p className="text-xs text-blue-600 font-medium">💾 Salvando dados de produção...</p>}
                                                                             </div>
                                                                         )}
                                                                     </div>
@@ -2830,6 +2937,26 @@ const KanbanPage = () => {
                                                                                         🗃️ {getCleanFilename(selectedPO.extra_metadata.invoice_xml_filename || selectedPO.extra_metadata.invoice_xml_path) || 'NF-e PDF 2'}
                                                                                     </a>
                                                                                 )}
+                                                                                {/* FF-HARDENING-013 Issue B UX: Consolidated production summary in downstream stages */}
+                                                                                {(() => {
+                                                                                    const items = selectedPO.items || []
+                                                                                    if (items.length === 0) return null
+                                                                                    const unit = (items[0]?.extra_metadata?.unit || items[0]?.unit || 'UN').toUpperCase()
+                                                                                    const totalQtd = items.reduce((acc, i) => acc + (parseFloat(i.extra_metadata?.qtd_real_produzida) || 0), 0)
+                                                                                    const totalPerda = items.reduce((acc, i) => acc + (parseFloat(i.extra_metadata?.perda_tecnica) || 0), 0)
+                                                                                    return (
+                                                                                        <div className="mt-3 pt-3 border-t border-gray-200 grid grid-cols-1 md:grid-cols-2 gap-2">
+                                                                                            <div>
+                                                                                                <span className="text-xs text-gray-500 font-semibold uppercase block">Qtd Real Produzida Consolidada ({items.length} SKUs)</span>
+                                                                                                <span className="font-bold text-gray-800">{totalQtd > 0 ? totalQtd : '—'} {unit}</span>
+                                                                                            </div>
+                                                                                            <div>
+                                                                                                <span className="text-xs text-gray-500 font-semibold uppercase block">Perda Técnica Consolidada ({items.length} SKUs)</span>
+                                                                                                <span className="font-bold text-gray-800">{totalPerda > 0 ? totalPerda : '—'} {unit}</span>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    )
+                                                                                })()}
                                                                             </div>
                                                                         ) : (
                                                                             <div className="space-y-4">
@@ -2939,6 +3066,26 @@ const KanbanPage = () => {
                                                                                         </a>
                                                                                     )}
                                                                                 </div>
+                                                                                {/* FF-HARDENING-013 Issue B UX: Consolidated production summary in Expedição */}
+                                                                                {(() => {
+                                                                                    const items = selectedPO.items || []
+                                                                                    if (items.length === 0) return null
+                                                                                    const unit = (items[0]?.extra_metadata?.unit || items[0]?.unit || 'UN').toUpperCase()
+                                                                                    const totalQtd = items.reduce((acc, i) => acc + (parseFloat(i.extra_metadata?.qtd_real_produzida) || 0), 0)
+                                                                                    const totalPerda = items.reduce((acc, i) => acc + (parseFloat(i.extra_metadata?.perda_tecnica) || 0), 0)
+                                                                                    return (
+                                                                                        <div className="mt-3 pt-3 border-t border-gray-200 grid grid-cols-1 md:grid-cols-2 gap-2">
+                                                                                            <div>
+                                                                                                <span className="text-xs text-gray-500 font-semibold uppercase block">Qtd Real Produzida Consolidada ({items.length} SKUs)</span>
+                                                                                                <span className="font-bold text-gray-800">{totalQtd > 0 ? totalQtd : '—'} {unit}</span>
+                                                                                            </div>
+                                                                                            <div>
+                                                                                                <span className="text-xs text-gray-500 font-semibold uppercase block">Perda Técnica Consolidada ({items.length} SKUs)</span>
+                                                                                                <span className="font-bold text-gray-800">{totalPerda > 0 ? totalPerda : '—'} {unit}</span>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    )
+                                                                                })()}
                                                                             </div>
                                                                         ) : (
                                                                             <div className="space-y-4">
@@ -3092,6 +3239,28 @@ const KanbanPage = () => {
                                                                             </div>
                                                                         ) : (
                                                                             <div className="space-y-4">
+                                                                                {/* FF-HARDENING-013 Issue B UX: Consolidated production summary in Financeiro */}
+                                                                                {(() => {
+                                                                                    const items = selectedPO.items || []
+                                                                                    if (items.length === 0) return null
+                                                                                    const unit = (items[0]?.extra_metadata?.unit || items[0]?.unit || 'UN').toUpperCase()
+                                                                                    const totalQtd = items.reduce((acc, i) => acc + (parseFloat(i.extra_metadata?.qtd_real_produzida) || 0), 0)
+                                                                                    const totalPerda = items.reduce((acc, i) => acc + (parseFloat(i.extra_metadata?.perda_tecnica) || 0), 0)
+                                                                                    if (totalQtd === 0 && totalPerda === 0) return null
+                                                                                    return (
+                                                                                        <div className="p-3 bg-green-50 border border-green-100 rounded-lg grid grid-cols-1 md:grid-cols-2 gap-2">
+                                                                                            <div>
+                                                                                                <span className="text-xs text-gray-500 font-semibold uppercase block">Qtd Real Produzida Consolidada ({items.length} SKUs)</span>
+                                                                                                <span className="font-bold text-gray-800">{totalQtd} {unit}</span>
+                                                                                            </div>
+                                                                                            <div>
+                                                                                                <span className="text-xs text-gray-500 font-semibold uppercase block">Perda Técnica Consolidada ({items.length} SKUs)</span>
+                                                                                                <span className="font-bold text-gray-800">{totalPerda} {unit}</span>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    )
+                                                                                })()}
+
                                                                                 {/* FF-HARDENING-010 [Item 8]: Duplicate shipping evidence panel removed.
                                                                                      NF-e, foto_carga_path, and foto_canhoto_path are already visible
                                                                                      inside the Faturamento/Expedição accordion above. */}
