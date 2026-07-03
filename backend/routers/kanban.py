@@ -1227,6 +1227,49 @@ async def cancel_purchase_order(
         }
     )
 
+    # FF-HARDENING-012.4 Item 2: Cascade cancellation to child POs.
+    # When the parent is in WAITING_COMMERCIAL_PARTITION, the child POs (C1/C2) are
+    # in SUBMITTED status and appear in the Comercial column.  Cancelling only the
+    # parent leaves those cards orphaned on the board.  We cascade CANCELLED to each
+    # child so they physically leave the Comercial column immediately.
+    if from_status == "WAITING_COMMERCIAL_PARTITION":
+        child_pos = db.query(PurchaseOrder).filter(
+            PurchaseOrder.parent_po_id == po.id,
+            PurchaseOrder.tenant_id == current_user.tenant_id
+        ).all()
+        cancelled_at_str = po.sla_justification_at.isoformat()
+        for child in child_pos:
+            if child.status_macro not in ("CANCELLED", "ARCHIVED", "ARCHIVED_PARTITIONED", "COMPLETED"):
+                child_from_status = child.status_macro
+                child.status_macro = "CANCELLED"
+                child.sla_justification_text = body.justification
+                child.sla_justification_user = current_user.name or current_user.email
+                child.sla_justification_at = po.sla_justification_at
+                child.sla_justification_category = "CANCELAMENTO"
+                child.updated_at = datetime.utcnow()
+                child_meta = dict(child.partition_metadata or {})
+                child_meta["cancelled_by"] = current_user.name or current_user.email
+                child_meta["cancelled_at"] = cancelled_at_str
+                child_meta["cancellation_justification"] = body.justification
+                child_meta["cancelled_with_parent"] = str(po.id)
+                child.partition_metadata = child_meta
+                _flag_modified(child, "partition_metadata")
+                log_po_status_transition(
+                    db=db,
+                    po=child,
+                    from_status=child_from_status,
+                    to_status="CANCELLED",
+                    current_user=current_user,
+                    justification=f"Cancelamento em cascata do pedido pai {po.po_number}: {body.justification}",
+                    is_exception=False,
+                    extra_data={
+                        "action_type": "CANCEL_PO_CASCADE",
+                        "parent_po_id": str(po.id),
+                        "parent_po_number": po.po_number,
+                        "cancelled_by": current_user.name or current_user.email,
+                    }
+                )
+
     db.commit()
     db.refresh(po)
 
@@ -2244,7 +2287,7 @@ async def commercial_reject(
 class SuggestPartitionBody(BaseModel):
     po_id: Optional[str] = None
     reason: Optional[str] = None
-    qty_splits: Optional[Dict[str, List[int]]] = None
+    qty_splits: Optional[Dict[str, List[float]]] = None  # FF-HARDENING-012.4 Item 3: float to accept decimal quantities
     new_delivery_date: Optional[str] = None
 
 @router.post("/suggest-partition")
@@ -2402,8 +2445,10 @@ async def suggest_partition(
             q1, q2 = 0, 0
             if qty_splits and (str(item.id) in qty_splits or item.sku in qty_splits):
                 split = qty_splits.get(str(item.id)) or qty_splits.get(item.sku)
-                q1, q2 = int(split[0]), int(split[1])
-                if q1 + q2 != item.quantity:
+                # FF-HARDENING-012.4 Item 3: use float() to accept decimal split quantities
+                q1, q2 = float(split[0]), float(split[1])
+                # Tolerance-based sum check to handle floating-point rounding (e.g., 5.5 + 5.0 = 10.5)
+                if abs((q1 + q2) - float(item.quantity)) > 0.001:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail=(

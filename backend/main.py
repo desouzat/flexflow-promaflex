@@ -220,6 +220,30 @@ async def lifespan(app: FastAPI):
             ]
         )
 
+        # Step 6 — FF-HARDENING-012.4 Item 1: Final canonical status constraint
+        # Drops and recreates check_po_status_macro with the definitive set of statuses
+        # for the homologation release. Executed as two separate steps so that a DROP
+        # failure never leaves the connection mid-transaction before the ADD attempt.
+        # Fully idempotent: safe to re-run on every container startup.
+        _run_ddl_step(
+            "alter_status_constraint_billing_final: drop old check_po_status_macro",
+            [
+                "ALTER TABLE purchase_orders DROP CONSTRAINT IF EXISTS check_po_status_macro"
+            ]
+        )
+        _run_ddl_step(
+            "alter_status_constraint_billing_final: recreate check_po_status_macro with final canonical list",
+            [
+                """ALTER TABLE purchase_orders ADD CONSTRAINT check_po_status_macro CHECK (
+                    status_macro IN (
+                        'DRAFT', 'SUBMITTED', 'PCP', 'APPROVED', 'MANUFACTURING',
+                        'BILLING', 'SHIPPING', 'WAITING_DISPATCH',
+                        'ARCHIVED', 'ARCHIVED_PARTITIONED', 'COMPLETED', 'CANCELLED'
+                    )
+                )"""
+            ]
+        )
+
         print("[DEBUG] Background DB schema initialization completed.")
 
     async def init_db_background():
