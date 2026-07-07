@@ -239,11 +239,11 @@ async def lifespan(app: FastAPI):
                         'DRAFT', 'SUBMITTED', 'PCP', 'APPROVED', 'MANUFACTURING',
                         'BILLING', 'SHIPPING', 'WAITING_DISPATCH',
                         'ARCHIVED', 'ARCHIVED_PARTITIONED', 'COMPLETED', 'CANCELLED',
-                        'WAITING_COMMERCIAL_PARTITION'
+                        'WAITING_COMMERCIAL_PARTITION', 'FINANCE', 'WAITING_MATERIAL'
                     )
                 )"""
             ]
-        )
+        )  # FF-HARDENING-013 hotfix: added FINANCE + WAITING_MATERIAL (omitted in prior build)
 
         print("[DEBUG] Background DB schema initialization completed.")
 

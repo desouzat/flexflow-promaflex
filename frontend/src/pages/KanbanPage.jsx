@@ -2831,17 +2831,27 @@ const KanbanPage = () => {
                                                                                     // FF-HARDENING-013 Issue 2.b: Código Estruturado instead of description
                                                                                     const codigoEstruturado = iMeta.codigo_estruturado || item.codigo_estruturado || iMeta.description || ''
 
-                                                                                    // Inner row component with local state to avoid select-reset race
+                                                                                    // Inner row component — state-isolated to prevent select-reset race.
+                                                                                    // HOTFIX: seed from item.extra_metadata (persisted DB value, stable)
+                                                                                    // NOT from iProd (parent transient state, can be stale on remount).
                                                                                     const SkuRow = () => {
-                                                                                        const [localStatus, setLocalStatus] = React.useState(iProd.status_producao || '')
+                                                                                        const persistedStatus = item.extra_metadata?.status_producao || ''
+                                                                                        const [localStatus, setLocalStatus] = React.useState(
+                                                                                            iProd.status_producao || persistedStatus
+                                                                                        )
+
+                                                                                        // Re-sync if the persisted value changes externally (e.g. after fetchBoard)
+                                                                                        React.useEffect(() => {
+                                                                                            if (persistedStatus && persistedStatus !== localStatus) {
+                                                                                                setLocalStatus(persistedStatus)
+                                                                                            }
+                                                                                        }, [persistedStatus]) // eslint-disable-line react-hooks/exhaustive-deps
 
                                                                                         const handleStatusChange = (e) => {
                                                                                             const val = e.target.value
                                                                                             setLocalStatus(val)
-                                                                                            // Update parent state and immediately trigger save with the new value
                                                                                             setItemProductionFields(prev => {
                                                                                                 const updated = { ...prev, [item.id]: { ...(prev[item.id] || {}), status_producao: val } }
-                                                                                                // Schedule save after state is committed
                                                                                                 setTimeout(() => handleSaveProductionItems(), 0)
                                                                                                 return updated
                                                                                             })
