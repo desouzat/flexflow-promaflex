@@ -375,10 +375,17 @@ async def upload_incremental_costs(
     updated_count = 0
     created_count = 0
     updated_skus = []
-    
+
     tenant_uuid = uuid.UUID(str(current_user.tenant_id))
     user_uuid = uuid.UUID(str(current_user.id))
-    
+
+    # ── Pass 1: In-memory deduplication (Bug 1 fix) ───────────────────────────
+    # If the spreadsheet contains duplicate SKUs (same Material value in multiple rows),
+    # Celso's business rule is: keep the row with the HIGHEST custo_mp_kg value.
+    # This prevents UniqueViolation on (tenant_id, sku) when the DB loop would otherwise
+    # attempt two INSERTs for the same SKU within the same unflushed session.
+    dedup: dict = {}   # sku -> {'rendimento': float, 'custo_mp_kg': float}
+
     for idx, row in df.iterrows():
         raw_sku = row.get(col_map_upload['sku'])
         if raw_sku is None or (isinstance(raw_sku, float) and pd.isna(raw_sku)):
@@ -386,26 +393,30 @@ async def upload_incremental_costs(
         sku = str(raw_sku).strip()
         if not sku or sku.lower() in ('nan', 'none', ''):
             continue
-        # Skip header-repeat rows
         if 'material' in sku.lower() or 'sku' in sku.lower():
             continue
-
         try:
             rendimento  = float(row.get(col_map_upload['rendimento']))
             custo_mp_kg = float(row.get(col_map_upload['custo_mp_kg']))
         except (ValueError, TypeError):
-            # Skip invalid rows
             continue
-
         if rendimento <= 0 or custo_mp_kg < 0:
             continue
-            
+        # Keep row with HIGHEST custo_mp_kg for this SKU
+        if sku not in dedup or custo_mp_kg > dedup[sku]['custo_mp_kg']:
+            dedup[sku] = {'rendimento': rendimento, 'custo_mp_kg': custo_mp_kg}
+
+    # ── Pass 2: UPSERT deduplicated rows into DB ──────────────────────────────
+    for sku, vals in dedup.items():
+        rendimento  = vals['rendimento']
+        custo_mp_kg = vals['custo_mp_kg']
+
         # Find existing MaterialCost
         material = db.query(MaterialCost).filter(
             MaterialCost.tenant_id == tenant_uuid,
             MaterialCost.sku == sku
         ).first()
-        
+
         if material:
             material.rendimento = rendimento
             material.custo_mp_kg = custo_mp_kg
@@ -428,9 +439,9 @@ async def upload_incremental_costs(
             )
             db.add(material)
             created_count += 1
-            
+
         updated_skus.append(sku)
-        
+
     try:
         db.commit()
     except Exception as e:
@@ -601,13 +612,13 @@ async def upload_onet_costs(
     updated_skus = []
     errors = []
 
-    # Skip the first data row (it repeats the header labels: "SKU Onet", "cod estruturado Onet", ...)
-    data_df = df  # Use col_map-based access; label rows are skipped inside the loop
+    # ── Pass 1: In-memory deduplication (Bug 1 fix) ───────────────────────────
+    # Same Celso business rule: if two rows have the same SKU, keep the one with
+    # the HIGHEST custo_mp_kg.  Prevents UniqueViolation on (tenant_id, sku).
+    onet_dedup: dict = {}   # sku -> {'nome': str, 'custo_mp_kg': float, 'rendimento': float}
 
-    for idx, row in data_df.iterrows():
+    for idx, row in df.iterrows():
         raw_sku = row.get(col_map['sku'])
-
-        # Strictly skip rows with null/empty/NaN SKU
         if raw_sku is None or (isinstance(raw_sku, float) and pd.isna(raw_sku)):
             skipped_count += 1
             continue
@@ -615,13 +626,10 @@ async def upload_onet_costs(
         if not sku or sku.lower() in ('nan', 'none', ''):
             skipped_count += 1
             continue
-
-        # Skip rows that repeat column header labels as data values
         if 'sku' in sku.lower():
             skipped_count += 1
             continue
 
-        # nome: prefer the cod_estruturado column, fall back to the SKU itself
         nome_col = col_map.get('nome')
         raw_cod = row.get(nome_col) if nome_col else None
         nome = (
@@ -635,10 +643,9 @@ async def upload_onet_costs(
 
         raw_custo      = row.get(col_map['custo_mp_kg'])
         raw_rendimento = row.get(col_map['rendimento'])
-
         try:
             custo_mp_kg = float(raw_custo)
-            rendimento = float(raw_rendimento)
+            rendimento  = float(raw_rendimento)
         except (ValueError, TypeError):
             errors.append(f"SKU {sku}: valores inválidos em CUSTO ou RENDIMENTO — linha ignorada.")
             skipped_count += 1
@@ -648,6 +655,16 @@ async def upload_onet_costs(
             errors.append(f"SKU {sku}: rendimento deve ser > 0 e custo >= 0 — linha ignorada.")
             skipped_count += 1
             continue
+
+        # Keep the row with the highest custo_mp_kg per SKU
+        if sku not in onet_dedup or custo_mp_kg > onet_dedup[sku]['custo_mp_kg']:
+            onet_dedup[sku] = {'nome': nome, 'custo_mp_kg': custo_mp_kg, 'rendimento': rendimento}
+
+    # ── Pass 2: UPSERT deduplicated rows into DB ──────────────────────────────
+    for sku, vals in onet_dedup.items():
+        nome        = vals['nome']
+        custo_mp_kg = vals['custo_mp_kg']
+        rendimento  = vals['rendimento']
 
         material = db.query(MaterialCost).filter(
             MaterialCost.tenant_id == tenant_uuid,

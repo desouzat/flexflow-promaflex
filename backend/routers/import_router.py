@@ -20,7 +20,9 @@ from backend.schemas.import_schema import (
     FinanceDecisionRequest,
     FinanceDecisionResponse,
     FinanceDecision,
-    ConfirmStagingPayload
+    ConfirmStagingPayload,
+    CancelStagingPayload,
+    CancelStagingItemSchema,
 )
 from backend.schemas.auth_schema import UserInfo
 from backend.services.import_service import ImportService
@@ -1183,3 +1185,156 @@ def confirm_staging(
         "message": f"Mesa de conferência confirmada com sucesso. {len(payload.pos)} pedido(s) importado(s)."
     }
 
+
+@router.post("/cancel-staging", status_code=status.HTTP_201_CREATED)
+def cancel_staging_po(
+    payload: CancelStagingPayload,
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Persist a Mesa de Conferência cancellation for a PO that does NOT yet have a DB record.
+
+    When an operator cancels a staging PO (parsed from ONET, not yet confirmed to DB), this
+    endpoint creates a permanent CANCELLED record so the cancellation appears in the
+    GET /api/reports/cancellations-export report.
+
+    Flow:
+        1. If a PO with this po_number already exists for the tenant → update it to CANCELLED
+           (idempotent guard: handles accidental double-clicks or retry).
+        2. Otherwise INSERT a new PurchaseOrder with status_macro=CANCELLED.
+        3. Create OrderItems from payload.items (required for AuditLog FK).
+        4. Write an AuditLog entry per item with action MESA_CANCELADO.
+        5. Commit atomically.
+
+    Security: Strictly scoped to current_user.tenant_id.
+    """
+    tenant_uuid = uuid.UUID(str(current_user.tenant_id))
+    user_uuid   = uuid.UUID(str(current_user.id))
+    now_utc     = datetime.now(tz=timezone.utc)
+
+    try:
+        # ── Idempotency guard: PO already in DB ───────────────────────────────
+        existing_po = (
+            db.query(PurchaseOrder)
+            .filter(
+                PurchaseOrder.tenant_id == tenant_uuid,
+                PurchaseOrder.po_number == payload.po_number,
+            )
+            .first()
+        )
+
+        if existing_po:
+            # Update to CANCELLED and store justification, then return early.
+            existing_po.status_macro            = "CANCELLED"
+            existing_po.sla_justification_text  = payload.justification
+            existing_po.sla_justification_user  = current_user.email or current_user.name
+            existing_po.sla_justification_at    = now_utc
+            existing_po.sla_justification_category = "CANCELAMENTO"
+            db.commit()
+            return {
+                "success": True,
+                "po_id": str(existing_po.id),
+                "po_number": existing_po.po_number,
+                "action": "updated_to_cancelled",
+            }
+
+        # ── Build partition_metadata ──────────────────────────────────────────
+        partition_metadata = {
+            "client_name": payload.client_name or "",
+            "cancelled_at": now_utc.isoformat(),
+            "cancelled_by": current_user.email or current_user.name,
+            "source": "MESA_CONFERENCIA",
+        }
+
+        # ── INSERT CANCELLED PO ───────────────────────────────────────────────
+        new_po = PurchaseOrder(
+            id=uuid.uuid4(),
+            tenant_id=tenant_uuid,
+            po_number=payload.po_number,
+            status_macro="CANCELLED",
+            po_total_value=payload.po_total_value,
+            partition_metadata=partition_metadata,
+            sla_justification_text=payload.justification,
+            sla_justification_user=current_user.email or current_user.name,
+            sla_justification_at=now_utc,
+            sla_justification_category="CANCELAMENTO",
+            created_by=user_uuid,
+        )
+        db.add(new_po)
+        db.flush()  # get new_po.id before creating items
+
+        # ── INSERT items + AuditLogs ──────────────────────────────────────────
+        # AuditLog.item_id is NOT NULL, so we must create at least one item.
+        # Use the payload items if provided; otherwise create a single sentinel item.
+        items_to_create = payload.items or [
+            CancelStagingItemSchema(sku="N/A", quantity=1.0, price=0.0)
+        ]
+
+        for item_data in items_to_create:
+            new_item = OrderItem(
+                id=uuid.uuid4(),
+                po_id=new_po.id,
+                tenant_id=tenant_uuid,
+                sku=item_data.sku,
+                quantity=max(float(item_data.quantity or 1.0), 0.000001),
+                price=float(item_data.price or 0.0),
+                status_item="CANCELLED",
+                is_personalized=False,
+                extra_metadata={
+                    "codigo_estruturado": item_data.codigo_estruturado or "",
+                    "client_name": payload.client_name or "",
+                    "largura": item_data.largura,
+                    "comprimento": item_data.comprimento,
+                    "cancel_source": "MESA_CONFERENCIA",
+                },
+            )
+            db.add(new_item)
+            db.flush()  # get new_item.id for AuditLog
+
+            audit_hash = AuditLog.calculate_hash_v2(
+                tenant_id=tenant_uuid,
+                item_id=new_item.id,
+                from_status=None,
+                to_status="CANCELLED",
+                timestamp=now_utc,
+                previous_hash=None,
+                changed_by=user_uuid,
+            )
+            audit = AuditLog(
+                id=uuid.uuid4(),
+                item_id=new_item.id,
+                from_status=None,
+                to_status="CANCELLED",
+                hash=audit_hash,
+                previous_hash=None,
+                is_exception=True,
+                justification=payload.justification,
+                changed_by=user_uuid,
+                hash_version=AuditLog.HASH_VERSION_CURRENT,
+                extra_data={
+                    "action": "MESA_CANCELADO",
+                    "po_number": new_po.po_number,
+                    "source": "MESA_CONFERENCIA",
+                    "cancelled_by": current_user.email or current_user.name,
+                },
+            )
+            db.add(audit)
+
+        db.commit()
+        db.refresh(new_po)
+
+        return {
+            "success": True,
+            "po_id": str(new_po.id),
+            "po_number": new_po.po_number,
+            "action": "cancelled_and_persisted",
+            "items_created": len(items_to_create),
+        }
+
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao registrar cancelamento: {str(exc)}",
+        ) from exc

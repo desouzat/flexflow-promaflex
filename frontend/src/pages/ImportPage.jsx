@@ -2511,10 +2511,28 @@ const ImportPage = () => {
                                     if (cancelImportJustification.trim().length < 10) return;
                                     setCancellingImport(true);
                                     try {
-                                        // If the PO already has a DB id, call the cancel endpoint
+                                        // If the PO already has a DB id, call the Kanban cancel endpoint
                                         if (currentPO.id) {
                                             await api.post(`/kanban/pos/${currentPO.id}/cancel`, {
                                                 justification: cancelImportJustification.trim()
+                                            });
+                                        } else {
+                                            // Bug 2 fix: PO exists only in staging memory (not yet in DB).
+                                            // Persist it as CANCELLED so it appears in the cancellations report.
+                                            await api.post('/import/cancel-staging', {
+                                                po_number: currentPO.po_number,
+                                                client_name: currentPO.client_name || null,
+                                                po_total_value: currentPO.po_total_value != null
+                                                    ? Number(currentPO.po_total_value) : null,
+                                                justification: cancelImportJustification.trim(),
+                                                items: (currentPO.items || []).map(item => ({
+                                                    sku: item.sku || 'N/A',
+                                                    quantity: Number(item.quantity) || 1,
+                                                    price: Number(item.unit_value ?? item.price_unit) || 0,
+                                                    codigo_estruturado: item.codigo_estruturado || null,
+                                                    largura: item.width ?? item.largura ?? null,
+                                                    comprimento: item.length ?? item.comprimento ?? null,
+                                                }))
                                             });
                                         }
                                         // Remove this PO from the staging list regardless

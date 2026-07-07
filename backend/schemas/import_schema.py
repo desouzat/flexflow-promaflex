@@ -615,3 +615,43 @@ class ConfirmStagingPayload(BaseModel):
     )
 
 
+# ── Cancel Staging (Bug 2 fix: persist pre-DB Mesa de Conferência cancellations) ──────────────
+
+class CancelStagingItemSchema(BaseModel):
+    """Minimal item data needed to create an OrderItem + AuditLog for a cancelled staging PO."""
+    sku: str
+    quantity: float = 1.0
+    price: float = 0.0
+    codigo_estruturado: Optional[str] = None
+    largura: Optional[float] = None
+    comprimento: Optional[float] = None
+
+
+class CancelStagingPayload(BaseModel):
+    """
+    Payload sent when a user cancels a staging PO that does not yet have a database record.
+    The backend will INSERT the PO as CANCELLED, create its items, and write an AuditLog.
+    """
+    po_number: str = Field(..., description="PO number from the ONET spreadsheet")
+    client_name: Optional[str] = Field(None, description="Client name from staging data")
+    po_total_value: Optional[float] = Field(None, description="PO total value from staging data")
+    justification: str = Field(..., min_length=1, description="Cancellation justification text")
+    items: Optional[List[CancelStagingItemSchema]] = Field(
+        default=None,
+        description="Items from the staging PO — used to create OrderItems and AuditLogs"
+    )
+
+    @field_validator("po_number")
+    @classmethod
+    def po_number_not_empty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("po_number cannot be empty")
+        return v.strip()
+
+    @field_validator("justification")
+    @classmethod
+    def justification_not_empty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("justification cannot be empty")
+        return v.strip()
+
