@@ -549,6 +549,8 @@ class ConfirmStagingItemExtra(BaseModel):
     is_new_client: bool = False
     is_export: bool = False
     is_replacement: bool = False
+    is_triangular: bool = False          # FF-HARDENING-015 Item 3: Triangular/Remessa → BILLING
+    is_estoque: bool = False             # FF-HARDENING-015 Item 3: Material de Estoque → BILLING
     customization_notes: Optional[str] = None
     attachment_path: Optional[str] = None
     attachment_filename: Optional[str] = None

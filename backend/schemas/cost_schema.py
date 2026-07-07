@@ -17,7 +17,7 @@ class MaterialCostBase(BaseModel):
     custo_mp_kg: Decimal = Field(..., ge=0, description="Custo de matéria-prima por kg")
     rendimento: Decimal = Field(..., gt=0, description="Rendimento em kg por unidade")
     indice_impostos: Decimal = Field(
-        default=Decimal("22.25"),
+        default=Decimal("9.25"),  # FF-HARDENING-015: PIS/COFINS unified rate (was 22.25)
         ge=0,
         le=100,
         description="Índice de impostos em percentual"
@@ -60,7 +60,7 @@ class MaterialCostListResponse(BaseModel):
 class GlobalSettingsResponse(BaseModel):
     """Schema para configurações globais de custos"""
     indice_impostos_padrao: Decimal = Field(
-        default=Decimal("22.25"),
+        default=Decimal("9.25"),  # FF-HARDENING-015: PIS/COFINS unified rate (was 22.25)
         description="Índice de impostos padrão em percentual"
     )
     tenant_id: str

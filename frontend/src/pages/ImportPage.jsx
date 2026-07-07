@@ -408,6 +408,8 @@ const ImportPage = () => {
                             is_new_client: false,
                             is_export: false,
                             is_replacement: false,
+                            is_triangular: false,       // FF-HARDENING-015 Item 3
+                            is_estoque: false,           // FF-HARDENING-015 Item 3
                             customization_notes: '',
                             attachment_path: null,
                             needs_mapping: false,
@@ -478,6 +480,8 @@ const ImportPage = () => {
                                 is_new_client: false,
                                 is_export: false,
                                 is_replacement: false,
+                                is_triangular: false,       // FF-HARDENING-015 Item 3
+                                is_estoque: false,           // FF-HARDENING-015 Item 3
                                 customization_notes: '',
                                 attachment_path: null,
                                 needs_mapping: false,
@@ -574,6 +578,42 @@ const ImportPage = () => {
                     items: Array.isArray(po.items) ? po.items.map(item =>
                         item.id === itemId
                             ? { ...item, is_replacement: !item.is_replacement }
+                            : item
+                    ) : []
+                }))
+            }
+        })
+    }
+
+    // FF-HARDENING-015 Item 3: Triangular/Remessa toggle
+    const handleToggleTriangular = (itemId) => {
+        setStagingData(prev => {
+            if (!prev || !prev.po_list || !Array.isArray(prev.po_list)) return prev
+            return {
+                ...prev,
+                po_list: prev.po_list.map(po => ({
+                    ...po,
+                    items: Array.isArray(po.items) ? po.items.map(item =>
+                        item.id === itemId
+                            ? { ...item, is_triangular: !item.is_triangular }
+                            : item
+                    ) : []
+                }))
+            }
+        })
+    }
+
+    // FF-HARDENING-015 Item 3: Material de Estoque toggle
+    const handleToggleEstoque = (itemId) => {
+        setStagingData(prev => {
+            if (!prev || !prev.po_list || !Array.isArray(prev.po_list)) return prev
+            return {
+                ...prev,
+                po_list: prev.po_list.map(po => ({
+                    ...po,
+                    items: Array.isArray(po.items) ? po.items.map(item =>
+                        item.id === itemId
+                            ? { ...item, is_estoque: !item.is_estoque }
                             : item
                     ) : []
                 }))
@@ -928,6 +968,8 @@ const ImportPage = () => {
                                 is_new_client: item.is_new_client || false,
                                 is_export: item.is_export || false,
                                 is_replacement: item.is_replacement || false,
+                                is_triangular: item.is_triangular || false,   // FF-HARDENING-015 Item 3
+                                is_estoque: item.is_estoque || false,         // FF-HARDENING-015 Item 3
                                 customization_notes: item.customization_notes || '',
                                 attachment_path: item.attachment_path || null,
                                 attachment_filename: item.attachment_filename || null,
@@ -1519,7 +1561,7 @@ const ImportPage = () => {
                                                         commissionRate: commRate,
                                                         costs: (itemCost * item.quantity) + proportionalAdditional,
                                                         paymentDays: paymentDays,
-                                                        taxRate: 22.25
+                                                        taxRate: 9.25  // FF-HARDENING-015: PIS/COFINS unified rate (was 22.25)
                                                     });
 
                                                     return (
@@ -1542,6 +1584,12 @@ const ImportPage = () => {
                                                                 {item.codigo_estruturado && (
                                                                     <span className="inline-flex items-center mt-0.5 px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 font-mono tracking-wide">
                                                                         🔖 {item.codigo_estruturado}
+                                                                    </span>
+                                                                )}
+                                                                {/* FF-HARDENING-015 Item 3: Dimensions */}
+                                                                {(item.width != null && item.length != null) && (
+                                                                    <span className="inline-flex items-center mt-0.5 ml-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                                                                        📐 Largura: {parseFloat(item.width)} mm × Comprimento: {parseFloat(item.length)} mm
                                                                     </span>
                                                                 )}
                                                             </div>
@@ -1676,14 +1724,6 @@ const ImportPage = () => {
                                                                     )}
                                                                 </div>
                                                             )}
-                                                            {item.balance !== null && (
-                                                                <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                                                                    <label className="text-xs font-medium text-gray-700">Saldo Devedor</label>
-                                                                    <p className="text-sm font-bold text-blue-700">
-                                                                        R$ {parseFloat(item.balance).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                                                    </p>
-                                                                </div>
-                                                            )}
                                                             {item.delay !== null && (
                                                                 <div className={`p-3 rounded-lg ${item.delay > 0 ? 'bg-orange-100 border-2 border-orange-400' : 'bg-green-100 border border-green-300'}`}>
                                                                     <label className="text-xs font-medium text-gray-700">Dias Atraso</label>
@@ -1752,40 +1792,64 @@ const ImportPage = () => {
                                                     )}
                                                 </div>
 
-                                                {/* Toggles - Now with 4 flags */}
-                                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-                                                    <label className="flex items-center gap-3 cursor-pointer">
+                                                {/* Toggles - 5 flags: Personalizado, Cliente Novo, Exportação, Triangular/Remessa, Mat. Estoque (FF-HARDENING-015) */}
+                                                <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+                                                    <label className="flex items-center gap-2 cursor-pointer">
                                                         <input
                                                             type="checkbox"
                                                             checked={item.is_personalized}
                                                             onChange={() => handleTogglePersonalized(item.id)}
-                                                            className="w-5 h-5 text-primary-600 rounded focus:ring-primary-500"
+                                                            className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500"
                                                         />
                                                         <span className="text-sm font-medium text-gray-700">
                                                             Personalizado?
                                                         </span>
                                                     </label>
-                                                    <label className="flex items-center gap-3 cursor-pointer">
+                                                    <label className="flex items-center gap-2 cursor-pointer">
                                                         <input
                                                             type="checkbox"
                                                             checked={item.is_new_client}
                                                             onChange={() => handleToggleNewClient(item.id)}
-                                                            className="w-5 h-5 text-primary-600 rounded focus:ring-primary-500"
+                                                            className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500"
                                                         />
                                                         <span className="text-sm font-medium text-gray-700">
                                                             Cliente Novo?
                                                         </span>
                                                     </label>
-                                                    <label className="flex items-center gap-3 cursor-pointer">
+                                                    <label className="flex items-center gap-2 cursor-pointer">
                                                         <input
                                                             type="checkbox"
                                                             checked={item.is_export}
                                                             onChange={() => handleToggleExport(item.id)}
-                                                            className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
+                                                            className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
                                                         />
                                                         <span className="text-sm font-medium text-gray-700 flex items-center gap-1">
-                                                            <Globe className="w-4 h-4" />
+                                                            <Globe className="w-3.5 h-3.5" />
                                                             Exportação?
+                                                        </span>
+                                                    </label>
+                                                    {/* FF-HARDENING-015 Item 3: Triangular/Remessa → routes to BILLING */}
+                                                    <label className="flex items-center gap-2 cursor-pointer">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={item.is_triangular || false}
+                                                            onChange={() => handleToggleTriangular(item.id)}
+                                                            className="w-4 h-4 text-orange-600 rounded focus:ring-orange-500"
+                                                        />
+                                                        <span className="text-sm font-medium text-orange-700">
+                                                            🔺 Triangular/Remessa
+                                                        </span>
+                                                    </label>
+                                                    {/* FF-HARDENING-015 Item 3: Material de Estoque (e-com) → routes to BILLING */}
+                                                    <label className="flex items-center gap-2 cursor-pointer">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={item.is_estoque || false}
+                                                            onChange={() => handleToggleEstoque(item.id)}
+                                                            className="w-4 h-4 text-teal-600 rounded focus:ring-teal-500"
+                                                        />
+                                                        <span className="text-sm font-medium text-teal-700">
+                                                            🏭 Mat. Estoque (e-com)
                                                         </span>
                                                     </label>
                                                     {/* UAT-FIX-4: Troca/Reposição checkbox removed — exchange cards are created via Kanban manual card flow */}
@@ -1793,12 +1857,9 @@ const ImportPage = () => {
 
                                                 {/* UAT-FIX-4: SLA notice removed with checkbox */}
 
-                                                {/* Detalhes do Item: Dt.Entrega, Vl.Frete, % ICMS, Dt.Faturamento, Vendedor, Vl. IPI, Data do Pedido */}
-                                                <div className="mb-4 p-3.5 bg-gray-50 border border-gray-200 rounded-lg grid grid-cols-2 md:grid-cols-7 gap-4 shadow-3xs animate-fade-in">
-                                                    <div>
-                                                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-0.5">Dt. Entrega</label>
-                                                        <p className="text-xs font-semibold text-gray-850 font-sans">{formatDate(item.delivery_date)}</p>
-                                                    </div>
+                                                {/* Detalhes do Item: Vl.Frete, % ICMS, Dt.Faturamento, Vendedor, Vl. IPI, Data do Pedido */}
+                                                {/* Dt. Entrega hidden per FF-HARDENING-015 Item 3 */}
+                                                <div className="mb-4 p-3.5 bg-gray-50 border border-gray-200 rounded-lg grid grid-cols-2 md:grid-cols-6 gap-4 shadow-3xs animate-fade-in">
                                                     <div>
                                                         <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-0.5">Vl. Frete</label>
                                                         <p className="text-xs font-bold text-green-700 font-mono">

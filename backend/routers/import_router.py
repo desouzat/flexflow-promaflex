@@ -821,18 +821,23 @@ def confirm_staging(
                 _calculated_sum_brl = 0.0
                 _po_total_brl = 0.0
 
-            # Status routing (FF-HARDENING-004 dual path vs normal path)
-            if has_financial_mismatch:
-                if payload.financial_override:
-                    # CASE A: operator approved mismatch → PCP column (DB value: APPROVED)
-                    po_status_macro = PurchaseOrder.STATUS_APPROVED
-                else:
-                    # CASE B: operator did not approve mismatch → archive to Concluídos (DB: COMPLETED)
-                    po_status_macro = PurchaseOrder.STATUS_COMPLETED
+            # Extract metadata flags BEFORE routing decision (FF-HARDENING-015 Item 3)
+            is_personalized = any(item.extra_metadata.is_personalized for item in po.items if item.extra_metadata)
+            is_new_client = any(item.extra_metadata.is_new_client for item in po.items if item.extra_metadata)
+            is_export = any(item.extra_metadata.is_export for item in po.items if item.extra_metadata)
+            is_replacement = any(item.extra_metadata.is_replacement for item in po.items if item.extra_metadata)
+            is_triangular = any(getattr(item.extra_metadata, 'is_triangular', False) for item in po.items if item.extra_metadata)
+            is_estoque = any(getattr(item.extra_metadata, 'is_estoque', False) for item in po.items if item.extra_metadata)
+
+            # Status routing — FF-HARDENING-013 Item 2: ALL confirmed POs route strictly to PCP.
+            # Exception FF-HARDENING-015 Item 3: Triangular/Remessa or Material de Estoque POs
+            # skip manufacturing and route directly to BILLING (Faturamento).
+            if is_triangular or is_estoque:
+                po_status_macro = PurchaseOrder.STATUS_BILLING  # → Faturamento column
             elif has_blocked_item:
                 po_status_macro = PurchaseOrder.STATUS_FINANCE
             else:
-                po_status_macro = PurchaseOrder.STATUS_APPROVED
+                po_status_macro = PurchaseOrder.STATUS_APPROVED  # → PCP column
 
             # 3. Create new PurchaseOrder
             # ONET 2026-07-01 DATE ROLE ALIGNMENT:
@@ -857,12 +862,6 @@ def confirm_staging(
                         po_carrier_code = item.carrier_code
                     if po_carrier_name is None and item.carrier_name:
                         po_carrier_name = item.carrier_name
-
-            # Extract fields from staging items payload
-            is_personalized = any(item.extra_metadata.is_personalized for item in po.items if item.extra_metadata)
-            is_new_client = any(item.extra_metadata.is_new_client for item in po.items if item.extra_metadata)
-            is_export = any(item.extra_metadata.is_export for item in po.items if item.extra_metadata)
-            is_replacement = any(item.extra_metadata.is_replacement for item in po.items if item.extra_metadata)
 
             customization_notes = None
             attachment_path = None
@@ -919,6 +918,8 @@ def confirm_staging(
                     "is_new_client": is_new_client,
                     "is_export": is_export,
                     "is_replacement": is_replacement,
+                    "is_triangular": is_triangular,               # FF-HARDENING-015 Item 3
+                    "is_estoque": is_estoque,                     # FF-HARDENING-015 Item 3
                     "customization_notes": customization_notes,
                     "attachment_path": attachment_path,
                     "additional_costs": po.additional_costs,
@@ -957,6 +958,8 @@ def confirm_staging(
                     "is_new_client": item.extra_metadata.is_new_client if item.extra_metadata else False,
                     "is_export": item.extra_metadata.is_export if item.extra_metadata else False,
                     "is_replacement": item.extra_metadata.is_replacement if item.extra_metadata else False,
+                    "is_triangular": getattr(item.extra_metadata, 'is_triangular', False) if item.extra_metadata else False,   # FF-HARDENING-015
+                    "is_estoque": getattr(item.extra_metadata, 'is_estoque', False) if item.extra_metadata else False,           # FF-HARDENING-015
                     "customization_notes": item.extra_metadata.customization_notes if item.extra_metadata else None,
                     "attachment_path": item.extra_metadata.attachment_path if item.extra_metadata else None,
                     "attachment_filename": item.extra_metadata.attachment_filename if item.extra_metadata else None,
@@ -1026,10 +1029,11 @@ def confirm_staging(
                         _ff004_decision = "FINANCIAL_OVERRIDE_APPROVED"
                         _ff004_routed_to = "APPROVED (PCP)"
                     else:
-                        # CASE B: operator did not approve → archived to Concluídos
-                        _ff004_justification = "CONFERIDO - NÃO APROVADO DIVERGENCIA (IPI)"
-                        _ff004_decision = "FINANCIAL_MISMATCH_REJECTED"
-                        _ff004_routed_to = "COMPLETED (Concluídos)"
+                        # CASE B: mismatch detected but no override — still routed to PCP
+                        # (FF-HARDENING-013: COMPLETED routing removed; all POs go to PCP)
+                        _ff004_justification = "CONFERIDO - DIVERGENCIA IPI DETECTADA (ROTEADO PARA PCP)"
+                        _ff004_decision = "FINANCIAL_MISMATCH_NOTED_ROUTED_PCP"
+                        _ff004_routed_to = "APPROVED (PCP)"  # no longer COMPLETED
 
                     _ff004_hash = AuditLog.calculate_hash_v2(
                         tenant_id=tenant_uuid,
@@ -1110,6 +1114,49 @@ def confirm_staging(
                     )
                     db.add(audit_log)
                     db.flush()  # sends audit_log INSERT; item FK satisfied above
+
+                # FF-HARDENING-015 Item 3: Write immutable CONFERIDO audit log for Triangular/Remessa or Estoque routing
+                item_is_triangular = getattr(item.extra_metadata, 'is_triangular', False) if item.extra_metadata else False
+                item_is_estoque = getattr(item.extra_metadata, 'is_estoque', False) if item.extra_metadata else False
+                if item_is_triangular or item_is_estoque:
+                    _route_type = "TRIANGULAR/REMESSA" if item_is_triangular else "MATERIAL DE ESTOQUE (E-COM)"
+                    _conferido_reason = f"CONFERIDO - ROTEADO PARA FATURAMENTO ({_route_type})"
+                    _now_billing = datetime.now(timezone.utc)
+                    _billing_hash = AuditLog.calculate_hash_v2(
+                        tenant_id=tenant_uuid,
+                        item_id=new_item_id,
+                        from_status=None,
+                        to_status="BILLING",
+                        timestamp=_now_billing,
+                        previous_hash=None,
+                        changed_by=user_uuid
+                    )
+                    _billing_audit = AuditLog(
+                        id=uuid.uuid4(),
+                        item_id=new_item_id,
+                        from_status=None,
+                        to_status="BILLING",
+                        hash=_billing_hash,
+                        previous_hash=None,
+                        hash_version=AuditLog.HASH_VERSION_CURRENT,
+                        is_exception=False,
+                        justification=_conferido_reason,
+                        changed_by=user_uuid,
+                        created_at=_now_billing,
+                        extra_data={
+                            "decision": "DIRECT_TO_BILLING",
+                            "route_type": _route_type,
+                            "po_number": po.po_number,
+                            "workflow": "FF_HARDENING_015_BILLING_ROUTING"
+                        }
+                    )
+                    db.add(_billing_audit)
+                    db.flush()
+                    print(
+                        f"[FF-HARDENING-015] Billing routing audit log written for PO {po.po_number} | "
+                        f"Route type: {_route_type}",
+                        flush=True
+                    )
 
             # ── Single commit per PO: atomically commits ClientPreference + PurchaseOrder
             # + all OrderItems + all AuditLogs in one COMMIT round-trip.

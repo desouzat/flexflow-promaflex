@@ -91,6 +91,9 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
         safepo.extra_metadata?.is_exchange_return ||
         (safepo.po_number || '').startsWith('TR-')
     ) || false
+    // FF-HARDENING-016 Item 2: Triangular/Remessa and Material de Estoque badges
+    const isTriangular = !!(safepo.partition_metadata?.is_triangular || safepo.extra_metadata?.is_triangular)
+    const isEstoque = !!(safepo.partition_metadata?.is_estoque || safepo.extra_metadata?.is_estoque)
 
     const marginInfo = useMemo(() => {
         if (safepo.margin_percentage === '***' || safepo.margin_global === '***') {
@@ -345,6 +348,30 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
                     </div>
                 )}
 
+                {/* FF-HARDENING-016 Item 2: Triangular/Remessa badge (compact) */}
+                {isTriangular && (
+                    <div className="mb-2">
+                        <span
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-orange-50 text-orange-700 border border-orange-300"
+                            title="Pedido triangular / remessa de faturamento"
+                        >
+                            🔺 Triangular
+                        </span>
+                    </div>
+                )}
+
+                {/* FF-HARDENING-016 Item 2: Mat. Estoque / e-com badge (compact) */}
+                {isEstoque && (
+                    <div className="mb-2">
+                        <span
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-teal-50 text-teal-700 border border-teal-300"
+                            title="Venda direta de e-commerce (Material de estoque)"
+                        >
+                            🏭 Mat. Estoque
+                        </span>
+                    </div>
+                )}
+
                 <p className="font-bold text-gray-800 mb-2" style={{ fontSize: '12px' }}>
                     Cliente: {safepo.client_name}
                 </p>
@@ -466,6 +493,30 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
                 </div>
             )}
 
+            {/* FF-HARDENING-016 Item 2: Triangular/Remessa badge (full card) */}
+            {isTriangular && (
+                <div
+                    className="mb-3 px-3 py-2 bg-orange-50 border border-orange-300 rounded-lg flex items-center gap-2"
+                    title="Pedido triangular / remessa de faturamento"
+                >
+                    <span className="text-xs font-bold text-orange-700 flex items-center gap-1.5">
+                        <span>🔺</span> Triangular
+                    </span>
+                </div>
+            )}
+
+            {/* FF-HARDENING-016 Item 2: Mat. Estoque / e-com badge (full card) */}
+            {isEstoque && (
+                <div
+                    className="mb-3 px-3 py-2 bg-teal-50 border border-teal-300 rounded-lg flex items-center gap-2"
+                    title="Venda direta de e-commerce (Material de estoque)"
+                >
+                    <span className="text-xs font-bold text-teal-700 flex items-center gap-1.5">
+                        <span>🏭</span> Mat. Estoque
+                    </span>
+                </div>
+            )}
+
             {/* Header */}
             <div className="flex items-start justify-between mb-3">
                 <div className="flex-1">
@@ -580,7 +631,7 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
                                              <span className="font-semibold font-mono text-white">{formatCurrency(marginInfo.breakdown.vp)}</span>
                                          </div>
                                          <div className="flex justify-between text-red-400 py-1">
-                                             <span className="text-slate-400">(-) Impostos (22.25%):</span>
+                                             <span className="text-slate-400">(-) Impostos (9.25% PIS/COFINS):</span>
                                              <span className="font-mono">-{formatCurrency(marginInfo.breakdown.taxes)}</span>
                                          </div>
                                          {marginInfo.breakdown.commission > 0 && (

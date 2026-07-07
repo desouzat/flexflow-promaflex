@@ -46,7 +46,7 @@ class FinancialService:
         sale_price: Decimal,
         cost: Decimal,
         shipping_cost: Decimal = Decimal("0.00"),
-        tax_rate: Decimal = Decimal("22.25")
+        tax_rate: Decimal = Decimal("9.25")  # FF-HARDENING-015: PIS/COFINS unified rate (was 22.25)
     ) -> Decimal:
         """
         Calculate margin percentage.
@@ -57,7 +57,7 @@ class FinancialService:
             sale_price: Sale price of the item/PO
             cost: Total cost (material cost)
             shipping_cost: Shipping/freight cost
-            tax_rate: Tax rate percentage (default 22.25%)
+            tax_rate: Tax rate percentage (default 9.25% PIS/COFINS)
             
         Returns:
             Margin percentage
@@ -231,7 +231,7 @@ class FinancialService:
         term_days: Union[int, float, str],
         client_code: Optional[str] = None,
         manual_commission_rate: Optional[Decimal] = None,
-        tax_rate: Decimal = Decimal("22.25")
+        tax_rate: Decimal = Decimal("9.25")  # FF-HARDENING-015: PIS/COFINS unified rate (was 22.25)
     ) -> Dict:
         """
         Calculate all financial metrics for a PO.

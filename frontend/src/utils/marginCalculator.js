@@ -50,7 +50,7 @@ export function parsePaymentTermsToDays(terms) {
  * @param {number} params.commissionRate - Commission rate percentage (e.g. 2.5 for 2.5%)
  * @param {number} params.costs - SKU unit cost or production costs (mp + mo + energy + gas)
  * @param {number} params.paymentDays - Payment term in days
- * @param {number} [params.taxRate=22.25] - Tax rate percentage (defaults to 22.25%)
+ * @param {number} [params.taxRate=9.25] - Tax rate percentage (defaults to 9.25% PIS/COFINS; was 22.25)
  * @returns {object} Status, margin (percentage), and detailed internal breakdown
  */
 export function calculateDynamicMargin({
@@ -59,7 +59,7 @@ export function calculateDynamicMargin({
     commissionRate = 0,
     costs = 0,
     paymentDays = 0,
-    taxRate = 22.25
+    taxRate = 9.25  // FF-HARDENING-015: PIS/COFINS unified rate (was 22.25)
 }) {
     // Null Safety check: If cost is missing, undefined, or <= 0, return PENDENTE_PCP
     const parsedCosts = parseFloat(costs);
@@ -76,7 +76,7 @@ export function calculateDynamicMargin({
     const parsedGross = parseFloat(gross) || 0;
     const parsedFreight = parseFloat(freight) || 0;
     const parsedCommissionRate = parseFloat(commissionRate) || 0;
-    const parsedTaxRate = parseFloat(taxRate) || 22.25;
+    const parsedTaxRate = parseFloat(taxRate) || 9.25;  // FF-HARDENING-015: PIS/COFINS fallback
 
     // 1. VP (Present Value) = Gross / (1.025 ** (paymentDays / 30))
     const vpFactor = Math.pow(1.025, paymentDays / 30);
@@ -183,7 +183,7 @@ export function calculatePOMargins(po) {
         
         const vpFactor = Math.pow(1.025, days / 30);
         const itemVP = itemGross / vpFactor;
-        const itemTaxes = itemVP * 0.2225;
+        const itemTaxes = itemVP * 0.0925;  // FF-HARDENING-015: PIS/COFINS 9.25% (was 0.2225)
 
         // Try getting commission rate from item or PO
         const commissionRate = 

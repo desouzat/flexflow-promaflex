@@ -234,6 +234,13 @@ const SkuProductionRow = ({ item, itemProdFields, setItemProductionFields, onSav
     const iProd = itemProdFields[item.id] || {}
     const codigoEstruturado = iMeta.codigo_estruturado || item.codigo_estruturado || iMeta.description || ''
 
+    // Dimensions — stored as largura/comprimento in extra_metadata (mm)
+    const largura = iMeta.largura ?? iMeta.width ?? item.width ?? null
+    const comprimento = iMeta.comprimento ?? iMeta.length ?? item.length ?? null
+    const dimensaoLabel = (largura != null && comprimento != null)
+        ? ` (Medidas: ${parseFloat(largura)} mm × ${parseFloat(comprimento)} mm)`
+        : ''
+
     // Seed from the persisted DB value (stable). iProd.status_producao is the
     // transient in-flight parent value — use it only as the higher-priority override.
     const [localStatus, setLocalStatus] = React.useState(
@@ -251,9 +258,32 @@ const SkuProductionRow = ({ item, itemProdFields, setItemProductionFields, onSav
     const handleStatusChange = (e) => {
         const val = e.target.value
         setLocalStatus(val)  // immediate local visual update — no parent re-render
+        // FF-HARDENING-016 Bug 1: Autosave on change. Use functional updater so the
+        // setTimeout callback reads the *committed* state, not a stale closure.
         setItemProductionFields(prev => {
             const updated = { ...prev, [item.id]: { ...(prev[item.id] || {}), status_producao: val } }
-            setTimeout(() => onSave(), 0)  // schedule save after state commits
+            setTimeout(() => onSave(updated), 0)  // pass latest state to avoid stale closure
+            return updated
+        })
+    }
+
+    // FF-HARDENING-016 Bug 1: Autosave on every field change (not just blur).
+    // Uses functional updater + setTimeout pattern so the scheduled save always
+    // receives the freshest state regardless of React batching.
+    const handleQtyChange = (e) => {
+        const val = e.target.value
+        setItemProductionFields(prev => {
+            const updated = { ...prev, [item.id]: { ...(prev[item.id] || {}), qtd_real_produzida: val } }
+            setTimeout(() => onSave(updated), 0)
+            return updated
+        })
+    }
+
+    const handlePerdaChange = (e) => {
+        const val = e.target.value
+        setItemProductionFields(prev => {
+            const updated = { ...prev, [item.id]: { ...(prev[item.id] || {}), perda_tecnica: val } }
+            setTimeout(() => onSave(updated), 0)
             return updated
         })
     }
@@ -261,7 +291,7 @@ const SkuProductionRow = ({ item, itemProdFields, setItemProductionFields, onSav
     return (
         <div className="p-4 bg-blue-50 border border-blue-100 rounded-lg space-y-3">
             <div className="text-xs font-bold text-blue-800 uppercase tracking-wide">
-                SKU: {item.sku}{codigoEstruturado ? ` — ${codigoEstruturado}` : ''}
+                SKU: {item.sku}{codigoEstruturado ? ` — ${codigoEstruturado}` : ''}{dimensaoLabel}
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
@@ -285,20 +315,21 @@ const SkuProductionRow = ({ item, itemProdFields, setItemProductionFields, onSav
                     <input
                         type="number" step="1" min="1"
                         value={iProd.qtd_real_produzida || ''}
-                        onChange={(e) => setItemProductionFields(prev => ({ ...prev, [item.id]: { ...(prev[item.id] || {}), qtd_real_produzida: e.target.value } }))}
+                        onChange={handleQtyChange}
                         onBlur={onSave}
                         placeholder="Ex: 500"
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800 font-medium"
                     />
                 </div>
                 <div>
+                    {/* Perda Técnica is OPTIONAL — blank is saved as 0.0 (FF-HARDENING-015 Item 1) */}
                     <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
-                        Perda Técnica ({poUnit}) <span className="text-red-500">*</span>
+                        Perda Técnica ({poUnit}) <span className="text-gray-400 normal-case font-normal">(opcional)</span>
                     </label>
                     <input
                         type="number" step="1" min="0"
                         value={iProd.perda_tecnica || ''}
-                        onChange={(e) => setItemProductionFields(prev => ({ ...prev, [item.id]: { ...(prev[item.id] || {}), perda_tecnica: e.target.value } }))}
+                        onChange={handlePerdaChange}
                         onBlur={onSave}
                         placeholder={`Ex: 12 ${poUnit}`}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800 font-medium"
@@ -850,13 +881,16 @@ const KanbanPage = () => {
             const response = await api.put(`/kanban/pos/${selectedPO.id}/area-fields`, fieldsToUpdate)
             if (response.data.success) {
                 // Update selectedPO in local state
-                setSelectedPO(prev => ({
-                    ...prev,
-                    extra_metadata: {
-                        ...(prev.extra_metadata || {}),
-                        ...response.data.partition_metadata
+                setSelectedPO(prev => {
+                    if (!prev) return prev  // FF-HARDENING-015 Item 2: null guard — modal may have closed
+                    return {
+                        ...prev,
+                        extra_metadata: {
+                            ...(prev.extra_metadata || {}),
+                            ...response.data.partition_metadata
+                        }
                     }
-                }))
+                })
                 // Also update in boardData to reflect changes instantly on the cards
                 setBoardData(prev => {
                     if (!prev || !prev.columns) return prev
@@ -887,9 +921,14 @@ const KanbanPage = () => {
     }
 
     // FF-HARDENING-013 Issue B: Save per-SKU production metrics to backend
-    const handleSaveProductionItems = async () => {
+    // FF-HARDENING-016 Bug 1: Accepts optional overrideFields to prevent stale-closure autosave.
+    // When called from onChange handlers, the freshest state is passed as overrideFields.
+    // When called from onBlur or the manual save button, overrideFields is undefined and
+    // the hook's current itemProductionFields is used (which is up-to-date at that point).
+    const handleSaveProductionItems = async (overrideFields) => {
         if (!selectedPO) return
-        const items = Object.entries(itemProductionFields).map(([item_id, fields]) => ({
+        const fieldsToUse = overrideFields || itemProductionFields
+        const items = Object.entries(fieldsToUse).map(([item_id, fields]) => ({
             item_id,
             status_producao: fields.status_producao || null,
             qtd_real_produzida: fields.qtd_real_produzida !== '' ? parseFloat(fields.qtd_real_produzida) : null,
@@ -901,16 +940,20 @@ const KanbanPage = () => {
             const response = await api.post(`/kanban/pos/${selectedPO.id}/production`, { items })
             if (response.data.success) {
                 // Reflect updated extra_metadata back into selectedPO.items for display consistency
-                setSelectedPO(prev => ({
-                    ...prev,
-                    items: (prev.items || []).map(item => {
-                        const updated = response.data.items?.find(u => u.item_id === item.id)
-                        if (updated) {
-                            return { ...item, extra_metadata: updated.extra_metadata }
-                        }
-                        return item
-                    })
-                }))
+                // and so canAdvanceCurrentArea() can read persisted values from iMeta fallback.
+                setSelectedPO(prev => {
+                    if (!prev) return prev  // FF-HARDENING-015 Item 2: null guard — modal may have closed
+                    return {
+                        ...prev,
+                        items: (prev.items || []).map(item => {
+                            const updated = response.data.items?.find(u => u.item_id === item.id)
+                            if (updated) {
+                                return { ...item, extra_metadata: updated.extra_metadata }
+                            }
+                            return item
+                        })
+                    }
+                })
             }
         } catch (err) {
             console.error('Error saving production items:', err)
@@ -1535,19 +1578,23 @@ const KanbanPage = () => {
         }
 
         if (selectedPO.status === 'Produção/Embalagem') {
-            // FF-HARDENING-013 Issue B: validate ALL items have Concluído + qtd_real_produzida > 0
+            // Enable advance as soon as ALL items have:
+            //   1. Any production status chosen (START or Concluído)
+            //   2. qtd_real_produzida > 0
+            // Reads from itemProductionFields (live in-memory state) with
+            // item.extra_metadata as the persisted fallback.
             const items = selectedPO.items || []
             if (items.length === 0) return false
             return items.every(item => {
                 const iProd = itemProductionFields[item.id] || {}
                 const iMeta = item.extra_metadata || {}
                 const statusProd = iProd.status_producao || iMeta.status_producao || ''
-                const qRealStr = iProd.qtd_real_produzida !== undefined ? iProd.qtd_real_produzida : (iMeta.qtd_real_produzida != null ? String(iMeta.qtd_real_produzida) : '')
+                const qRealStr = iProd.qtd_real_produzida !== undefined
+                    ? iProd.qtd_real_produzida
+                    : (iMeta.qtd_real_produzida != null ? String(iMeta.qtd_real_produzida) : '')
                 const qReal = parseFloat(qRealStr)
-                return (
-                    (statusProd === 'Finalizado' || statusProd === 'FINISH' || statusProd === 'Concluído') &&
-                    !isNaN(qReal) && qReal > 0
-                )
+                // Accept any non-empty status ('START' = Em Andamento, 'Concluído' = FINISH)
+                return statusProd !== '' && !isNaN(qReal) && qReal > 0
             })
         }
 
