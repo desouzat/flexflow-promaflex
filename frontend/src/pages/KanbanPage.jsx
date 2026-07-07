@@ -217,6 +217,98 @@ const LogisticsUploadSection = ({
     )
 }
 
+/**
+ * SkuProductionRow — module-scope component (MUST stay outside KanbanPage).
+ *
+ * React identifies components by their function reference. If this were defined
+ * inside KanbanPage (or inside the .map() callback), every parent re-render would
+ * produce a NEW function reference → React treats it as a completely different
+ * component type → full unmount + remount → useState wiped → select resets.
+ *
+ * At module scope the reference is stable forever, so React reuses the existing
+ * DOM node and local state across parent re-renders.
+ */
+const SkuProductionRow = ({ item, itemProdFields, setItemProductionFields, onSave }) => {
+    const iMeta = item.extra_metadata || {}
+    const poUnit = (iMeta.unit || item.unit || 'UN').toUpperCase()
+    const iProd = itemProdFields[item.id] || {}
+    const codigoEstruturado = iMeta.codigo_estruturado || item.codigo_estruturado || iMeta.description || ''
+
+    // Seed from the persisted DB value (stable). iProd.status_producao is the
+    // transient in-flight parent value — use it only as the higher-priority override.
+    const [localStatus, setLocalStatus] = React.useState(
+        iProd.status_producao || iMeta.status_producao || ''
+    )
+
+    // Re-sync when the server-side value changes (e.g. after fetchBoard refreshes selectedPO)
+    React.useEffect(() => {
+        const serverVal = iMeta.status_producao || ''
+        if (serverVal && serverVal !== localStatus) {
+            setLocalStatus(serverVal)
+        }
+    }, [iMeta.status_producao]) // eslint-disable-line react-hooks/exhaustive-deps
+
+    const handleStatusChange = (e) => {
+        const val = e.target.value
+        setLocalStatus(val)  // immediate local visual update — no parent re-render
+        setItemProductionFields(prev => {
+            const updated = { ...prev, [item.id]: { ...(prev[item.id] || {}), status_producao: val } }
+            setTimeout(() => onSave(), 0)  // schedule save after state commits
+            return updated
+        })
+    }
+
+    return (
+        <div className="p-4 bg-blue-50 border border-blue-100 rounded-lg space-y-3">
+            <div className="text-xs font-bold text-blue-800 uppercase tracking-wide">
+                SKU: {item.sku}{codigoEstruturado ? ` — ${codigoEstruturado}` : ''}
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                        Status da Produção <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                        value={localStatus}
+                        onChange={handleStatusChange}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-semibold text-gray-800"
+                    >
+                        <option value="">Selecione...</option>
+                        <option value="START">Em Andamento (START)</option>
+                        <option value="Concluído">Concluído (FINISH)</option>
+                    </select>
+                </div>
+                <div>
+                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                        Qtd Real Produzida ({poUnit}) <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                        type="number" step="1" min="1"
+                        value={iProd.qtd_real_produzida || ''}
+                        onChange={(e) => setItemProductionFields(prev => ({ ...prev, [item.id]: { ...(prev[item.id] || {}), qtd_real_produzida: e.target.value } }))}
+                        onBlur={onSave}
+                        placeholder="Ex: 500"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800 font-medium"
+                    />
+                </div>
+                <div>
+                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                        Perda Técnica ({poUnit}) <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                        type="number" step="1" min="0"
+                        value={iProd.perda_tecnica || ''}
+                        onChange={(e) => setItemProductionFields(prev => ({ ...prev, [item.id]: { ...(prev[item.id] || {}), perda_tecnica: e.target.value } }))}
+                        onBlur={onSave}
+                        placeholder={`Ex: 12 ${poUnit}`}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800 font-medium"
+                    />
+                </div>
+            </div>
+        </div>
+    )
+}
+
 const KanbanPage = () => {
 
     const [boardData, setBoardData] = useState(null)
@@ -2824,90 +2916,16 @@ const KanbanPage = () => {
                                                                             // overwriting the select's value with a stale prop before React commits the new state.
                                                                             <div className="space-y-4">
                                                                                 {(selectedPO.items && selectedPO.items.length > 0) ? selectedPO.items.map(item => {
-                                                                                    // Capture stable values for closure
-                                                                                    const iMeta = item.extra_metadata || {}
-                                                                                    const poUnit = (iMeta.unit || item.unit || 'UN').toUpperCase()
-                                                                                    const iProd = itemProductionFields[item.id] || {}
-                                                                                    // FF-HARDENING-013 Issue 2.b: Código Estruturado instead of description
-                                                                                    const codigoEstruturado = iMeta.codigo_estruturado || item.codigo_estruturado || iMeta.description || ''
-
-                                                                                    // Inner row component — state-isolated to prevent select-reset race.
-                                                                                    // HOTFIX: seed from item.extra_metadata (persisted DB value, stable)
-                                                                                    // NOT from iProd (parent transient state, can be stale on remount).
-                                                                                    const SkuRow = () => {
-                                                                                        const persistedStatus = item.extra_metadata?.status_producao || ''
-                                                                                        const [localStatus, setLocalStatus] = React.useState(
-                                                                                            iProd.status_producao || persistedStatus
-                                                                                        )
-
-                                                                                        // Re-sync if the persisted value changes externally (e.g. after fetchBoard)
-                                                                                        React.useEffect(() => {
-                                                                                            if (persistedStatus && persistedStatus !== localStatus) {
-                                                                                                setLocalStatus(persistedStatus)
-                                                                                            }
-                                                                                        }, [persistedStatus]) // eslint-disable-line react-hooks/exhaustive-deps
-
-                                                                                        const handleStatusChange = (e) => {
-                                                                                            const val = e.target.value
-                                                                                            setLocalStatus(val)
-                                                                                            setItemProductionFields(prev => {
-                                                                                                const updated = { ...prev, [item.id]: { ...(prev[item.id] || {}), status_producao: val } }
-                                                                                                setTimeout(() => handleSaveProductionItems(), 0)
-                                                                                                return updated
-                                                                                            })
-                                                                                        }
-
-                                                                                        return (
-                                                                                            <div className="p-4 bg-blue-50 border border-blue-100 rounded-lg space-y-3">
-                                                                                                <div className="text-xs font-bold text-blue-800 uppercase tracking-wide">
-                                                                                                    SKU: {item.sku}{codigoEstruturado ? ` — ${codigoEstruturado}` : ''}
-                                                                                                </div>
-                                                                                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                                                                                    <div>
-                                                                                                        <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
-                                                                                                            Status da Produção <span className="text-red-500">*</span>
-                                                                                                        </label>
-                                                                                                        <select
-                                                                                                            value={localStatus}
-                                                                                                            onChange={handleStatusChange}
-                                                                                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-semibold text-gray-800"
-                                                                                                        >
-                                                                                                            <option value="">Selecione...</option>
-                                                                                                            <option value="START">Em Andamento (START)</option>
-                                                                                                            <option value="Concluído">Concluído (FINISH)</option>
-                                                                                                        </select>
-                                                                                                    </div>
-                                                                                                    <div>
-                                                                                                        <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
-                                                                                                            Qtd Real Produzida ({poUnit}) <span className="text-red-500">*</span>
-                                                                                                        </label>
-                                                                                                        <input
-                                                                                                            type="number" step="1" min="1"
-                                                                                                            value={iProd.qtd_real_produzida || ''}
-                                                                                                            onChange={(e) => setItemProductionFields(prev => ({ ...prev, [item.id]: { ...(prev[item.id] || {}), qtd_real_produzida: e.target.value } }))}
-                                                                                                            onBlur={handleSaveProductionItems}
-                                                                                                            placeholder="Ex: 500"
-                                                                                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800 font-medium"
-                                                                                                        />
-                                                                                                    </div>
-                                                                                                    <div>
-                                                                                                        <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
-                                                                                                            Perda Técnica ({poUnit}) <span className="text-red-500">*</span>
-                                                                                                        </label>
-                                                                                                        <input
-                                                                                                            type="number" step="1" min="0"
-                                                                                                            value={iProd.perda_tecnica || ''}
-                                                                                                            onChange={(e) => setItemProductionFields(prev => ({ ...prev, [item.id]: { ...(prev[item.id] || {}), perda_tecnica: e.target.value } }))}
-                                                                                                            onBlur={handleSaveProductionItems}
-                                                                                                            placeholder={`Ex: 12 ${poUnit}`}
-                                                                                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800 font-medium"
-                                                                                                        />
-                                                                                                    </div>
-                                                                                                </div>
-                                                                                            </div>
-                                                                                        )
-                                                                                    }
-                                                                                    return <SkuRow key={item.id} />
+                                                                                    // SkuProductionRow is defined at MODULE SCOPE (outside KanbanPage).
+                                                                                    // This gives it a stable component identity across all parent re-renders,
+                                                                                    // preventing the unmount+remount that wiped its useState on every update.
+                                                                                    return <SkuProductionRow
+                                                                                        key={item.id}
+                                                                                        item={item}
+                                                                                        itemProdFields={itemProductionFields}
+                                                                                        setItemProductionFields={setItemProductionFields}
+                                                                                        onSave={handleSaveProductionItems}
+                                                                                    />
                                                                                 }) : (
                                                                                     <p className="text-xs text-gray-500">Nenhum item para preencher.</p>
                                                                                 )}
