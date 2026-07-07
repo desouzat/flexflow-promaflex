@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
-import { Shield, Settings, Mail, Save, Loader2, Clock, Calendar, Timer, AlertCircle } from 'lucide-react'
+import { Shield, Settings, Mail, Save, Loader2, Clock, Calendar, Timer, AlertCircle, Download, FileText } from 'lucide-react'
 import api from '../utils/api'
 import { showSuccess, showError, showLoading, dismissToast } from '../utils/toast'
 
@@ -407,6 +407,76 @@ const SettingsPage = () => {
                                     </div>
                                 </form>
                             )}
+                        </div>
+                    )}
+
+                    {/* ── Relatórios de Dados Card (ADMIN ONLY) ── */}
+                    {isAdmin && (
+                        <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden">
+                            <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-emerald-50 to-teal-50">
+                                <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                                    <FileText className="w-5 h-5 text-emerald-600" />
+                                    Relatórios de Dados
+                                </h2>
+                                <p className="text-xs text-gray-500 mt-1">
+                                    Exportar dados operacionais em formato CSV compatível com Excel.
+                                </p>
+                            </div>
+                            <div className="p-6 flex flex-col gap-3">
+                                {/* Export all POs */}
+                                <button
+                                    id="btn-export-all-pos"
+                                    onClick={async () => {
+                                        try {
+                                            const token = localStorage.getItem('token')
+                                            const res = await fetch('/api/reports/po-export', {
+                                                headers: { 'Authorization': `Bearer ${token}` }
+                                            })
+                                            if (!res.ok) throw new Error('Falha no export')
+                                            const blob = await res.blob()
+                                            const url = URL.createObjectURL(blob)
+                                            const a = document.createElement('a')
+                                            a.href = url
+                                            a.download = `pedidos_export_${new Date().toISOString().slice(0,10)}.csv`
+                                            a.click()
+                                            URL.revokeObjectURL(url)
+                                        } catch (err) {
+                                            showError('Erro ao exportar relatório: ' + err.message)
+                                        }
+                                    }}
+                                    className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors shadow-sm font-semibold text-sm cursor-pointer"
+                                >
+                                    <Download className="w-4 h-4" />
+                                    📥 Exportar Todos os Pedidos (CSV)
+                                </button>
+
+                                {/* Export CANCELLED POs — Mesa de Conferência */}
+                                <button
+                                    id="btn-export-cancellations"
+                                    onClick={async () => {
+                                        try {
+                                            const token = localStorage.getItem('token')
+                                            const res = await fetch('/api/reports/cancellations-export', {
+                                                headers: { 'Authorization': `Bearer ${token}` }
+                                            })
+                                            if (!res.ok) throw new Error('Falha no export de cancelamentos')
+                                            const blob = await res.blob()
+                                            const url = URL.createObjectURL(blob)
+                                            const a = document.createElement('a')
+                                            a.href = url
+                                            a.download = `cancelamentos_export_${new Date().toISOString().slice(0,10)}.csv`
+                                            a.click()
+                                            URL.revokeObjectURL(url)
+                                        } catch (err) {
+                                            showError('Erro ao exportar relatório de cancelamentos: ' + err.message)
+                                        }
+                                    }}
+                                    className="flex items-center gap-2 px-5 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors shadow-sm font-semibold text-sm cursor-pointer"
+                                >
+                                    <Download className="w-4 h-4" />
+                                    📥 Exportar Relatório de Cancelados (CSV)
+                                </button>
+                            </div>
                         </div>
                     )}
 

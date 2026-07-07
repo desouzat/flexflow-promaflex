@@ -329,22 +329,49 @@ async def upload_incremental_costs(
             detail=f"Falha ao ler arquivo Excel: {str(e)}"
         )
         
-    if len(df.columns) < 4:
+    # ── Flexible name-based column detection (FF-HARDENING-016 Bug 1, hardened per safety audit) ─
+    # Columns are matched by case-insensitive normalised header text.
+    # CRITICAL: The primary cost column ('custo_mp_kg') uses STRICT exclusion so that
+    # secondary columns like 'Custo Total kg' or 'Custo KG' can NEVER be mistaken for it.
+    #
+    # Matching rules (evaluated top-to-bottom with elif; first match wins via setdefault):
+    #   'material'/'sku' in norm           → sku role
+    #   'rendimento' in norm               → rendimento role
+    #   'custo' in norm AND 'total' in norm OR 'kg' in norm
+    #                                      → custo_total_kg (secondary, not used for margin calc)
+    #   norm == 'custo' exactly            → custo_mp_kg (primary unit cost, used for margin)
+    #   'custo' in norm AND 'total' NOT in norm AND 'kg' NOT in norm
+    #                                      → custo_mp_kg (e.g. 'Custo Uníd.' variant)
+    col_map_upload = {}
+    for col in df.columns:
+        if not isinstance(col, str):
+            continue
+        norm = ' '.join(col.strip().lower().split())
+        if 'material' in norm or ('sku' in norm and 'total' not in norm):
+            col_map_upload.setdefault('sku', col)
+        elif 'rendimento' in norm:
+            col_map_upload.setdefault('rendimento', col)
+        # STRICT SECONDARY: any column with 'custo' AND ('total' or 'kg') is the secondary.
+        # It is mapped to custo_total_kg and intentionally NEVER used for custo_mp_kg.
+        elif 'custo' in norm and ('total' in norm or 'kg' in norm):
+            col_map_upload.setdefault('custo_total_kg', col)
+        # STRICT PRIMARY: 'custo' present, but neither 'total' nor 'kg' appear.
+        # This matches exactly 'CUSTO', 'Custo', 'custo un.', etc.
+        elif 'custo' in norm and 'total' not in norm and 'kg' not in norm:
+            col_map_upload.setdefault('custo_mp_kg', col)
+
+    required_upload = ['sku', 'rendimento', 'custo_mp_kg']
+    missing_upload = [r for r in required_upload if r not in col_map_upload]
+    if missing_upload:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="A planilha deve conter pelo menos 4 colunas (Material, Rendimento, ..., CUSTO KG)."
+            detail=(
+                f"Colunas obrigatórias não encontradas: {missing_upload}. "
+                f"Colunas detectadas: {list(df.columns)}. "
+                "Verifique se o arquivo contém cabeçalhos 'Material'/'SKU', 'Rendimento' e 'CUSTO KG'/'CUSTO'."
+            )
         )
-        
-    col_a = str(df.columns[0]).strip()
-    col_b = str(df.columns[1]).strip()
-    col_d = str(df.columns[3]).strip()
-    
-    if col_a != 'Material' or col_b != 'Rendimento' or col_d != 'CUSTO KG':
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Estrutura da planilha incorreta. Esperado exatamente as colunas: A='Material', B='Rendimento', D='CUSTO KG'. Encontrado: A='{col_a}', B='{col_b}', D='{col_d}'."
-        )
-        
+
     updated_count = 0
     created_count = 0
     updated_skus = []
@@ -353,21 +380,23 @@ async def upload_incremental_costs(
     user_uuid = uuid.UUID(str(current_user.id))
     
     for idx, row in df.iterrows():
-        raw_sku = row.iloc[0]
-        if pd.isna(raw_sku):
+        raw_sku = row.get(col_map_upload['sku'])
+        if raw_sku is None or (isinstance(raw_sku, float) and pd.isna(raw_sku)):
             continue
-            
         sku = str(raw_sku).strip()
-        if not sku:
+        if not sku or sku.lower() in ('nan', 'none', ''):
             continue
-            
+        # Skip header-repeat rows
+        if 'material' in sku.lower() or 'sku' in sku.lower():
+            continue
+
         try:
-            rendimento = float(row.iloc[1])
-            custo_mp_kg = float(row.iloc[3])
+            rendimento  = float(row.get(col_map_upload['rendimento']))
+            custo_mp_kg = float(row.get(col_map_upload['custo_mp_kg']))
         except (ValueError, TypeError):
             # Skip invalid rows
             continue
-            
+
         if rendimento <= 0 or custo_mp_kg < 0:
             continue
             
@@ -519,6 +548,16 @@ async def upload_onet_costs(
 
     # ── Map column names by matching header text (case-insensitive) ───────────────
     # Normalise: strip whitespace, collapse multiple spaces, convert to lowercase.
+    #
+    # CRITICAL DISAMBIGUATION (safety audit FF-HARDENING-016):
+    # The ONET sheet contains two similar columns:
+    #   Column E: 'CUSTO'        → custo_mp_kg (primary unit cost, used for all margin calculations)
+    #   Column F: 'Custo Total kg' → custo_total_kg (secondary derived field, NOT used for margins)
+    #
+    # Rule: A column maps to custo_mp_kg ONLY when 'custo' is present AND
+    #       neither 'total' NOR 'kg' appears in the normalised header.
+    #       Any header containing both 'custo' and ('total' or 'kg') maps to
+    #       custo_total_kg and is NEVER assigned to custo_mp_kg.
     col_map = {}   # semantic role -> original DataFrame column name
     for col in df.columns:
         if not isinstance(col, str):
@@ -529,10 +568,13 @@ async def upload_onet_costs(
             col_map.setdefault('sku', col)
         elif 'cod estruturado' in norm:
             col_map.setdefault('nome', col)
-        # 'custo total' MUST be matched before bare 'custo' to avoid mis-mapping
-        elif 'custo total' in norm:
+        # STRICT SECONDARY: columns with 'custo' AND ('total' or 'kg') are the secondary.
+        # Maps to custo_total_kg and is NEVER allowed to reach custo_mp_kg.
+        elif 'custo' in norm and ('total' in norm or 'kg' in norm):
             col_map.setdefault('custo_total_kg', col)
-        elif norm == 'custo' or ('custo' in norm and 'total' not in norm):
+        # STRICT PRIMARY: 'custo' present but neither 'total' nor 'kg' appear.
+        # This exclusively matches 'CUSTO', 'Custo', 'custo unitário', etc.
+        elif 'custo' in norm and 'total' not in norm and 'kg' not in norm:
             col_map.setdefault('custo_mp_kg', col)
         elif 'rendimento' in norm:
             col_map.setdefault('rendimento', col)

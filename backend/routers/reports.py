@@ -189,3 +189,137 @@ async def export_pos_csv(
             "Content-Type": "text/csv; charset=utf-8",
         },
     )
+
+
+@router.get("/cancellations-export")
+async def export_cancellations_csv(
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Export all CANCELLED purchase orders for the tenant as a CSV file.
+
+    Mesa de Conferência — Relatório de Cancelamentos.
+
+    Columns (8 in order):
+        Número PO | Cliente | Valor Total do Pedido | SKU |
+        Código estruturado | Justificativa de Cancelamento |
+        Data/hora cancelamento (America/Sao_Paulo) | Usuário
+
+    Security: Strictly filtered by current_user.tenant_id — no cross-tenant
+    data can appear in the response.
+    """
+    from zoneinfo import ZoneInfo  # Python 3.9+
+    SP_TZ = ZoneInfo("America/Sao_Paulo")
+
+    # ── Fetch only CANCELLED POs — tenant-scoped ─────────────────────────────
+    pos = (
+        db.query(PurchaseOrder)
+        .filter(
+            PurchaseOrder.tenant_id == current_user.tenant_id,
+            PurchaseOrder.status_macro == "CANCELLED"
+        )
+        .order_by(PurchaseOrder.updated_at.desc())
+        .all()
+    )
+
+    # ── Build CSV in memory ──────────────────────────────────────────────────
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter=";", quoting=csv.QUOTE_MINIMAL)
+
+    # Header row — exactly 8 columns as specified
+    writer.writerow([
+        "Número PO",
+        "Cliente",
+        "Valor Total do Pedido",
+        "SKU",
+        "Código estruturado",
+        "Justificativa de Cancelamento",
+        "Data/hora cancelamento",
+        "Usuário",
+    ])
+
+    for po in pos:
+        # ── Resolve shared PO-level fields ───────────────────────────────────
+        # client_name: uses the PO model @property (partition_metadata → item fallback)
+        client_name = po.client_name or ""
+
+        # Valor total — prefer po_total_value ORM column, fall back to sum of item prices
+        if po.po_total_value is not None:
+            total_value_str = f"{float(po.po_total_value):.2f}".replace(".", ",")
+        else:
+            computed = sum(
+                float(item.price or 0) * float(item.quantity or 0)
+                for item in (po.items or [])
+            )
+            total_value_str = f"{computed:.2f}".replace(".", ",")
+
+        # Justification text
+        justificativa = po.sla_justification_text or ""
+        usuario = po.sla_justification_user or ""
+
+        # Cancellation timestamp — convert UTC → America/Sao_Paulo
+        cancelamento_str = ""
+        if po.sla_justification_at:
+            # sla_justification_at is stored as UTC in PostgreSQL
+            utc_dt = po.sla_justification_at
+            if utc_dt.tzinfo is None:
+                # Naive datetime — treat as UTC
+                from datetime import timezone
+                utc_dt = utc_dt.replace(tzinfo=timezone.utc)
+            sp_dt = utc_dt.astimezone(SP_TZ)
+            cancelamento_str = sp_dt.strftime("%d/%m/%Y %H:%M:%S")
+
+        if not po.items:
+            # PO with no items — emit one row with blank item fields
+            writer.writerow([
+                po.po_number,
+                client_name,
+                total_value_str,
+                "",   # SKU
+                "",   # Código estruturado
+                justificativa,
+                cancelamento_str,
+                usuario,
+            ])
+            continue
+
+        for item in po.items:
+            meta = item.extra_metadata or {}
+
+            # SKU from OrderItem
+            sku = item.sku or ""
+
+            # Código estruturado from item.extra_metadata
+            codigo_estruturado = (
+                meta.get("codigo_estruturado")
+                or meta.get("cod_estruturado")
+                or meta.get("codigo")
+                or ""
+            )
+
+            writer.writerow([
+                po.po_number,
+                client_name,
+                total_value_str,
+                sku,
+                codigo_estruturado,
+                justificativa,
+                cancelamento_str,
+                usuario,
+            ])
+
+    # ── Stream response with BOM for Excel UTF-8 compatibility ───────────────
+    csv_content = "\ufeff" + output.getvalue()
+    output.close()
+
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    filename = f"cancelamentos_export_{timestamp}.csv"
+
+    return StreamingResponse(
+        iter([csv_content.encode("utf-8-sig")]),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Type": "text/csv; charset=utf-8",
+        },
+    )
