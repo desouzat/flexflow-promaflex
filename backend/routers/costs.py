@@ -448,9 +448,15 @@ async def upload_incremental_costs(
         ).first()
 
         if material:
+            # UPDATE — refresh only the cost and yield fields.
+            # IMPORTANT: do NOT overwrite material.nome here.
+            # The 'nome' (cod_estruturado) field is the exclusive domain of the
+            # /upload-onet endpoint which reads it from the "cod estruturado Onet"
+            # spreadsheet column.  Overwriting it with the raw numeric SKU (e.g.
+            # "111.0") would destroy any structured product code ("PAB035") already
+            # stored from a prior /upload-onet run.
             material.rendimento = rendimento
             material.custo_mp_kg = custo_mp_kg
-            material.nome = sku  # Material column is the source for both SKU and name
             material.updated_at = datetime.utcnow()
             material.updated_by = user_uuid
             updated_count += 1
