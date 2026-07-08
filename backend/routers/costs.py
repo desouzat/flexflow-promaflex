@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from decimal import Decimal
+import math
 
 from backend.schemas.cost_schema import (
     MaterialCostCreate,
@@ -22,6 +23,35 @@ from backend.routers.auth import get_current_user
 from backend.models import MaterialCost, User
 
 router = APIRouter(prefix="/api/costs", tags=["Custos"])
+
+
+def _safe_float(val, default: float = 0.0) -> float:
+    """Coerce a spreadsheet cell value to a finite float.
+
+    Handles:
+      - None / pd.NA / pd.NaT          → default (0.0)
+      - float('nan') / float('inf')    → default (0.0)
+      - Excel formula errors '#DIV/0!' → default (0.0)
+      - Any non-numeric string         → default (0.0)
+
+    This prevents Pydantic's 'finite_number' ValidationError and ensures
+    no NaN/Inf value is ever committed to the database.
+    """
+    if val is None:
+        return default
+    try:
+        import pandas as pd  # local import avoids circular issues
+        if pd.isna(val):
+            return default
+    except (TypeError, ValueError):
+        pass  # pd.isna raises on some non-scalar types; fall through
+    try:
+        result = float(val)
+    except (ValueError, TypeError):
+        return default
+    if not math.isfinite(result):
+        return default
+    return result
 
 
 def require_admin_or_master_role(current_user: UserInfo = Depends(get_current_user)):
@@ -396,9 +426,9 @@ async def upload_incremental_costs(
         if 'material' in sku.lower() or 'sku' in sku.lower():
             continue
         try:
-            rendimento  = float(row.get(col_map_upload['rendimento']))
-            custo_mp_kg = float(row.get(col_map_upload['custo_mp_kg']))
-        except (ValueError, TypeError):
+            rendimento  = _safe_float(row.get(col_map_upload['rendimento']))
+            custo_mp_kg = _safe_float(row.get(col_map_upload['custo_mp_kg']))
+        except Exception:
             continue
         if rendimento <= 0 or custo_mp_kg < 0:
             continue
@@ -644,9 +674,9 @@ async def upload_onet_costs(
         raw_custo      = row.get(col_map['custo_mp_kg'])
         raw_rendimento = row.get(col_map['rendimento'])
         try:
-            custo_mp_kg = float(raw_custo)
-            rendimento  = float(raw_rendimento)
-        except (ValueError, TypeError):
+            custo_mp_kg = _safe_float(raw_custo)
+            rendimento  = _safe_float(raw_rendimento)
+        except Exception:
             errors.append(f"SKU {sku}: valores inválidos em CUSTO ou RENDIMENTO — linha ignorada.")
             skipped_count += 1
             continue
