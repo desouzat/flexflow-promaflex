@@ -377,8 +377,11 @@ async def upload_incremental_costs(
         if not isinstance(col, str):
             continue
         norm = ' '.join(col.strip().lower().split())
-        if 'material' in norm or ('sku' in norm and 'total' not in norm):
+        if 'material' in norm or ('sku' in norm and 'total' not in norm and 'estruturado' not in norm):
             col_map_upload.setdefault('sku', col)
+        # COD ESTRUTURADO ONET (Column B) — the human-readable product code (e.g. 'PAB035')
+        elif 'cod estruturado' in norm or 'estruturado' in norm:
+            col_map_upload.setdefault('nome', col)
         elif 'rendimento' in norm:
             col_map_upload.setdefault('rendimento', col)
         # STRICT SECONDARY: any column with 'custo' AND ('total' or 'kg') is the secondary.
@@ -414,7 +417,10 @@ async def upload_incremental_costs(
     # Celso's business rule is: keep the row with the HIGHEST custo_mp_kg value.
     # This prevents UniqueViolation on (tenant_id, sku) when the DB loop would otherwise
     # attempt two INSERTs for the same SKU within the same unflushed session.
-    dedup: dict = {}   # sku -> {'rendimento': float, 'custo_mp_kg': float}
+    # sku -> {'nome': str, 'rendimento': float, 'custo_mp_kg': float}
+    # 'nome' is read from the 'COD ESTRUTURADO ONET' column (col B) when present;
+    # it falls back to sku ONLY for truly legacy files that have no such column.
+    dedup: dict = {}
 
     for idx, row in df.iterrows():
         raw_sku = row.get(col_map_upload['sku'])
@@ -425,6 +431,20 @@ async def upload_incremental_costs(
             continue
         if 'material' in sku.lower() or 'sku' in sku.lower():
             continue
+
+        # Read 'COD ESTRUTURADO ONET' (Column B) as the product's structured name.
+        # Fall back to sku ONLY when the column is absent (legacy sheet format).
+        nome_col = col_map_upload.get('nome')
+        raw_cod  = row.get(nome_col) if nome_col else None
+        nome = (
+            str(raw_cod).strip()
+            if raw_cod is not None and not (isinstance(raw_cod, float) and pd.isna(raw_cod))
+            else sku
+        )
+        # Skip header-echo rows (e.g. if row contains the column label itself)
+        if 'cod estruturado' in nome.lower() or 'estruturado' in nome.lower():
+            continue
+
         try:
             rendimento  = _safe_float(row.get(col_map_upload['rendimento']))
             custo_mp_kg = _safe_float(row.get(col_map_upload['custo_mp_kg']))
@@ -434,10 +454,11 @@ async def upload_incremental_costs(
             continue
         # Keep row with HIGHEST custo_mp_kg for this SKU
         if sku not in dedup or custo_mp_kg > dedup[sku]['custo_mp_kg']:
-            dedup[sku] = {'rendimento': rendimento, 'custo_mp_kg': custo_mp_kg}
+            dedup[sku] = {'nome': nome, 'rendimento': rendimento, 'custo_mp_kg': custo_mp_kg}
 
     # ── Pass 2: UPSERT deduplicated rows into DB ──────────────────────────────
     for sku, vals in dedup.items():
+        nome        = vals['nome']         # COD ESTRUTURADO ONET (e.g. 'PAB035')
         rendimento  = vals['rendimento']
         custo_mp_kg = vals['custo_mp_kg']
 
@@ -448,13 +469,11 @@ async def upload_incremental_costs(
         ).first()
 
         if material:
-            # UPDATE — refresh only the cost and yield fields.
-            # IMPORTANT: do NOT overwrite material.nome here.
-            # The 'nome' (cod_estruturado) field is the exclusive domain of the
-            # /upload-onet endpoint which reads it from the "cod estruturado Onet"
-            # spreadsheet column.  Overwriting it with the raw numeric SKU (e.g.
-            # "111.0") would destroy any structured product code ("PAB035") already
-            # stored from a prior /upload-onet run.
+            # UPDATE — refresh cost, yield, AND nome (cod_estruturado).
+            # Since this endpoint now reads the COD ESTRUTURADO ONET column directly,
+            # it is safe to update nome here. nome is only the sku fallback when
+            # the source file has no cod_estruturado column.
+            material.nome = nome
             material.rendimento = rendimento
             material.custo_mp_kg = custo_mp_kg
             material.updated_at = datetime.utcnow()
@@ -465,10 +484,10 @@ async def upload_incremental_costs(
                 id=uuid.uuid4(),
                 tenant_id=tenant_uuid,
                 sku=sku,
-                nome=sku,
+                nome=nome,   # COD ESTRUTURADO ONET — never nome=sku
                 rendimento=rendimento,
                 custo_mp_kg=custo_mp_kg,
-                indice_impostos=9.25,  # FF-HARDENING-015: PIS/COFINS unified rate (was 22.25)
+                indice_impostos=9.25,  # FF-HARDENING-015: PIS/COFINS unified rate
                 updated_by=user_uuid,
                 created_at=datetime.utcnow(),
                 updated_at=datetime.utcnow()
