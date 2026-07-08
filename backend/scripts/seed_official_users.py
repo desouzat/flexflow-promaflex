@@ -16,27 +16,52 @@ from backend.database import SessionLocal, engine, Base
 from backend.models import Tenant, User
 from backend.routers.auth import get_password_hash
 
-# List of official users to seed
+# ── OFFICIAL PRODUCTION USER LIST — 23 accounts (Andrea's final list, 2026-07-07) ──────────────
 OFFICIAL_USERS = [
-    {"area": "Comercial",   "email": "mairla@promaflex.com.br",                    "role": "operator", "name": "Mairla"},
-    {"area": "Comercial",   "email": "jader@promaflex.com.br",                     "role": "operator", "name": "Jader"},
-    {"area": "Comercial",   "email": "mvelletri_promaflex@grupovelletri.com.br",   "role": "operator", "name": "Mvelletri Promaflex"},
-    {"area": "Comercial",   "email": "barbara@bardge.com.br",                     "role": "operator", "name": "Barbara"},
-    {"area": "Financeiro",  "email": "anderson.moreno@promaflex.com.br",           "role": "master",   "name": "Anderson Moreno"},
-    {"area": "Financeiro",  "email": "alex@promaflex.com.br",                      "role": "master",   "name": "Alex"},
-    {"area": "Financeiro",  "email": "cristiane.oliveira@promaflex.com.br",        "role": "master",   "name": "Cristiane Oliveira"},
-    {"area": "Expedicao",   "email": "fabio_promaflex@grupovelletri.com.br",       "role": "operator", "name": "Fabio Promaflex"},
-    {"area": "Expedicao",   "email": "gabriel_promaflex@grupovelletri.com.br",     "role": "operator", "name": "Gabriel Promaflex"},
-    {"area": "Expedicao",   "email": "expedicao@promaflex.com.br",                 "role": "operator", "name": "Expedicao"},
-    {"area": "PCP",         "email": "jonata_promaflex@grupovelletri.com.br",      "role": "operator", "name": "Jonata Promaflex"},
-    {"area": "PCP",         "email": "cristiano_promaflex@grupovelletri.com.br",   "role": "operator", "name": "Cristiano Promaflex"},
-    {"area": "PCP",         "email": "rogerio_promaflex@grupovelletri.com.br",     "role": "operator", "name": "Rogerio Promaflex"},
-    {"area": "PCP",         "email": "claudio.xavier@grupovelletri.com.br",        "role": "operator", "name": "Claudio Xavier"},
-    {"area": "Embalagem",   "email": "embalagem_promaflex@grupovelletri.com.br",   "role": "operator", "name": "Embalagem Promaflex"},
-    {"area": "Management",  "email": "andrea@grupovelletri.com.br",               "role": "master",   "name": "Andrea"},
-    # CRITICAL: Primary admin account — must always be present
-    {"area": "Management",  "email": "thiago@botcase.net",                         "role": "admin",    "name": "Thiago BotCase"},
+    # ── MASTER ROLES ──────────────────────────────────────────────────────────────────────────────
+    {"area": "Management",  "email": "andrea@promaflex.com.br",                     "role": "master",   "name": "Andrea"},
+    {"area": "Management",  "email": "celso.paes@promaflex.com.br",                 "role": "master",   "name": "Celso Paes"},
+
+    # ── COMERCIAL CONFERÊNCIA (Mesa de Conferência operators) ─────────────────────────────────────
+    {"area": "Comercial",   "email": "mairla@promaflex.com.br",                     "role": "operator", "name": "Mairla"},
+    {"area": "Comercial",   "email": "abimaelbrito@promaflex.com.br",               "role": "operator", "name": "Abimael Brito"},
+    {"area": "Comercial",   "email": "comercial@promaflex.com.br",                  "role": "operator", "name": "Comercial Promaflex"},
+
+    # ── COMERCIAL OPERATORS ────────────────────────────────────────────────────────────────────────
+    {"area": "Comercial",   "email": "jader@promaflex.com.br",                      "role": "operator", "name": "Jader"},
+    {"area": "Comercial",   "email": "mvelletri_promaflex@grupovelletri.com.br",    "role": "operator", "name": "Mvelletri Promaflex"},
+    {"area": "Comercial",   "email": "barbara@bardge.com.br",                       "role": "operator", "name": "Barbara"},
+    {"area": "Comercial",   "email": "alexandre@promaflex.com.br",                  "role": "operator", "name": "Alexandre"},
+    {"area": "Comercial",   "email": "leandro@promaflex.com.br",                    "role": "operator", "name": "Leandro"},
+    {"area": "Comercial",   "email": "clayton@promaflex.com.br",                    "role": "operator", "name": "Clayton"},
+    {"area": "Comercial",   "email": "fabio.sodre@promaflex.com.br",                "role": "operator", "name": "Fabio Sodre"},
+    {"area": "Comercial",   "email": "Luis.monteiro@promaflex.com.br",              "role": "operator", "name": "Luis Monteiro"},
+    {"area": "Comercial",   "email": "isadora_promaflex@grupovelletri.com.br",      "role": "operator", "name": "Isadora Promaflex"},
+    {"area": "Comercial",   "email": "guilherme@promaflex.com.br",                  "role": "operator", "name": "Guilherme"},
+    {"area": "Comercial",   "email": "psauma_promaflex@grupovelletri.com.br",       "role": "operator", "name": "Psauma Promaflex"},
+    {"area": "Comercial",   "email": "rodrigo.cruz@promaflex.com.br",               "role": "operator", "name": "Rodrigo Cruz"},
+
+    # ── LOGISTICA & EXPEDICAO ──────────────────────────────────────────────────────────────────────
+    {"area": "Expedicao",   "email": "roberto.souza@promaflex.com.br",              "role": "operator", "name": "Roberto Souza"},
+    {"area": "Expedicao",   "email": "gabriel_promaflex@grupovelletri.com.br",      "role": "operator", "name": "Gabriel Promaflex"},
+    {"area": "Expedicao",   "email": "Expedicao@promaflex.com.br",                  "role": "operator", "name": "Expedicao Promaflex"},
+    {"area": "Expedicao",   "email": "luis.silva@promaflex.com.br",                 "role": "operator", "name": "Luis Silva"},
+
+    # ── PCP OPERATORS ─────────────────────────────────────────────────────────────────────────────
+    # Note: Jonata also covers Embalagem area per Andrea's request
+    {"area": "PCP",         "email": "Jonata_promaflex@grupovelletri.com.br",       "role": "operator", "name": "Jonata Promaflex"},
+    {"area": "PCP",         "email": "cristiano_promaflex@grupovelletri.com.br",    "role": "operator", "name": "Cristiano Promaflex"},
+    {"area": "PCP",         "email": "rogerio_promaflex@grupovelletri.com.br",      "role": "operator", "name": "Rogerio Promaflex"},
+    {"area": "PCP",         "email": "claudio.xavier@grupovelletri.com.br",         "role": "operator", "name": "Claudio Xavier"},
+
+    # ── EMBALAGEM OPERATOR ─────────────────────────────────────────────────────────────────────────
+    {"area": "Embalagem",   "email": "Embalagem_promaflex@grupovelletri.com.br",    "role": "operator", "name": "Embalagem Promaflex"},
+
+    # ── CRITICAL: Primary admin account — must ALWAYS remain present and active ───────────────────
+    {"area": "Management",  "email": "thiago@botcase.net",                          "role": "admin",    "name": "Thiago BotCase",
+     "is_sla_manager": True},
 ]
+
 
 DEFAULT_PASSWORD = "Proma@2026"
 
@@ -76,23 +101,29 @@ def seed_users():
         hashed_pwd = get_password_hash(DEFAULT_PASSWORD)
         
         # 3. Seed users
+        total = len(OFFICIAL_USERS)
         processed_count = 0
         for user_info in OFFICIAL_USERS:
-            email = user_info["email"]
-            role = user_info["role"]
-            area = user_info["area"]
-            name = user_info["name"]
-            
-            # Check if user exists by email
-            existing_user = db.query(User).filter(User.email == email).first()
-            
+            email           = user_info["email"]
+            role            = user_info["role"]
+            area            = user_info["area"]
+            name            = user_info["name"]
+            is_sla_manager  = user_info.get("is_sla_manager", False)
+
+            # Check if user exists by email (case-insensitive)
+            existing_user = db.query(User).filter(
+                User.email.ilike(email)
+            ).first()
+
             if existing_user:
                 print(f"User {email} already exists. Updating area='{area}', role='{role}'...")
-                existing_user.name = name
-                existing_user.area = area
-                existing_user.role = role
+                existing_user.name            = name
+                existing_user.area            = area
+                existing_user.role            = role
                 existing_user.hashed_password = hashed_pwd
-                existing_user.is_active = True
+                existing_user.is_active       = True
+                if is_sla_manager:
+                    existing_user.is_sla_manager = True
                 db.add(existing_user)
                 status_str = "UPDATED"
             else:
@@ -104,19 +135,37 @@ def seed_users():
                     hashed_password=hashed_pwd,
                     role=role,
                     area=area,
-                    is_active=True
+                    is_active=True,
+                    is_sla_manager=is_sla_manager,
                 )
                 db.add(new_user)
                 status_str = "CREATED"
-                
+
             processed_count += 1
-            print(f"  [{processed_count:02d}/17] {email} -> {status_str}")
-            
+            print(f"  [{processed_count:02d}/{total}] {email} -> {status_str}")
+
         db.commit()
         print("=" * 60)
-        print(f"SUCCESS: Seeding completed! {processed_count} users processed.")
+        print(f"SUCCESS: Seeding completed! {processed_count}/{total} users processed.")
         print("=" * 60)
-        
+
+        # ── Verification: count active users in DB ─────────────────────────────
+        active_users = db.query(User).filter(
+            User.tenant_id == tenant.id,
+            User.is_active == True
+        ).order_by(User.area, User.email).all()
+
+        print(f"\nVERIFICATION: Total active users in flexflow_prod = {len(active_users)}")
+        print("-" * 72)
+        print(f"  {'#':<4} {'Email':<48} {'Role':<10} {'Area'}")
+        print("-" * 72)
+        for i, u in enumerate(active_users, 1):
+            sla = " [SLA]" if getattr(u, "is_sla_manager", False) else ""
+            print(f"  {i:<4} {u.email:<48} {u.role:<10} {u.area}{sla}")
+        print("-" * 72)
+        print(f"  TOTAL: {len(active_users)} active user(s) confirmed in database.")
+        print("=" * 60)
+
     except Exception as e:
         db.rollback()
         print(f"ERROR: Seeding failed: {e}")
