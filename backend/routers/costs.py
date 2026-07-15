@@ -89,44 +89,50 @@ async def list_material_costs(
     - Lista de custos de materiais
     """
     
-    # Query base
-    query = db.query(MaterialCost).filter(
-        MaterialCost.tenant_id == current_user.tenant_id
-    )
-    
-    # Aplicar filtro de SKU se fornecido
-    if sku:
-        query = query.filter(MaterialCost.sku.ilike(f"%{sku}%"))
-    
-    # Contar total
-    total = query.count()
-    
-    # Aplicar paginação
-    materials = query.order_by(MaterialCost.sku).offset(skip).limit(limit).all()
-    
-    # Converter para response
-    items = [
-        MaterialCostResponse(
-            id=str(material.id),
-            tenant_id=str(material.tenant_id),
-            sku=material.sku,
-            nome=material.nome,
-            custo_mp_kg=Decimal(str(material.custo_mp_kg)),
-            rendimento=Decimal(str(material.rendimento)),
-            indice_impostos=Decimal(str(material.indice_impostos)),
-            created_at=material.created_at,
-            updated_at=material.updated_at,
-            updated_by=str(material.updated_by) if material.updated_by else None
+    try:
+        # Query base
+        query = db.query(MaterialCost).filter(
+            MaterialCost.tenant_id == current_user.tenant_id
         )
-        for material in materials
-    ]
-    
-    return MaterialCostListResponse(
-        items=items,
-        total=total,
-        skip=skip,
-        limit=limit
-    )
+        
+        # Aplicar filtro de SKU ou Nome (Código Estruturado) se fornecido
+        if sku:
+            query = query.filter(
+                (MaterialCost.sku.ilike(f"%{sku}%")) | (MaterialCost.nome.ilike(f"%{sku}%"))
+            )
+        
+        # Contar total
+        total = query.count()
+        
+        # Aplicar paginação
+        materials = query.order_by(MaterialCost.sku).offset(skip).limit(limit).all()
+        
+        # Converter para response
+        items = [
+            MaterialCostResponse(
+                id=str(material.id),
+                tenant_id=str(material.tenant_id),
+                sku=material.sku,
+                nome=material.nome,
+                custo_mp_kg=Decimal(str(material.custo_mp_kg)),
+                rendimento=Decimal(str(material.rendimento)),
+                indice_impostos=Decimal(str(material.indice_impostos)),
+                created_at=material.created_at,
+                updated_at=material.updated_at,
+                updated_by=str(material.updated_by) if material.updated_by else None
+            )
+            for material in materials
+        ]
+        
+        return MaterialCostListResponse(
+            items=items,
+            total=total,
+            skip=skip,
+            limit=limit
+        )
+    finally:
+        db.close()
+
 
 
 @router.get("/materials/{sku}", response_model=MaterialCostResponse)
