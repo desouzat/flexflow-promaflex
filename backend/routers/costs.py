@@ -202,7 +202,7 @@ async def get_material_cost(
 @router.post("/materials", response_model=MaterialCostResponse, status_code=status.HTTP_201_CREATED)
 async def create_material_cost(
     material_data: MaterialCostCreate,
-    current_user: UserInfo = Depends(require_admin_or_master_role),
+    current_user: UserInfo = Depends(require_costs_lookup_permission),
     db: Session = Depends(get_db)
 ):
     """
@@ -262,7 +262,7 @@ async def create_material_cost(
 async def update_material_cost(
     sku: str,
     material_data: MaterialCostUpdate,
-    current_user: UserInfo = Depends(require_admin_or_master_role),
+    current_user: UserInfo = Depends(require_costs_lookup_permission),
     db: Session = Depends(get_db)
 ):
     """
