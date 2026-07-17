@@ -460,7 +460,7 @@ class ImportService:
             if error:
                 errors.append(error)
             else:
-                data['sku'] = sku
+                data['sku'] = sku.strip().replace('.', '')
         
         # Parse quantity
         if ImportFieldType.QUANTITY not in field_to_column:

@@ -181,8 +181,17 @@ def test_pcp_cost_lookup_permission(monkeypatch):
         return original_query(self, *args, **kwargs)
     monkeypatch.setattr(Session, "query", patched_query_post)
     
+    # Test POST /materials (Create) with dot in SKU
+    captured_added_skus = []
+    def mock_add_with_capture(self, instance):
+        if hasattr(instance, 'sku'):
+            captured_added_skus.append(instance.sku)
+        mock_add(self, instance)
+        
+    monkeypatch.setattr(Session, "add", mock_add_with_capture)
+    
     post_payload = {
-        "sku": "NEW_SKU",
+        "sku": "8.243",
         "nome": "New Material",
         "custo_mp_kg": 10.5,
         "rendimento": 1.2,
@@ -190,12 +199,13 @@ def test_pcp_cost_lookup_permission(monkeypatch):
     }
     response_post = client.post("/api/costs/materials", json=post_payload)
     assert response_post.status_code == 201
+    assert "8243" in captured_added_skus  # verified dot was stripped
     
-    # Test PUT /materials/{sku} (Update)
+    # Test PUT /materials/{sku} (Update) with dot in SKU path
     mock_existing_material = MaterialCost(
         id=uuid.UUID("33333333-3333-3333-3333-333333333333"),
         tenant_id=uuid.UUID("22222222-2222-2222-2222-222222222222"),
-        sku="EXISTING_SKU",
+        sku="8243",
         nome="Existing Material",
         custo_mp_kg=5.0,
         rendimento=1.0,
@@ -203,12 +213,13 @@ def test_pcp_cost_lookup_permission(monkeypatch):
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow()
     )
-    mock_put_query = MagicMock()
-    mock_put_query.filter.return_value = mock_put_query
-    mock_put_query.first.return_value = mock_existing_material
     
+    captured_queries = []
     def patched_query_put(self, *args, **kwargs):
         if args and args[0] == MaterialCost:
+            mock_put_query = MagicMock()
+            mock_put_query.filter.side_effect = lambda *filters: (captured_queries.extend(filters), mock_put_query)[1]
+            mock_put_query.first.return_value = mock_existing_material
             return mock_put_query
         return original_query(self, *args, **kwargs)
     monkeypatch.setattr(Session, "query", patched_query_put)
@@ -219,7 +230,7 @@ def test_pcp_cost_lookup_permission(monkeypatch):
         "rendimento": 1.5,
         "indice_impostos": 22.25
     }
-    response_put = client.put("/api/costs/materials/EXISTING_SKU", json=put_payload)
+    response_put = client.put("/api/costs/materials/8.243", json=put_payload)
     assert response_put.status_code == 200
     
     # Test DELETE /materials/{sku} should be 403 (unauthorized for OPERADOR/PCP)

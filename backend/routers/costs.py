@@ -174,15 +174,16 @@ async def get_material_cost(
     - Dados de custo do material
     """
     
+    sanitized_sku = sku.strip().replace('.', '')
     material = db.query(MaterialCost).filter(
         MaterialCost.tenant_id == current_user.tenant_id,
-        MaterialCost.sku == sku
+        MaterialCost.sku == sanitized_sku
     ).first()
     
     if not material:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Material com SKU '{sku}' não encontrado"
+            detail=f"Material com SKU '{sanitized_sku}' não encontrado"
         )
     
     return MaterialCostResponse(
@@ -216,6 +217,9 @@ async def create_material_cost(
     **Returns:**
     - Material criado
     """
+    
+    # Sanitize SKU
+    material_data.sku = str(material_data.sku).strip().replace('.', '')
     
     # Verificar se SKU já existe
     existing = db.query(MaterialCost).filter(
@@ -280,15 +284,16 @@ async def update_material_cost(
     - Material atualizado
     """
     
+    sanitized_sku = sku.strip().replace('.', '')
     material = db.query(MaterialCost).filter(
         MaterialCost.tenant_id == current_user.tenant_id,
-        MaterialCost.sku == sku
+        MaterialCost.sku == sanitized_sku
     ).first()
     
     if not material:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Material com SKU '{sku}' não encontrado"
+            detail=f"Material com SKU '{sanitized_sku}' não encontrado"
         )
     
     # Atualizar campos fornecidos
@@ -333,15 +338,16 @@ async def delete_material_cost(
     - 204 No Content
     """
     
+    sanitized_sku = sku.strip().replace('.', '')
     material = db.query(MaterialCost).filter(
         MaterialCost.tenant_id == current_user.tenant_id,
-        MaterialCost.sku == sku
+        MaterialCost.sku == sanitized_sku
     ).first()
     
     if not material:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Material com SKU '{sku}' não encontrado"
+            detail=f"Material com SKU '{sanitized_sku}' não encontrado"
         )
     
     db.delete(material)
