@@ -67,12 +67,33 @@ def require_admin_or_master_role(current_user: UserInfo = Depends(get_current_us
     return current_user
 
 
+def require_costs_lookup_permission(
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Dependency para permitir acesso a custos para admin, master ou qualquer operador da área PCP.
+    """
+    if current_user.role.lower() in ["admin", "master"]:
+        return current_user
+        
+    import uuid
+    user = db.query(User).filter(User.id == uuid.UUID(str(current_user.id))).first()
+    if user and user.area and user.area.upper() == "PCP":
+        return current_user
+        
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Acesso negado. Apenas administradores, masters ou usuários da área PCP podem consultar custos."
+    )
+
+
 @router.get("/materials", response_model=MaterialCostListResponse)
 async def list_material_costs(
     skip: int = Query(0, ge=0, description="Número de registros a pular"),
     limit: int = Query(100, ge=1, le=1000, description="Máximo de registros a retornar"),
     sku: Optional[str] = Query(None, description="Filtrar por SKU (busca parcial)"),
-    current_user: UserInfo = Depends(require_admin_or_master_role),
+    current_user: UserInfo = Depends(require_costs_lookup_permission),
     db: Session = Depends(get_db)
 ):
     """

@@ -1024,40 +1024,66 @@ const ImportPage = () => {
         }
     }
 
-    const handleSyncS3 = async () => {
+    const [showS3Modal, setShowS3Modal] = useState(false)
+    const [s3Files, setS3Files] = useState([])
+    const [selectedS3Files, setSelectedS3Files] = useState([])
+    const [fetchingS3Files, setFetchingS3Files] = useState(false)
+
+    const handleOpenSyncModal = async () => {
+        setShowS3Modal(true)
+        setFetchingS3Files(true)
+        setS3Files([])
+        setSelectedS3Files([])
+        try {
+            const response = await api.get('/import/pending-s3-files')
+            setS3Files(response.data)
+            // Pre-select all files on load
+            setSelectedS3Files(response.data.map(f => f.filename))
+        } catch (error) {
+            console.error('Error fetching S3 files:', error)
+            showError('Erro ao buscar arquivos pendentes no S3.')
+        } finally {
+            setFetchingS3Files(false)
+        }
+    }
+
+    const handleConfirmS3Import = async () => {
+        if (selectedS3Files.length === 0) return
         setSyncing(true)
         const toastId = showLoading('Sincronizando com ONET (Nuvem)...')
 
         try {
-            const response = await api.post('/import/sync-s3')
+            const response = await api.post('/import/sync-s3', {
+                filenames: selectedS3Files
+            })
 
             dismissToast(toastId)
 
             if (response.data.success) {
-                const { files_processed, pos_imported } = response.data
+                const { files_processed, pos_imported, errors } = response.data
 
                 if (files_processed > 0) {
                     showSuccess(
-                        `✅ ${files_processed} arquivo(s) processado(s)! ` +
-                        `POs importados: ${pos_imported.join(', ')}`
+                        `✅ Sincronização concluída! ${files_processed} arquivo(s) processado(s).`
                     )
-                    refreshNotifications()
+                    if (pos_imported && pos_imported.length > 0) {
+                        showSuccess(`POs importados: ${pos_imported.join(', ')}`)
+                    }
+                    if (errors && errors.length > 0) {
+                        showError(`Divergências: ${errors.join('; ')}`)
+                    }
+                    await refreshNotifications()
                 } else {
-                    showSuccess('✅ Sincronização concluída. Nenhum arquivo novo encontrado.')
+                    showSuccess('✅ Sincronização concluída. Nenhum arquivo novo importado.')
                 }
+                setShowS3Modal(false)
             } else {
                 showError(response.data.message || 'Falha na sincronização')
             }
         } catch (error) {
             dismissToast(toastId)
             console.error('S3 sync error:', error)
-
-            // Don't block manual upload if S3 fails
-            if (error.response?.status === 503) {
-                showError('⚠️ Serviço S3 não disponível. Use upload manual abaixo.')
-            } else {
-                showError('⚠️ Erro ao sincronizar com ONET. Use upload manual abaixo.')
-            }
+            showError(error.response?.data?.detail || 'Erro ao sincronizar com ONET.')
         } finally {
             setSyncing(false)
         }
@@ -1160,7 +1186,7 @@ const ImportPage = () => {
                     </div>
                     <div className="flex items-center gap-3">
                         <button
-                            onClick={handleSyncS3}
+                            onClick={handleOpenSyncModal}
                             disabled={syncing}
                             title="Buscar automaticamente novos arquivos Excel da nuvem ONET e importá-los para o sistema"
                             className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -2566,6 +2592,151 @@ const ImportPage = () => {
                                 }`}
                             >
                                 {cancellingImport ? 'Cancelando...' : '🚫 Confirmar Cancelamento'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* S3 Sync Modal */}
+            {showS3Modal && (
+                <div className="fixed inset-0 bg-slate-900 bg-opacity-50 backdrop-blur-xs flex items-center justify-center z-[9999] p-4 animate-fade-in">
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh] border border-slate-200">
+                        {/* Header */}
+                        <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                                <Cloud className="w-5 h-5 text-blue-600 animate-pulse" />
+                                <h3 className="text-lg font-bold text-slate-800">Sincronizar com ONET (Nuvem)</h3>
+                            </div>
+                            <button 
+                                onClick={() => setShowS3Modal(false)}
+                                className="text-slate-400 hover:text-slate-600 hover:bg-slate-100 p-1.5 rounded-lg transition-all"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+                        
+                        {/* Body */}
+                        <div className="p-6 overflow-y-auto flex-1">
+                            {fetchingS3Files ? (
+                                <div className="flex flex-col items-center justify-center py-12 gap-3">
+                                    <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                                    <span className="text-sm font-medium text-slate-600">Buscando arquivos pendentes no S3...</span>
+                                </div>
+                            ) : s3Files.length === 0 ? (
+                                <div className="text-center py-12">
+                                    <Package className="w-12 h-12 text-slate-400 mx-auto mb-3" />
+                                    <h4 className="font-semibold text-slate-700 mb-1">Nenhum arquivo novo encontrado</h4>
+                                    <p className="text-sm text-slate-500">O bucket do ONET está atualizado.</p>
+                                </div>
+                            ) : (
+                                <div className="space-y-4">
+                                    <div className="flex items-center justify-between bg-slate-50 p-3 rounded-lg border border-slate-200">
+                                        <label className="flex items-center gap-2 cursor-pointer text-slate-700 font-semibold text-sm">
+                                            <input 
+                                                type="checkbox"
+                                                checked={selectedS3Files.length === s3Files.length}
+                                                onChange={(e) => {
+                                                    if (e.target.checked) {
+                                                        setSelectedS3Files(s3Files.map(f => f.filename))
+                                                    } else {
+                                                        setSelectedS3Files([])
+                                                    }
+                                                }}
+                                                className="w-4 h-4 rounded text-blue-600 border-slate-300 focus:ring-blue-500"
+                                            />
+                                            Selecionar Todos ({s3Files.length})
+                                        </label>
+                                        <span className="text-xs text-slate-500 font-medium">
+                                            {selectedS3Files.length} selecionado(s)
+                                        </span>
+                                    </div>
+                                    
+                                    <div className="border border-slate-200 rounded-lg overflow-hidden">
+                                        <table className="w-full text-left text-sm border-collapse">
+                                            <thead>
+                                                <tr className="bg-slate-50 text-slate-600 uppercase font-semibold text-xs border-b border-slate-200">
+                                                    <th className="px-4 py-3 w-10">Select</th>
+                                                    <th className="px-4 py-3">Arquivo</th>
+                                                    <th className="px-4 py-3">Data Ref</th>
+                                                    <th className="px-4 py-3">Tamanho</th>
+                                                    <th className="px-4 py-3">Status</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-100 text-slate-700 font-medium">
+                                                {s3Files.map((file) => (
+                                                    <tr 
+                                                        key={file.filename}
+                                                        className={`hover:bg-slate-50 transition-colors ${file.is_empty_template ? 'bg-slate-50/50' : ''}`}
+                                                    >
+                                                        <td className="px-4 py-3">
+                                                            <input 
+                                                                type="checkbox"
+                                                                checked={selectedS3Files.includes(file.filename)}
+                                                                onChange={(e) => {
+                                                                    if (e.target.checked) {
+                                                                        setSelectedS3Files(prev => [...prev, file.filename])
+                                                                    } else {
+                                                                        setSelectedS3Files(prev => prev.filter(name => name !== file.filename))
+                                                                    }
+                                                                }}
+                                                                className="w-4 h-4 rounded text-blue-600 border-slate-300 focus:ring-blue-500"
+                                                            />
+                                                        </td>
+                                                        <td className="px-4 py-3 font-mono text-xs max-w-[200px] truncate" title={file.filename}>
+                                                            {file.filename}
+                                                        </td>
+                                                        <td className="px-4 py-3 text-slate-600">
+                                                            {file.parsed_date}
+                                                        </td>
+                                                        <td className="px-4 py-3 text-slate-500">
+                                                            {(file.size_bytes / 1024).toFixed(1)} KB
+                                                        </td>
+                                                        <td className="px-4 py-3">
+                                                            {file.is_empty_template ? (
+                                                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-700 border border-gray-300">
+                                                                    Vazio - Final de Semana
+                                                                </span>
+                                                            ) : (
+                                                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700 border border-green-200">
+                                                                    Possui Dados
+                                                                </span>
+                                                            )}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                        
+                        {/* Footer */}
+                        <div className="bg-slate-50 px-6 py-4 border-t border-slate-200 flex justify-end gap-3">
+                            <button 
+                                onClick={() => setShowS3Modal(false)}
+                                className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-100 font-semibold transition-colors"
+                                disabled={syncing}
+                            >
+                                Cancelar
+                            </button>
+                            <button 
+                                onClick={handleConfirmS3Import}
+                                disabled={syncing || selectedS3Files.length === 0 || fetchingS3Files}
+                                className="flex items-center gap-2 px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-semibold"
+                            >
+                                {syncing ? (
+                                    <>
+                                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                        <span>Importando...</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <Cloud className="w-5 h-5" />
+                                        <span>Confirmar e Importar</span>
+                                    </>
+                                )}
                             </button>
                         </div>
                     </div>

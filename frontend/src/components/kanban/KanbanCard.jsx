@@ -529,6 +529,18 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
                             <div className="flex items-center gap-1">
                                 {strategicIndicators.map((indicator) => {
                                     const IconComponent = indicator.icon
+                                    if (indicator.key === 'is_personalized') {
+                                        return (
+                                            <div
+                                                key={indicator.key}
+                                                className="inline-flex items-center gap-1 bg-red-50 text-red-700 text-xs font-semibold px-2 py-0.5 rounded border border-red-200"
+                                                title={indicator.tooltip}
+                                            >
+                                                <IconComponent className="w-3 h-3 text-red-600" />
+                                                <span>Personalizado</span>
+                                            </div>
+                                        )
+                                    }
                                     return (
                                         <div
                                             key={indicator.key}

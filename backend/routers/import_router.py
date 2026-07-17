@@ -557,69 +557,158 @@ def validate_staging_item(
     }
 
 
-@router.post("/sync-s3")
-async def sync_s3_bucket(
+from pydantic import BaseModel
+from typing import List
+
+class SyncS3Request(BaseModel):
+    filenames: List[str]
+
+
+@router.get("/pending-s3-files")
+async def get_pending_s3_files(
     current_user: UserInfo = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
-    Manually trigger S3 bucket synchronization.
-    
-    Checks the configured S3 bucket for new CSV/XLSX files and imports them.
-    
-    **Returns:**
-    - Sync results with number of files processed and POs imported
-    
-    **Requires:**
-    - S3 credentials configured in .env file
+    List all unprocessed files in the S3 bucket with parsed date and metadata.
     """
     from backend.services.s3_service import S3Service
+    import re
     
-    try:
-        # Create S3 service
-        s3_service = S3Service(db)
-        
-        # Check if S3 is configured
-        if not s3_service.is_configured():
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="S3 service not configured. Please check environment variables (S3_ACCESS_KEY, S3_SECRET_KEY, S3_BUCKET_NAME)."
-            )
-        
-        # Trigger sync
-        result = s3_service.check_for_new_files(
-            tenant_id=str(current_user.tenant_id),
-            user_id=str(current_user.id)
+    s3_service = S3Service(db)
+    if not s3_service.is_configured():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="S3 service not configured. Please check environment variables (S3_ACCESS_KEY, S3_SECRET_KEY, S3_BUCKET_NAME)."
         )
         
-        # Format response
-        if result['success']:
-            message = f"Sincronização concluída: {result['files_processed']} arquivo(s) processado(s)"
-            if result['files_failed'] > 0:
-                message += f", {result['files_failed']} falhou(s)"
+    try:
+        files = s3_service.list_new_files()
+        pending = []
+        
+        for f in files:
+            key = f['key']
+            filename = f['filename']
+            size = f['size']
+            last_modified = f.get('last_modified')
             
-            return {
-                "success": True,
-                "message": message,
-                "files_found": result['files_found'],
-                "files_processed": result['files_processed'],
-                "files_failed": result['files_failed'],
-                "pos_imported": result['pos_imported'],
-                "errors": result['errors']
-            }
-        else:
-            return {
-                "success": False,
-                "message": "Sincronização falhou: " + "; ".join(result['errors']),
-                "files_found": result['files_found'],
-                "files_processed": result['files_processed'],
-                "files_failed": result['files_failed'],
-                "pos_imported": result['pos_imported'],
-                "errors": result['errors']
-            }
+            # Parse date from name e.g. Exportacao_20260712_200000.xlsx
+            match = re.search(r"Exportacao_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})", filename)
+            if match:
+                year, month, day, hour, minute, second = match.groups()
+                parsed_date = f"{day}/{month}/{year} às {hour}:{minute}"
+            else:
+                # Fallback using last modified timestamp
+                parsed_date = last_modified.strftime("%d/%m/%Y às %H:%M") if last_modified else "Desconhecida"
+                
+            is_empty_template = size <= 3500
+            
+            pending.append({
+                "filename": filename,
+                "file_key": key,
+                "parsed_date": parsed_date,
+                "size_bytes": size,
+                "is_empty_template": is_empty_template
+            })
+            
+        return pending
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao listar arquivos do S3: {str(e)}"
+        )
+
+
+@router.post("/sync-s3")
+async def sync_s3_bucket(
+    req: SyncS3Request,
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Sincroniza apenas os arquivos selecionados do bucket S3.
+    Para templates de final de semana (is_empty_template = True), move diretamente para a pasta processed sem processar.
+    """
+    from backend.services.s3_service import S3Service
+    import logging
     
-    except HTTPException:
-        raise
+    logger = logging.getLogger("backend.services.s3_service")
+    s3_service = S3Service(db)
+    
+    if not s3_service.is_configured():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="S3 service not configured. Please check environment variables (S3_ACCESS_KEY, S3_SECRET_KEY, S3_BUCKET_NAME)."
+        )
+        
+    result = {
+        'success': True,
+        'files_processed': 0,
+        'files_failed': 0,
+        'pos_imported': [],
+        'errors': []
+    }
+    
+    try:
+        # Get list of new files in S3
+        all_new_files = s3_service.list_new_files()
+        selected_filenames = set(req.filenames)
+        
+        # Filter to only keep selected files
+        selected_files = [f for f in all_new_files if f['filename'] in selected_filenames]
+        
+        for file_info in selected_files:
+            file_key = file_info['key']
+            filename = file_info['filename']
+            size = file_info['size']
+            
+            # Checks if it is an empty weekend template (size <= 3500 bytes)
+            if size <= 3500:
+                try:
+                    logger.info(f"[INFO] File {filename} is an empty weekend template. Archiving without processing.")
+                    # Move to processed folder directly
+                    s3_service.move_to_processed(file_key)
+                    result['files_processed'] += 1
+                except Exception as e:
+                    result['files_failed'] += 1
+                    result['errors'].append(f"{filename} (Weekend template archive failed): {str(e)}")
+            else:
+                # Regular data processing
+                try:
+                    logger.info(f"Downloading and processing data file: {filename}")
+                    file_content, _ = s3_service.download_file(file_key)
+                    
+                    # Create import request
+                    import_request = ImportRequest(
+                        file_content=file_content,
+                        file_name=filename,
+                        mapping=s3_service.get_default_mapping(),
+                        tenant_id=str(current_user.tenant_id),
+                        user_id=str(current_user.id)
+                    )
+                    
+                    # Process with ImportService (commits to DB)
+                    import_response = s3_service.import_service.import_po(import_request)
+                    
+                    if import_response.success:
+                        # Move to processed folder
+                        s3_service.move_to_processed(file_key)
+                        result['files_processed'] += 1
+                        result['pos_imported'].append(import_response.po_number or "N/A")
+                    else:
+                        result['files_failed'] += 1
+                        result['errors'].append(f"{filename}: {import_response.message}")
+                except Exception as e:
+                    result['files_failed'] += 1
+                    result['errors'].append(f"{filename}: {str(e)}")
+                    
+        # Set overall success based on results
+        if result['files_failed'] > 0 and result['files_processed'] == 0:
+            result['success'] = False
+            
+        return result
+        
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
