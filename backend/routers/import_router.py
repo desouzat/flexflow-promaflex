@@ -647,6 +647,7 @@ async def sync_s3_bucket(
         'files_processed': 0,
         'files_failed': 0,
         'pos_imported': [],
+        'po_list': [],          # ← accumulated staging data, returned to frontend
         'errors': []
     }
     
@@ -663,47 +664,65 @@ async def sync_s3_bucket(
             filename = file_info['filename']
             size = file_info['size']
             
-            # Checks if it is an empty weekend template (size <= 3500 bytes)
+            # ── Empty weekend template: archive immediately, no parsing needed ──────
             if size <= 3500:
                 try:
-                    logger.info(f"[INFO] File {filename} is an empty weekend template. Archiving without processing.")
+                    logger.info(f"[S3→STAGING] {filename} is a weekend template — archiving.")
                     # Move to processed folder directly
                     s3_service.move_to_processed(file_key)
                     result['files_processed'] += 1
                 except Exception as e:
                     result['files_failed'] += 1
-                    result['errors'].append(f"{filename} (Weekend template archive failed): {str(e)}")
-            else:
-                # Regular data processing
-                try:
-                    logger.info(f"Downloading and processing data file: {filename}")
-                    file_content, _ = s3_service.download_file(file_key)
+                    result['errors'].append(f"{filename} (archive failed): {str(e)}")
+                continue
+            
+            # ── Data file: parse into staging po_list, then archive ───────────────
+            try:
+                logger.info(f"[S3→STAGING] Parsing {filename} for Mesa de Conferência staging.")
+                file_content, _ = s3_service.download_file(file_key)
+                
+                # Create import request
+                import_request = ImportRequest(
+                    file_content=file_content,
+                    file_name=filename,
+                    mapping=s3_service.get_default_mapping(),
+                    tenant_id=str(current_user.tenant_id),
+                    user_id=str(current_user.id)
+                )
+                
+                # import_po() parses the Excel and returns po_list — NO DB write.
+                import_response = s3_service.import_service.import_po(import_request)
+                
+                if import_response.success:
+                    # Archive the raw S3 file now that we hold its data in memory
+                    s3_service.move_to_processed(file_key)
+                    result['files_processed'] += 1
                     
-                    # Create import request
-                    import_request = ImportRequest(
-                        file_content=file_content,
-                        file_name=filename,
-                        mapping=s3_service.get_default_mapping(),
-                        tenant_id=str(current_user.tenant_id),
-                        user_id=str(current_user.id)
-                    )
-                    
-                    # Process with ImportService (commits to DB)
-                    import_response = s3_service.import_service.import_po(import_request)
-                    
-                    if import_response.success:
-                        # Move to processed folder
-                        s3_service.move_to_processed(file_key)
-                        result['files_processed'] += 1
-                        result['pos_imported'].append(import_response.po_number or "N/A")
-                    else:
-                        result['files_failed'] += 1
-                        result['errors'].append(f"{filename}: {import_response.message}")
-                except Exception as e:
+                    # Accumulate po_list entries so all files merge into one staging batch
+                    if import_response.po_list:
+                        result['po_list'].extend(import_response.po_list)
+                        for po in import_response.po_list:
+                            result['pos_imported'].append(po.get('po_number', 'N/A'))
+                    elif import_response.items:
+                        # Legacy single-PO fallback: synthesise a po_list entry
+                        result['po_list'].append({
+                            'po_number':    import_response.po_number,
+                            'client_name':  import_response.client_name,
+                            'business_unit': None,
+                            'items':        [item.model_dump() for item in import_response.items],
+                            'po_total_value': getattr(import_response, 'po_total_value', None),
+                            'has_integrity_error': getattr(import_response, 'has_integrity_error', False),
+                            'integrity_error_message': getattr(import_response, 'integrity_error_message', None),
+                        })
+                        result['pos_imported'].append(import_response.po_number or 'N/A')
+                else:
                     result['files_failed'] += 1
-                    result['errors'].append(f"{filename}: {str(e)}")
+                    result['errors'].append(f"{filename}: {import_response.message}")
+            except Exception as e:
+                result['files_failed'] += 1
+                result['errors'].append(f"{filename}: {str(e)}")
                     
-        # Set overall success based on results
+        # Partial failure is still a partial success
         if result['files_failed'] > 0 and result['files_processed'] == 0:
             result['success'] = False
             

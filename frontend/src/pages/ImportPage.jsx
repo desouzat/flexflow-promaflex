@@ -1060,23 +1060,100 @@ const ImportPage = () => {
             dismissToast(toastId)
 
             if (response.data.success) {
-                const { files_processed, pos_imported, errors } = response.data
+                const { files_processed, po_list, pos_imported, errors } = response.data
 
-                if (files_processed > 0) {
-                    showSuccess(
-                        `✅ Sincronização concluída! ${files_processed} arquivo(s) processado(s).`
+                if (files_processed > 0 && po_list && po_list.length > 0) {
+                    // ✅ STAGING FIX: transform the raw po_list from the S3 parse response
+                    // into the same stagingData shape that handleUploadToStaging produces.
+                    // This populates the Mesa de Conferência table immediately — no production
+                    // write occurs until the operator clicks 'Confirmar' on this screen.
+                    const transformedList = po_list.map(po => {
+                        const sumFreight = (po.items || []).reduce(
+                            (sum, item) => sum + (parseFloat(item.freight) || 0), 0
+                        )
+                        return {
+                            po_number: po.po_number,
+                            client_name: po.client_name,
+                            business_unit: po.business_unit || null,
+                            freight_cost: sumFreight,
+                            additional_costs: 0,
+                            po_total_value: po.po_total_value || null,
+                            has_integrity_error: po.has_integrity_error || false,
+                            integrity_error_message: po.integrity_error_message || null,
+                            items: (po.items || []).map((item, index) => ({
+                                id: `${po.po_number}-${index + 1}`,
+                                sku: item.sku,
+                                description: item.description || null,
+                                quantity: item.quantity,
+                                price_unit: item.price_unit || 0,
+                                unit_value: item.unit_value || null,
+                                item_total_value: item.item_total_value || null,
+                                block_status: item.block_status || null,
+                                balance: item.balance || null,
+                                delay: item.delay || null,
+                                payment_terms: item.payment_terms || null,
+                                unit: item.unit || null,
+                                width: item.width || null,
+                                length: item.length || null,
+                                lead_time: item.lead_time || null,
+                                delivery_date: item.delivery_date || null,
+                                billing_date: item.billing_date || null,
+                                order_date: item.order_date || null,
+                                icms_percent: item.icms_percent || null,
+                                freight: item.freight || null,
+                                salesperson: item.salesperson || null,
+                                ipi: item.ipi || null,
+                                codigo_estruturado: item.codigo_estruturado || null,
+                                carrier_code: item.carrier_code || null,
+                                carrier_name: item.carrier_name || null,
+                                is_personalized: false,
+                                is_new_client: false,
+                                is_export: false,
+                                is_replacement: false,
+                                is_triangular: false,
+                                is_estoque: false,
+                                customization_notes: '',
+                                attachment_path: null,
+                                needs_mapping: false,
+                                is_checked: false,
+                                extra_metadata: { finance_justification: null }
+                            }))
+                        }
+                    })
+
+                    setStagingData({
+                        isMultiPO: transformedList.length > 1,
+                        po_list: transformedList,
+                        total_pos: transformedList.length
+                    })
+                    setSelectedPOIndex(0)
+                    setCurrentPage(1)
+                    setShowS3Modal(false)
+
+                    const totalItems = transformedList.reduce(
+                        (sum, po) => sum + po.items.length, 0
                     )
-                    if (pos_imported && pos_imported.length > 0) {
-                        showSuccess(`POs importados: ${pos_imported.join(', ')}`)
-                    }
+                    showSuccess(
+                        `✅ ${files_processed} arquivo(s) sincronizado(s) com a Mesa de Conferência! ` +
+                        `${transformedList.length} PO(s) com ${totalItems} item(s) prontos para revisão.`
+                    )
                     if (errors && errors.length > 0) {
                         showError(`Divergências: ${errors.join('; ')}`)
                     }
                     await refreshNotifications()
+
+                } else if (files_processed > 0) {
+                    // Weekend-only batch (no data files, all empty templates archived)
+                    showSuccess(`✅ ${files_processed} template(s) de final de semana arquivado(s).`)
+                    setShowS3Modal(false)
                 } else {
                     showSuccess('✅ Sincronização concluída. Nenhum arquivo novo importado.')
+                    setShowS3Modal(false)
                 }
-                setShowS3Modal(false)
+
+                if (errors && errors.length > 0 && files_processed === 0) {
+                    showError(`Falha: ${errors.join('; ')}`)
+                }
             } else {
                 showError(response.data.message || 'Falha na sincronização')
             }
