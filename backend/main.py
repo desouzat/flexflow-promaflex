@@ -245,6 +245,23 @@ async def lifespan(app: FastAPI):
             ]
         )  # FF-HARDENING-013 hotfix: added FINANCE + WAITING_MATERIAL (omitted in prior build)
 
+        # Step 7 — staging_sessions table + unique index
+        _run_ddl_step(
+            "initialized staging_sessions table",
+            [
+                """
+                CREATE TABLE IF NOT EXISTS staging_sessions (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    tenant_id UUID NOT NULL,
+                    data JSONB NOT NULL,
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    updated_by VARCHAR(255)
+                );
+                """,
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_staging_session_tenant_id ON staging_sessions(tenant_id);"
+            ]
+        )
+
         print("[DEBUG] Background DB schema initialization completed.")
 
     async def init_db_background():

@@ -7,7 +7,7 @@ import os
 import io
 import logging
 from typing import List, Dict, Optional, Tuple
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 import boto3
@@ -76,12 +76,16 @@ class S3Service:
             self.s3_client is not None
         ])
     
-    def list_new_files(self) -> List[Dict[str, any]]:
+    def list_new_files(self, include_processed: bool = True) -> List[Dict[str, any]]:
         """
-        List all unprocessed CSV/XLSX files in the bucket root.
+        List unprocessed CSV/XLSX files in the bucket root and optionally
+        recent processed files in the /processed folder.
         
+        Args:
+            include_processed: If True, also include files in /processed modified within last 7 days (max 15).
+            
         Returns:
-            List of file metadata dictionaries with keys: key, size, last_modified
+            List of file metadata dictionaries with keys: key, size, last_modified, filename, is_processed
             
         Raises:
             Exception: If S3 connection fails
@@ -90,16 +94,17 @@ class S3Service:
             raise Exception("S3 service is not properly configured. Check environment variables.")
         
         try:
-            # List objects in bucket root (not in /processed folder)
-            response = self.s3_client.list_objects_v2(
+            files = []
+            
+            # 1. List objects in bucket root (unprocessed files)
+            response_root = self.s3_client.list_objects_v2(
                 Bucket=self.bucket_name,
                 Prefix='',  # Root level
                 Delimiter='/'  # Don't recurse into folders
             )
             
-            files = []
-            if 'Contents' in response:
-                for obj in response['Contents']:
+            if 'Contents' in response_root:
+                for obj in response_root['Contents']:
                     key = obj['Key']
                     
                     # Skip folders and processed files
@@ -112,13 +117,52 @@ class S3Service:
                             'key': key,
                             'size': obj['Size'],
                             'last_modified': obj['LastModified'],
-                            'filename': Path(key).name
+                            'filename': Path(key).name,
+                            'is_processed': False
                         })
             
-            # Sort by last modified (newest first)
+            # Sort unprocessed files by last modified (newest first)
             files.sort(key=lambda x: x['last_modified'], reverse=True)
             
-            logger.info(f"Found {len(files)} unprocessed files in bucket")
+            # 2. List objects in /processed folder with 7-day recency filter
+            if include_processed:
+                response_proc = self.s3_client.list_objects_v2(
+                    Bucket=self.bucket_name,
+                    Prefix='processed/'
+                )
+                
+                if 'Contents' in response_proc:
+                    proc_files = []
+                    now_utc = datetime.now(timezone.utc)
+                    cutoff_date = now_utc - timedelta(days=7)
+                    
+                    for obj in response_proc['Contents']:
+                        key = obj['Key']
+                        if key.endswith('/'):
+                            continue
+                        
+                        if key.lower().endswith(('.csv', '.xlsx', '.xls')):
+                            last_mod = obj['LastModified']
+                            if last_mod.tzinfo is None:
+                                last_mod = last_mod.replace(tzinfo=timezone.utc)
+                            
+                            # Filter to last 7 days to avoid memory/performance degradation
+                            if last_mod >= cutoff_date:
+                                proc_files.append({
+                                    'key': key,
+                                    'size': obj['Size'],
+                                    'last_modified': obj['LastModified'],
+                                    'filename': Path(key).name,
+                                    'is_processed': True
+                                })
+                    
+                    # Sort processed files by last modified desc and cap at 15 most recent
+                    proc_files.sort(key=lambda x: x['last_modified'], reverse=True)
+                    proc_files = proc_files[:15]
+                    
+                    files.extend(proc_files)
+            
+            logger.info(f"Found {len(files)} total files (root + recent processed) in bucket")
             return files
         
         except ClientError as e:

@@ -578,7 +578,8 @@ from pydantic import BaseModel
 from typing import List
 
 class SyncS3Request(BaseModel):
-    filenames: List[str]
+    filenames: Optional[List[str]] = None
+    file_keys: Optional[List[str]] = None
 
 
 # ============================================================================
@@ -770,7 +771,7 @@ async def get_pending_s3_files(
     db: Session = Depends(get_db)
 ):
     """
-    List all unprocessed files in the S3 bucket with parsed date and metadata.
+    List all unprocessed and recent processed files in the S3 bucket with parsed date and metadata.
     """
     from backend.services.s3_service import S3Service
     import re
@@ -791,6 +792,7 @@ async def get_pending_s3_files(
             filename = f['filename']
             size = f['size']
             last_modified = f.get('last_modified')
+            is_processed = f.get('is_processed', False)
             
             # Parse date from name e.g. Exportacao_20260712_200000.xlsx
             match = re.search(r"Exportacao_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})", filename)
@@ -808,7 +810,8 @@ async def get_pending_s3_files(
                 "file_key": key,
                 "parsed_date": parsed_date,
                 "size_bytes": size,
-                "is_empty_template": is_empty_template
+                "is_empty_template": is_empty_template,
+                "is_processed": is_processed
             })
             
         return pending
@@ -828,7 +831,7 @@ async def sync_s3_bucket(
 ):
     """
     Sincroniza apenas os arquivos selecionados do bucket S3.
-    Para templates de final de semana (is_empty_template = True), move diretamente para a pasta processed sem processar.
+    Suporta tanto arquivos novos no root quanto re-processamento de arquivos em processed/.
     """
     from backend.services.s3_service import S3Service
     import logging
@@ -852,33 +855,37 @@ async def sync_s3_bucket(
     }
     
     try:
-        # Get list of new files in S3
-        all_new_files = s3_service.list_new_files()
-        selected_filenames = set(req.filenames)
+        # Get list of files in S3 (root + processed)
+        all_s3_files = s3_service.list_new_files()
+        requested_ids = set(req.file_keys or req.filenames or [])
         
-        # Filter to only keep selected files
-        selected_files = [f for f in all_new_files if f['filename'] in selected_filenames]
+        # Filter to only keep selected files matching filename or file_key
+        selected_files = [
+            f for f in all_s3_files
+            if f['filename'] in requested_ids or f['key'] in requested_ids
+        ]
         
         for file_info in selected_files:
             file_key = file_info['key']
             filename = file_info['filename']
             size = file_info['size']
+            is_processed = file_info.get('is_processed', False) or file_key.startswith('processed/')
             
-            # ── Empty weekend template: archive immediately, no parsing needed ──────
+            # ── Empty weekend template: archive if not already in processed ──────
             if size <= 3500:
                 try:
-                    logger.info(f"[S3→STAGING] {filename} is a weekend template — archiving.")
-                    # Move to processed folder directly
-                    s3_service.move_to_processed(file_key)
+                    logger.info(f"[S3→STAGING] {filename} is a weekend template.")
+                    if not is_processed:
+                        s3_service.move_to_processed(file_key)
                     result['files_processed'] += 1
                 except Exception as e:
                     result['files_failed'] += 1
                     result['errors'].append(f"{filename} (archive failed): {str(e)}")
                 continue
             
-            # ── Data file: parse into staging po_list, then archive ───────────────
+            # ── Data file: parse into staging po_list, archive if in root ───────
             try:
-                logger.info(f"[S3→STAGING] Parsing {filename} for Mesa de Conferência staging.")
+                logger.info(f"[S3→STAGING] Parsing {filename} (is_processed={is_processed}) for Mesa de Conferência staging.")
                 file_content, _ = s3_service.download_file(file_key)
                 
                 # Create import request
@@ -890,12 +897,14 @@ async def sync_s3_bucket(
                     user_id=str(current_user.id)
                 )
                 
-                # import_po() parses the Excel and returns po_list — NO DB write.
+                # import_po() parses the Excel and returns po_list
                 import_response = s3_service.import_service.import_po(import_request)
                 
                 if import_response.success:
-                    # Archive the raw S3 file now that we hold its data in memory
-                    s3_service.move_to_processed(file_key)
+                    # Move to processed folder only if file came from bucket root
+                    if not is_processed:
+                        s3_service.move_to_processed(file_key)
+                        
                     result['files_processed'] += 1
                     
                     # Accumulate po_list entries so all files merge into one staging batch
@@ -904,7 +913,7 @@ async def sync_s3_bucket(
                         for po in import_response.po_list:
                             result['pos_imported'].append(po.get('po_number', 'N/A'))
                     elif import_response.items:
-                        # Legacy single-PO fallback: synthesise a po_list entry
+                        # Legacy single-PO fallback
                         result['po_list'].append({
                             'po_number':    import_response.po_number,
                             'client_name':  import_response.client_name,
@@ -935,8 +944,8 @@ async def sync_s3_bucket(
                     po_list=result['po_list'],
                     updated_by=getattr(current_user, 'email', str(current_user.id))
                 )
-            except Exception:
-                pass  # Best-effort; never block the sync response
+            except Exception as upsert_err:
+                logger.warning(f"[S3→STAGING] Failed to upsert staging session: {upsert_err}")
 
         return result
         

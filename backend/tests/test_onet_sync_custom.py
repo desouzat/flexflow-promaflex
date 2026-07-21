@@ -115,6 +115,31 @@ def test_sync_s3_selection(monkeypatch):
     assert res_data["files_processed"] == 1
     assert "Exportacao_20260712_200000.xlsx" in moved_keys
 
+def test_reprocessing_processed_file(monkeypatch):
+    from backend.services.s3_service import S3Service
+    monkeypatch.setattr(S3Service, "is_configured", lambda self: True)
+    
+    mock_files = [
+        {
+            'key': 'processed/20260720_180000_Exportacao_20260720_180000.xlsx',
+            'size': 3307,
+            'filename': '20260720_180000_Exportacao_20260720_180000.xlsx',
+            'is_processed': True
+        }
+    ]
+    monkeypatch.setattr(S3Service, "list_new_files", lambda self: mock_files)
+    
+    moved_keys = []
+    monkeypatch.setattr(S3Service, "move_to_processed", lambda self, key: moved_keys.append(key))
+    
+    response = client.post("/api/import/sync-s3", json={"file_keys": ["processed/20260720_180000_Exportacao_20260720_180000.xlsx"]})
+    assert response.status_code == 200
+    res_data = response.json()
+    assert res_data["success"] is True
+    assert res_data["files_processed"] == 1
+    # Key was already in processed, so move_to_processed should NOT have been called again
+    assert len(moved_keys) == 0
+
 def test_pcp_cost_lookup_permission(monkeypatch):
     db = TestingSessionLocal()
     import uuid
