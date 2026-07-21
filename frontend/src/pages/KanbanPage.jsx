@@ -559,7 +559,7 @@ const KanbanPage = () => {
             const exactMatch = (checkRes.data?.items || []).find(it => it.sku.toLowerCase() === item.sku.toLowerCase())
             if (exactMatch) {
                 setCostForm({
-                    sku: exactMatch.sku,
+                    sku: item.sku,  // always locked to the PO item's SKU — never the matched material's
                     nome: exactMatch.nome,
                     custo_mp_kg: exactMatch.custo_mp_kg.toString(),
                     rendimento: exactMatch.rendimento.toString(),
@@ -591,13 +591,17 @@ const KanbanPage = () => {
     }
 
     const handleSelectMaterial = (mat) => {
-        setCostForm({
-            sku: mat.sku,
+        // IMPORTANT: The target SKU is intentionally preserved as the PO item's SKU (linkingItem.sku).
+        // Selecting a search result copies ONLY the cost parameters into the form.
+        // This prevents the critical bug where saving would occur under the searched material's SKU
+        // (e.g. 9229) instead of the actual PO item's SKU (e.g. 8211).
+        setCostForm(prev => ({
+            ...prev,
             nome: mat.nome,
             custo_mp_kg: mat.custo_mp_kg.toString(),
             rendimento: mat.rendimento.toString(),
             indice_impostos: mat.indice_impostos.toString()
-        })
+        }))
         setSearchResults([])
         setSearchQuery('')
     }
@@ -4131,7 +4135,10 @@ const KanbanPage = () => {
                                                     onClick={() => handleSelectMaterial(mat)}
                                                     className="px-4 py-2 hover:bg-slate-100 cursor-pointer text-xs flex flex-col gap-0.5 font-medium"
                                                 >
-                                                    <span className="font-bold text-slate-900">{mat.sku}</span>
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <span className="font-bold text-slate-900">{mat.sku}</span>
+                                                        <span className="text-[9px] bg-amber-100 text-amber-700 border border-amber-300 rounded px-1 py-0.5 font-bold uppercase tracking-wide">Copiar parâmetros</span>
+                                                    </div>
                                                     <span className="text-gray-500 text-[10px]">{mat.nome}</span>
                                                     <span className="text-[10px] text-slate-700">MP: R$ {parseFloat(mat.custo_mp_kg).toFixed(2)}/kg | Rend: {parseFloat(mat.rendimento).toFixed(2)} kg/un</span>
                                                 </li>
