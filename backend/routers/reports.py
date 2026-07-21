@@ -144,12 +144,12 @@ def _load_audit_logs_by_po(
 
     # Step 1: get all OrderItems for these POs, capturing item_id → po_id mapping
     items = (
-        db.query(OrderItem.id, OrderItem.purchase_order_id)
-        .filter(OrderItem.purchase_order_id.in_(po_ids))
+        db.query(OrderItem.id, OrderItem.po_id)  # FK column is po_id, NOT purchase_order_id
+        .filter(OrderItem.po_id.in_(po_ids))
         .all()
     )
     item_to_po: Dict[str, str] = {
-        str(row.id): str(row.purchase_order_id) for row in items
+        str(row.id): str(row.po_id) for row in items
     }
     if not item_to_po:
         return {}
@@ -178,7 +178,7 @@ def _load_audit_logs_by_po(
 def _compute_stage_times(
     logs: List,
     po_status_macro: str,
-    po_created_at: datetime,
+    po_created_at,
     config: dict,
     now: datetime,
 ) -> Dict:
@@ -189,23 +189,39 @@ def _compute_stage_times(
       - hours_by_area: dict of { area_name → total_business_hours }
 
     Uses earliest-entry-wins logic across all items to build a PO-level timeline.
+    All inputs are null-guarded — never raises on missing dates or empty logs.
     """
+    _ZERO_RESULT = {"hours_in_current_stage": 0.0, "hours_by_area": {}}
+
+    # Guard: can't compute anything without a creation timestamp
+    if po_created_at is None:
+        return _ZERO_RESULT
+
+    # Normalise now to naive UTC
+    now_naive = now
+    if now_naive is not None and getattr(now_naive, 'tzinfo', None) is not None:
+        now_naive = now_naive.astimezone(timezone.utc).replace(tzinfo=None)
+    if now_naive is None:
+        now_naive = datetime.utcnow()
+
     # Collect earliest timestamp for each distinct status encountered
     earliest_entry: Dict[str, datetime] = {}
-    for log in logs:
-        ts = log.created_at
-        # Normalise to naive UTC for arithmetic
-        if ts is not None and ts.tzinfo is not None:
-            ts = ts.astimezone(timezone.utc).replace(tzinfo=None)
+    for log in (logs or []):
+        ts = getattr(log, 'created_at', None)
         if ts is None:
             continue
-        status = log.to_status
+        # Normalise to naive UTC for arithmetic
+        if ts.tzinfo is not None:
+            ts = ts.astimezone(timezone.utc).replace(tzinfo=None)
+        status = getattr(log, 'to_status', None)
+        if not status:
+            continue
         if status not in earliest_entry or ts < earliest_entry[status]:
             earliest_entry[status] = ts
 
     # Ensure the origin status (whatever the PO started at) is anchored to created_at
     po_created_naive = po_created_at
-    if po_created_naive is not None and po_created_naive.tzinfo is not None:
+    if getattr(po_created_naive, 'tzinfo', None) is not None:
         po_created_naive = po_created_naive.astimezone(timezone.utc).replace(tzinfo=None)
 
     # Build a sorted timeline: [(timestamp, status), ...]
@@ -213,7 +229,9 @@ def _compute_stage_times(
     timeline = []
     if po_created_naive:
         # Add the implicit "entry into first status" at PO creation
-        first_status = logs[0].to_status if logs else po_status_macro
+        first_log = logs[0] if logs else None
+        first_status = getattr(first_log, 'to_status', None) if first_log else None
+        first_status = first_status or po_status_macro or "DRAFT"
         timeline.append((po_created_naive, first_status))
 
     for status, ts in sorted(earliest_entry.items(), key=lambda x: x[1]):
@@ -228,10 +246,6 @@ def _compute_stage_times(
             seen_ts.add(key)
             unique_timeline.append((ts, status))
 
-    now_naive = now
-    if now_naive.tzinfo is not None:
-        now_naive = now_naive.astimezone(timezone.utc).replace(tzinfo=None)
-
     # ── Accumulate business hours by area ──────────────────────────────────
     hours_by_area: Dict[str, float] = defaultdict(float)
     for i, (ts_enter, status) in enumerate(unique_timeline):
@@ -239,16 +253,22 @@ def _compute_stage_times(
         if ts_exit <= ts_enter:
             continue
         area = _STATUS_AREA.get(status, "Outro")
-        bh = calculate_business_hours(ts_enter, ts_exit, config)
-        hours_by_area[area] += bh
+        try:
+            bh = calculate_business_hours(ts_enter, ts_exit, config)
+            hours_by_area[area] += max(0.0, bh)
+        except Exception:
+            pass  # never crash the export on a bad segment
 
     # ── Time in current stage ──────────────────────────────────────────────
-    stage_entry_at = earliest_entry.get(po_status_macro)
+    stage_entry_at = earliest_entry.get(po_status_macro or "")
     if stage_entry_at is None and po_created_naive:
         stage_entry_at = po_created_naive
     hours_in_stage = 0.0
     if stage_entry_at and now_naive > stage_entry_at:
-        hours_in_stage = calculate_business_hours(stage_entry_at, now_naive, config)
+        try:
+            hours_in_stage = max(0.0, calculate_business_hours(stage_entry_at, now_naive, config))
+        except Exception:
+            hours_in_stage = 0.0
 
     return {
         "hours_in_current_stage": round(hours_in_stage, 2),
@@ -348,14 +368,17 @@ async def export_pos_csv(
             )
 
         # ── Date received ─────────────────────────────────────────────────
-        date_received = po.created_at.strftime("%d/%m/%Y") if po.created_at else ""
+        try:
+            date_received = po.created_at.strftime("%d/%m/%Y") if po.created_at else ""
+        except Exception:
+            date_received = ""
 
         # ── SLA computations (PO-level, shared across all item rows) ──────
         po_created_naive = po.created_at
-        if po_created_naive is not None and po_created_naive.tzinfo is not None:
+        if po_created_naive is not None and getattr(po_created_naive, 'tzinfo', None) is not None:
             po_created_naive = po_created_naive.astimezone(timezone.utc).replace(tzinfo=None)
 
-        is_finished = po.status_macro in _FINISHED_STATUSES
+        is_finished = (po.status_macro or "") in _FINISHED_STATUSES
 
         # Elapsed business hours (subtract any SLA freeze time)
         elapsed_h = 0.0
@@ -364,17 +387,23 @@ async def export_pos_csv(
         overdue_h_str = ""
 
         if po_created_naive:
-            raw_elapsed_h = calculate_business_hours(po_created_naive, now_utc, sla_config)
-            hold_h = float(getattr(po, "total_hold_time_seconds", 0) or 0) / 3600.0
-            elapsed_h = max(0.0, raw_elapsed_h - hold_h)
+            try:
+                raw_elapsed_h = calculate_business_hours(po_created_naive, now_utc, sla_config)
+                hold_h = float(getattr(po, "total_hold_time_seconds", 0) or 0) / 3600.0
+                elapsed_h = max(0.0, raw_elapsed_h - hold_h)
 
-            # SLA deadline: project sla_limit_h forward from created_at
-            deadline_dt = _add_business_hours(po_created_naive, sla_limit_h, sla_config)
-            sla_deadline_str = deadline_dt.strftime("%d/%m/%Y %H:%M")
+                # SLA deadline: project sla_limit_h forward from created_at
+                deadline_dt = _add_business_hours(po_created_naive, sla_limit_h, sla_config)
+                sla_deadline_str = deadline_dt.strftime("%d/%m/%Y %H:%M")
 
-            sla_status_label = _sla_label(elapsed_h, sla_limit_h, is_finished)
-            overdue_h = max(0.0, elapsed_h - sla_limit_h) if not is_finished else 0.0
-            overdue_h_str = f"{overdue_h:.2f}".replace(".", ",") if overdue_h > 0 else ""
+                sla_status_label = _sla_label(elapsed_h, sla_limit_h, is_finished)
+                overdue_h = max(0.0, elapsed_h - sla_limit_h) if not is_finished else 0.0
+                overdue_h_str = f"{overdue_h:.2f}".replace(".", ",") if overdue_h > 0 else ""
+            except Exception:
+                elapsed_h = 0.0
+                sla_deadline_str = ""
+                sla_status_label = ""
+                overdue_h_str = ""
 
         elapsed_h_str = f"{elapsed_h:.2f}".replace(".", ",")
 
@@ -389,9 +418,12 @@ async def export_pos_csv(
             justificativa = just_txt
 
         # Data de entrada no Kanban (same as created_at, full timestamp)
-        data_entrada = (
-            po.created_at.strftime("%d/%m/%Y %H:%M") if po.created_at else ""
-        )
+        try:
+            data_entrada = (
+                po.created_at.strftime("%d/%m/%Y %H:%M") if po.created_at else ""
+            )
+        except Exception:
+            data_entrada = ""
 
         # SLA Entrega ao Cliente — expected_delivery_date property
         entrega_cliente = ""
@@ -407,13 +439,16 @@ async def export_pos_csv(
 
         # Stage timing from audit logs
         po_logs = audit_by_po.get(str(po.id), [])
-        stage_data = _compute_stage_times(
-            logs=po_logs,
-            po_status_macro=po.status_macro,
-            po_created_at=po.created_at,
-            config=sla_config,
-            now=now_utc,
-        )
+        try:
+            stage_data = _compute_stage_times(
+                logs=po_logs,
+                po_status_macro=po.status_macro or "",
+                po_created_at=po.created_at,
+                config=sla_config,
+                now=now_utc,
+            )
+        except Exception:
+            stage_data = {"hours_in_current_stage": 0.0, "hours_by_area": {}}
         hours_in_stage_str = (
             f"{stage_data['hours_in_current_stage']:.2f}".replace(".", ",")
         )
