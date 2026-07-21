@@ -57,6 +57,25 @@ _STATUS_AREA: Dict[str, str] = {
 _FINISHED_STATUSES = {"COMPLETED", "CANCELLED", "ARCHIVED", "ARCHIVED_PARTITIONED"}
 _AREAS_OF_INTEREST = ["PCP", "Produção", "Faturamento"]
 
+# ── Human-readable Portuguese labels for Kanban stage names ─────────────────────
+# Used in the ETAPA ATUAL column of the CSV export.
+_STATUS_TRANSLATION: Dict[str, str] = {
+    "DRAFT":                        "Rascunho",
+    "SUBMITTED":                    "Submetido",
+    "ANALISE_CREDITO":              "Análise de Crédito",
+    "WAITING_COMMERCIAL_PARTITION": "Comercial (Partição)",
+    "APPROVED":                     "PCP",
+    "WAITING_MATERIAL":             "Aguardando Material",
+    "MANUFACTURING":                "Produção/Embalagem",
+    "BILLING":                      "Faturamento",
+    "FINANCE":                      "Financeiro",
+    "SHIPPING":                     "Expedição",
+    "COMPLETED":                    "Concluído",
+    "ARCHIVED":                     "Arquivado",
+    "ARCHIVED_PARTITIONED":         "Arquivado (Particionado)",
+    "CANCELLED":                    "Cancelado",
+}
+
 
 # ── Helper: project a business-hours deadline forward from a start datetime ─
 def _add_business_hours(
@@ -286,13 +305,13 @@ async def export_pos_csv(
 ):
     """Export all purchase orders for the tenant as a CSV file.
 
-    Columns (21 total):
-        ── Core PO & Item Data (12 columns) ──────────────────────────────────
-        Nº PO | CLIENTE | PRODUTO | DATA RECEBIMENTO | UNIDADE MEDIDA |
-        QTDE | PERSONALIZADO | LARGURA | COMPRIMENTO |
+    Columns (25 total):
+        ── Core PO & Item Data (13 columns) ────────────────────────────────
+        Nº PO | CLIENTE | PRODUTO | CÓDIGO ESTRUTURADO | DATA RECEBIMENTO |
+        UNIDADE MEDIDA | QTDE | PERSONALIZADO | LARGURA | COMPRIMENTO |
         STATUS PRODUÇÃO | QTD REAL PRODUZIDA | PERDA TÉCNICA
 
-        ── SLA & Audit Columns (9 columns, Sponsor-approved — Celso) ─────────
+        ── SLA & Audit Columns (12 columns, Sponsor-approved — Celso) ──────
         ETAPA ATUAL | STATUS SLA | HORAS SLA DECORRIDAS |
         PRAZO LIMITE SLA | HORAS DE ATRASO | JUSTIFICATIVA OCORRÊNCIA |
         DATA ENTRADA KANBAN | SLA ENTREGA CLIENTE |
@@ -323,12 +342,13 @@ async def export_pos_csv(
     output = io.StringIO()
     writer = csv.writer(output, delimiter=";", quoting=csv.QUOTE_MINIMAL)
 
-    # Header row — 21 columns
+    # Header row — 25 columns
     writer.writerow([
         # ── Core PO & Item data ───────────────────────────────────────────
         "Nº PO",
         "CLIENTE",
         "PRODUTO",
+        "CÓDIGO ESTRUTURADO",
         "DATA RECEBIMENTO",
         "UNIDADE MEDIDA",
         "QTDE",
@@ -338,7 +358,7 @@ async def export_pos_csv(
         "STATUS PRODUÇÃO",
         "QTD REAL PRODUZIDA",
         "PERDA TÉCNICA",
-        # ── SLA & Audit columns (9 new, Sponsor-approved) ─────────────────
+        # ── SLA & Audit columns (12, Sponsor-approved) ────────────────────
         "ETAPA ATUAL",
         "STATUS SLA",
         "HORAS SLA DECORRIDAS",
@@ -457,8 +477,9 @@ async def export_pos_csv(
         tempo_producao_str = f"{hba.get('Produção', 0.0):.2f}".replace(".", ",")
         tempo_fatur_str = f"{hba.get('Faturamento', 0.0):.2f}".replace(".", ",")
 
-        # ── Etapa Atual (human label) ─────────────────────────────────────
-        etapa_atual = po.status_macro or ""
+        # ── Etapa Atual — friendly Portuguese label ───────────────────────────
+        raw_status = po.status_macro or ""
+        etapa_atual = _STATUS_TRANSLATION.get(raw_status, raw_status)
 
         # ── Build SLA tuple shared across all rows for this PO ────────────
         sla_cols = [
@@ -482,6 +503,7 @@ async def export_pos_csv(
                 po.po_number,
                 client_name,
                 "",             # PRODUTO
+                "",             # CÓDIGO ESTRUTURADO
                 date_received,
                 "",             # UNIDADE MEDIDA
                 "",             # QTDE
@@ -550,10 +572,22 @@ async def export_pos_csv(
             perda_tecnica = meta.get("perda_tecnica")
             perda_str = str(perda_tecnica) if perda_tecnica is not None else ""
 
+            # Código Estruturado — from extra_metadata (various key aliases from ONET import)
+            codigo_estruturado = (
+                meta.get("codigo_estruturado")
+                or meta.get("cod_estruturado")
+                or meta.get("Código Estruturado")
+                or meta.get("codigo")
+                or getattr(item, "codigo_estruturado", None)
+                or ""
+            )
+            codigo_estruturado = str(codigo_estruturado) if codigo_estruturado else ""
+
             writer.writerow([
                 po.po_number,
                 item_client,
                 produto,
+                codigo_estruturado,
                 date_received,
                 unit,
                 qty_str,

@@ -273,13 +273,13 @@ class TestCsvColumns:
         raw = raw_bytes.decode("utf-8-sig")
         return list(csv.reader(io.StringIO(raw), delimiter=";"))
 
-    def test_header_has_24_columns(self, db_session):
+    def test_header_has_25_columns(self, db_session):
         session, tid = db_session
         raw = self._call_route(tid, session)
         rows = self._parse_csv(raw)
         assert len(rows) >= 1, "CSV must have at least a header row"
-        assert len(rows[0]) == 24, (
-            f"Expected 24 columns, got {len(rows[0])}.\n"
+        assert len(rows[0]) == 25, (
+            f"Expected 25 columns, got {len(rows[0])}.\n"
             f"Header: {rows[0]}"
         )
 
@@ -288,6 +288,7 @@ class TestCsvColumns:
         raw = self._call_route(tid, session)
         header = self._parse_csv(raw)[0]
         required = [
+            "CÓDIGO ESTRUTURADO",
             "ETAPA ATUAL",
             "STATUS SLA",
             "HORAS SLA DECORRIDAS",
