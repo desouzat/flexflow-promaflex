@@ -1139,3 +1139,56 @@ class ClientPreference(Base):
     def __repr__(self):
         return f"<ClientPreference(id={self.id}, client_name={self.client_name}, business_unit={self.business_unit})>"
 
+
+# ============================================================================
+# MODELO: StagingSession
+# ============================================================================
+
+class StagingSession(Base):
+    """
+    Mesa de Conferência — Database-Backed Staging Session (2026-07-21).
+
+    Stores the active ONET import batch (po_list) for a tenant as JSONB,
+    enabling multiple operators on different machines to collaborate on the
+    same staging batch before final confirmation to production.
+
+    Design decisions:
+      - One row per tenant (tenant_id unique index enforces this).
+      - No FK to `tenants` so that adding/removing this table requires no
+        migration involving the tenants cascade chain.
+      - `data` JSONB holds the full po_list array (same shape as the React
+        stagingData.po_list — see ImportPage.jsx handleUploadToStaging).
+      - `updated_by` stores the last editor's email for the concurrency banner.
+    """
+    __tablename__ = "staging_sessions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=False
+    )
+    # Full po_list array — same JSON structure as React stagingData.po_list
+    data: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        nullable=False,
+        comment="Active po_list batch for the Mesa de Conferência staging screen"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now()
+    )
+    # Last editor's email — shown in the concurrency warning banner
+    updated_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+    __table_args__ = (
+        # One active session per tenant
+        Index('idx_staging_session_tenant_id', 'tenant_id', unique=True),
+    )
+
+    def __repr__(self):
+        return f"<StagingSession(tenant_id={self.tenant_id}, updated_by={self.updated_by}, updated_at={self.updated_at})>"

@@ -29,14 +29,20 @@ from backend.services.import_service import ImportService
 from backend.services.file_service import FileService
 from backend.database import get_db
 from backend.routers.auth import get_current_user
-from backend.models import OrderItem, AuditLog, PurchaseOrder
+from backend.models import OrderItem, AuditLog, PurchaseOrder, StagingSession
 
 router = APIRouter(prefix="/api/import", tags=["Import"])
 
-
+import threading as _threading
 
 # In-memory storage for import configurations (replace with database in production)
 import_configs_storage = {}
+
+# ── In-memory Heartbeat Lock ──────────────────────────────────────────────────
+# Tracks operators who currently have the Mesa de Conferência open.
+# Keyed by tenant_id (str) → {user_email, user_name, expires_at (datetime UTC)}
+_heartbeat_lock = _threading.Lock()
+_active_mesa_users: dict = {}
 
 
 @router.post("/upload", response_model=ImportResponse)
@@ -121,16 +127,27 @@ async def upload_and_import_file(
         user_id=current_user.id
     )
     
-    # Execute import
+    # Execute import — parse only, no production DB write
     import_service = ImportService(db)
     response = import_service.import_po(import_request)
-    
+
     if not response.success:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=response.message
         )
-    
+
+    # ── Upsert staging session so other operators can load this batch ──────────
+    try:
+        _upsert_staging_session(
+            db=db,
+            tenant_id=str(current_user.tenant_id),
+            po_list=response.po_list or [],
+            updated_by=getattr(current_user, 'email', str(current_user.id))
+        )
+    except Exception:
+        pass  # Best-effort; never block the import response
+
     return response
 
 
@@ -564,6 +581,189 @@ class SyncS3Request(BaseModel):
     filenames: List[str]
 
 
+# ============================================================================
+# HELPER: Staging Session Upsert
+# ============================================================================
+
+def _upsert_staging_session(db, tenant_id: str, po_list: list, updated_by: str) -> None:
+    """
+    Insert or replace the active StagingSession for a tenant.
+    One session per tenant (enforced by unique index on tenant_id).
+    """
+    import uuid as _uuid
+    from sqlalchemy import select as _select
+    from datetime import datetime as _dt, timezone as _tz
+
+    tenant_uuid = _uuid.UUID(str(tenant_id))
+    existing = db.execute(
+        _select(StagingSession).where(StagingSession.tenant_id == tenant_uuid)
+    ).scalar_one_or_none()
+
+    if existing:
+        existing.data = po_list
+        existing.updated_by = updated_by
+        existing.updated_at = _dt.now(_tz.utc)
+    else:
+        session = StagingSession(
+            id=_uuid.uuid4(),
+            tenant_id=tenant_uuid,
+            data=po_list,
+            updated_by=updated_by,
+            updated_at=_dt.now(_tz.utc)
+        )
+        db.add(session)
+    db.commit()
+
+
+# ============================================================================
+# NEW ENDPOINT: GET /staging-session
+# ============================================================================
+
+@router.get("/staging-session")
+def get_staging_session(
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Retrieve the active Mesa de Conferência staging session for this tenant.
+    Returns {po_list: [], updated_by: null, updated_at: null} if no session exists.
+    """
+    from sqlalchemy import select as _select
+    import uuid as _uuid
+
+    tenant_uuid = _uuid.UUID(str(current_user.tenant_id))
+    session = db.execute(
+        _select(StagingSession).where(StagingSession.tenant_id == tenant_uuid)
+    ).scalar_one_or_none()
+
+    if not session:
+        return {"po_list": [], "updated_by": None, "updated_at": None}
+
+    return {
+        "po_list": session.data or [],
+        "updated_by": session.updated_by,
+        "updated_at": session.updated_at.isoformat() if session.updated_at else None
+    }
+
+
+# ============================================================================
+# NEW ENDPOINT: PUT /staging-session  (auto-save)
+# ============================================================================
+
+class StagingSessionUpdateRequest(BaseModel):
+    po_list: list
+
+
+@router.put("/staging-session")
+def update_staging_session(
+    payload: StagingSessionUpdateRequest,
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Auto-save the current po_list state to the DB staging session.
+    Called by the frontend whenever an operator edits a dropdown or checkbox.
+    """
+    try:
+        _upsert_staging_session(
+            db=db,
+            tenant_id=str(current_user.tenant_id),
+            po_list=payload.po_list,
+            updated_by=getattr(current_user, 'email', str(current_user.id))
+        )
+        return {"success": True}
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao salvar sessão de staging: {str(exc)}"
+        ) from exc
+
+
+# ============================================================================
+# HEARTBEAT ENDPOINTS — Concurrency Warning Banner
+# ============================================================================
+
+class HeartbeatRequest(BaseModel):
+    user_name: str
+
+
+@router.post("/mesa-heartbeat")
+def post_mesa_heartbeat(
+    payload: HeartbeatRequest,
+    current_user: UserInfo = Depends(get_current_user)
+):
+    """
+    Claim or refresh the heartbeat lock for the Mesa de Conferência.
+    Must be called every 60 seconds by the active user's browser.
+    Lock expires after 5 minutes of inactivity.
+    """
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    tenant_key = str(current_user.tenant_id)
+    user_email = getattr(current_user, 'email', str(current_user.id))
+    expires_at = _dt.now(_tz.utc) + _td(minutes=5)
+
+    with _heartbeat_lock:
+        _active_mesa_users[tenant_key] = {
+            "user_email": user_email,
+            "user_name": payload.user_name,
+            "expires_at": expires_at
+        }
+    return {"success": True, "expires_at": expires_at.isoformat()}
+
+
+@router.get("/mesa-lock-status")
+def get_mesa_lock_status(
+    current_user: UserInfo = Depends(get_current_user)
+):
+    """
+    Check if another operator has the Mesa open for this tenant.
+    Returns {locked: false} if no active session or if the current user owns it.
+    Returns {locked: true, holder_name, holder_email, since} if another user is active.
+    """
+    from datetime import datetime as _dt, timezone as _tz
+    tenant_key = str(current_user.tenant_id)
+    caller_email = getattr(current_user, 'email', str(current_user.id))
+
+    with _heartbeat_lock:
+        entry = _active_mesa_users.get(tenant_key)
+
+    if not entry:
+        return {"locked": False}
+
+    # Check expiry
+    if entry["expires_at"] < _dt.now(_tz.utc):
+        with _heartbeat_lock:
+            _active_mesa_users.pop(tenant_key, None)
+        return {"locked": False}
+
+    # If the caller is the lock holder, not locked for them
+    if entry["user_email"] == caller_email:
+        return {"locked": False}
+
+    return {
+        "locked": True,
+        "holder_name": entry["user_name"],
+        "holder_email": entry["user_email"],
+        "since": entry["expires_at"].strftime("%H:%M")
+    }
+
+
+@router.delete("/mesa-heartbeat")
+def release_mesa_heartbeat(
+    current_user: UserInfo = Depends(get_current_user)
+):
+    """
+    Release the heartbeat lock immediately (called on page unmount).
+    """
+    tenant_key = str(current_user.tenant_id)
+    caller_email = getattr(current_user, 'email', str(current_user.id))
+    with _heartbeat_lock:
+        entry = _active_mesa_users.get(tenant_key)
+        if entry and entry["user_email"] == caller_email:
+            _active_mesa_users.pop(tenant_key, None)
+    return {"success": True}
+
+
 @router.get("/pending-s3-files")
 async def get_pending_s3_files(
     current_user: UserInfo = Depends(get_current_user),
@@ -725,7 +925,19 @@ async def sync_s3_bucket(
         # Partial failure is still a partial success
         if result['files_failed'] > 0 and result['files_processed'] == 0:
             result['success'] = False
-            
+
+        # ── Upsert staging session so other operators can load this batch ──────
+        if result['po_list']:
+            try:
+                _upsert_staging_session(
+                    db=db,
+                    tenant_id=str(current_user.tenant_id),
+                    po_list=result['po_list'],
+                    updated_by=getattr(current_user, 'email', str(current_user.id))
+                )
+            except Exception:
+                pass  # Best-effort; never block the sync response
+
         return result
         
     except Exception as e:
@@ -1287,6 +1499,20 @@ def confirm_staging(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erro ao salvar staging no banco: {str(exc)}"
         ) from exc
+
+    # ── Delete active staging session after successful production commit ──────
+    try:
+        from sqlalchemy import select as _sel_cs
+        import uuid as _uuid_cs
+        _t_uuid = _uuid_cs.UUID(str(current_user.tenant_id))
+        _sess = db.execute(
+            _sel_cs(StagingSession).where(StagingSession.tenant_id == _t_uuid)
+        ).scalar_one_or_none()
+        if _sess:
+            db.delete(_sess)
+            db.commit()
+    except Exception:
+        pass  # Cleanup is best-effort; production data is already committed
 
     return {
         "success": True,

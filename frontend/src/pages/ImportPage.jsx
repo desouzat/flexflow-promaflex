@@ -1029,6 +1029,177 @@ const ImportPage = () => {
     const [selectedS3Files, setSelectedS3Files] = useState([])
     const [fetchingS3Files, setFetchingS3Files] = useState(false)
 
+    // ─── Concurrency banner state ────────────────────────────────────────────
+    const [concurrentUser, setConcurrentUser] = useState(null)  // {name, email, since}
+
+    // ─── DB Staging Session: load on mount ──────────────────────────────────
+    // If a DB session exists for this tenant (e.g. synced by a peer operator),
+    // and no localStorage session was found, load it into the staging table.
+    useEffect(() => {
+        if (!user || !sessionChecked) return
+        // Only load from DB if the table is currently empty
+        if (stagingData && stagingData.po_list && stagingData.po_list.length > 0) return
+
+        api.get('/import/staging-session').then(res => {
+            const dbPoList = res.data?.po_list
+            if (!dbPoList || dbPoList.length === 0) return
+            // Transform raw po_list from DB into full stagingData shape
+            const transformed = dbPoList.map((po, _poIdx) => {
+                const sumFreight = (po.items || []).reduce(
+                    (sum, item) => sum + (parseFloat(item.freight) || 0), 0
+                )
+                return {
+                    po_number: po.po_number,
+                    client_name: po.client_name,
+                    business_unit: po.business_unit || null,
+                    freight_cost: po.freight_cost !== undefined ? po.freight_cost : sumFreight,
+                    additional_costs: po.additional_costs || 0,
+                    po_total_value: po.po_total_value || null,
+                    has_integrity_error: po.has_integrity_error || false,
+                    integrity_error_message: po.integrity_error_message || null,
+                    items: (po.items || []).map((item, index) => ({
+                        id: item.id || `${po.po_number}-${index + 1}`,
+                        sku: item.sku,
+                        description: item.description || null,
+                        quantity: item.quantity,
+                        price_unit: item.price_unit || 0,
+                        unit_value: item.unit_value || null,
+                        item_total_value: item.item_total_value || null,
+                        block_status: item.block_status || null,
+                        balance: item.balance || null,
+                        delay: item.delay || null,
+                        payment_terms: item.payment_terms || null,
+                        unit: item.unit || null,
+                        width: item.width || null,
+                        length: item.length || null,
+                        lead_time: item.lead_time || null,
+                        delivery_date: item.delivery_date || null,
+                        billing_date: item.billing_date || null,
+                        order_date: item.order_date || null,
+                        icms_percent: item.icms_percent || null,
+                        freight: item.freight || null,
+                        salesperson: item.salesperson || null,
+                        ipi: item.ipi || null,
+                        codigo_estruturado: item.codigo_estruturado || null,
+                        carrier_code: item.carrier_code || null,
+                        carrier_name: item.carrier_name || null,
+                        is_personalized: item.is_personalized || false,
+                        is_new_client: item.is_new_client || false,
+                        is_export: item.is_export || false,
+                        is_replacement: item.is_replacement || false,
+                        is_triangular: item.is_triangular || false,
+                        is_estoque: item.is_estoque || false,
+                        customization_notes: item.customization_notes || '',
+                        attachment_path: item.attachment_path || null,
+                        needs_mapping: item.needs_mapping || false,
+                        is_checked: item.is_checked || false,
+                        extra_metadata: item.extra_metadata || { finance_justification: null }
+                    }))
+                }
+            })
+            setStagingData({
+                isMultiPO: transformed.length > 1,
+                po_list: transformed,
+                total_pos: transformed.length
+            })
+            setSelectedPOIndex(0)
+            setCurrentPage(1)
+            const updatedBy = res.data?.updated_by
+            showSuccess(
+                `📥 Mesa de Conferência restaurada do servidor${updatedBy ? ` (editada por ${updatedBy})` : ''}: ` +
+                `${transformed.length} PO(s) carregados.`
+            )
+        }).catch(() => {
+            /* Silently ignore if DB session unavailable */
+        })
+    }, [user, sessionChecked]) // eslint-disable-line react-hooks/exhaustive-deps
+
+    // ─── DB Staging Session: auto-save on stagingData change (1s debounce) ─
+    const _autoSaveTimerRef = useRef(null)
+    useEffect(() => {
+        if (!user || !stagingData || !stagingData.po_list) return
+        if (_autoSaveTimerRef.current) clearTimeout(_autoSaveTimerRef.current)
+        _autoSaveTimerRef.current = setTimeout(() => {
+            api.put('/import/staging-session', { po_list: stagingData.po_list }).catch(() => {
+                /* Best-effort — silently swallow errors */
+            })
+        }, 1000) // 1-second debounce
+        return () => {
+            if (_autoSaveTimerRef.current) clearTimeout(_autoSaveTimerRef.current)
+        }
+    }, [stagingData]) // eslint-disable-line react-hooks/exhaustive-deps
+
+    // ─── Heartbeat: claim lock + poll for concurrent users ───────────────────
+    useEffect(() => {
+        if (!user) return
+        const userName = user.name || user.email || 'Operador'
+
+        const sendHeartbeat = () => {
+            api.post('/import/mesa-heartbeat', { user_name: userName }).catch(() => {})
+        }
+        const checkLockStatus = () => {
+            api.get('/import/mesa-lock-status').then(res => {
+                if (res.data?.locked) {
+                    setConcurrentUser({
+                        name: res.data.holder_name,
+                        email: res.data.holder_email,
+                        since: res.data.since
+                    })
+                } else {
+                    setConcurrentUser(null)
+                }
+            }).catch(() => {})
+        }
+
+        // Initial calls on mount
+        sendHeartbeat()
+        checkLockStatus()
+
+        // Heartbeat every 60s; lock status poll every 30s
+        const heartbeatInterval = setInterval(sendHeartbeat, 60000)
+        const pollInterval = setInterval(checkLockStatus, 30000)
+
+        // Release lock on unmount
+        return () => {
+            clearInterval(heartbeatInterval)
+            clearInterval(pollInterval)
+            api.delete('/import/mesa-heartbeat').catch(() => {})
+        }
+    }, [user]) // eslint-disable-line react-hooks/exhaustive-deps
+
+    // ─── Manual refresh: fetch peer edits from DB ────────────────────────────
+    const handleRefreshMesa = async () => {
+        try {
+            const res = await api.get('/import/staging-session')
+            const dbPoList = res.data?.po_list
+            if (!dbPoList || dbPoList.length === 0) {
+                showSuccess('Mesa de Conferência: nenhuma sessão ativa no servidor.')
+                return
+            }
+            setStagingData(prev => {
+                // Merge server po_list preserving local is_checked flags
+                const prevMap = {}
+                if (prev?.po_list) {
+                    prev.po_list.forEach(po => {
+                        po.items.forEach(item => { prevMap[item.id] = item })
+                    })
+                }
+                const merged = dbPoList.map((po, _pi) => ({
+                    ...po,
+                    items: (po.items || []).map((item, index) => {
+                        const local = prevMap[item.id || `${po.po_number}-${index + 1}`]
+                        return { ...item, is_checked: local ? local.is_checked : false }
+                    })
+                }))
+                return { isMultiPO: merged.length > 1, po_list: merged, total_pos: merged.length }
+            })
+            const updatedBy = res.data?.updated_by
+            showSuccess(`🔄 Mesa atualizada${updatedBy ? ` com edições de ${updatedBy}` : ''}.`)
+        } catch {
+            showError('Erro ao atualizar Mesa de Conferência do servidor.')
+        }
+    }
+
     const handleOpenSyncModal = async () => {
         setShowS3Modal(true)
         setFetchingS3Files(true)
@@ -1280,6 +1451,17 @@ const ImportPage = () => {
                                 </>
                             )}
                         </button>
+                        {stagingData && (
+                            <button
+                                id="btn-refresh-mesa"
+                                onClick={handleRefreshMesa}
+                                title="Buscar atualizações feitas por outros operadores no servidor"
+                                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
+                            >
+                                <RefreshCw className="w-5 h-5" />
+                                <span className="font-medium">Atualizar Mesa</span>
+                            </button>
+                        )}
                         <button
                             onClick={() => setShowHelp(true)}
                             className="flex items-center gap-2 px-4 py-2 text-primary-600 hover:bg-primary-50 rounded-lg transition-colors"
@@ -1290,6 +1472,23 @@ const ImportPage = () => {
                     </div>
                 </div>
             </div>
+
+            {/* ── Concurrency Warning Banner ─────────────────────────────── */}
+            {concurrentUser && (
+                <div className="bg-amber-50 border-b border-amber-300 px-6 py-3 flex items-center gap-3">
+                    <span className="text-amber-600 text-xl">⚠️</span>
+                    <div className="flex-1">
+                        <span className="text-amber-800 font-semibold">
+                            {concurrentUser.name} ({concurrentUser.email})
+                        </span>
+                        <span className="text-amber-700">
+                            {' '}também está editando esta Mesa de Conferência
+                            {concurrentUser.since ? ` desde ${concurrentUser.since}` : ''}.
+                            Use o botão <strong>Atualizar Mesa</strong> para sincronizar.
+                        </span>
+                    </div>
+                </div>
+            )}
 
             {/* Content */}
             <div className="flex-1 p-6 overflow-auto">
