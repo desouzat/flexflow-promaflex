@@ -30,6 +30,11 @@ from backend.schemas.auth_schema import UserInfo
 from backend.database import get_db
 from backend.routers.auth import get_current_user
 from backend.models import PurchaseOrder, OrderItem, MaterialCost
+from backend.utils.salesperson_filter import (
+    get_salesperson_filter_name,
+    filter_pos_by_salesperson,
+    po_matches_salesperson
+)
 
 router = APIRouter(prefix="/api/kanban", tags=["Kanban"])
 
@@ -111,7 +116,7 @@ def _map_single_po(po: PurchaseOrder, db: Session, is_privileged: bool) -> PORes
         unit_cost = Decimal("0.00")
         cost_meta = {}
         if material:
-            unit_cost = Decimal(str(material.custo_mp_kg)) / Decimal(str(material.rendimento)) if material.rendimento > 0 else Decimal("0.00")
+            unit_cost = Decimal(str(material.custo_mp_kg)) * Decimal(str(material.rendimento))
             cost_meta = {
                 "total_cost": float(unit_cost),
                 "cost_mp": float(unit_cost),
@@ -323,6 +328,11 @@ async def get_kanban_board(
         PurchaseOrder.tenant_id == current_user.tenant_id
     ).all()
     
+    # Salesperson isolation filter for Operador in COMERCIAL
+    sp_filter = get_salesperson_filter_name(current_user, db)
+    if sp_filter:
+        pos = filter_pos_by_salesperson(pos, sp_filter)
+    
     # Define status columns - FF-HARDENING-012.2: 6 Columns (Faturamento + Expedição split)
     # Comercial: SUBMITTED (fallback DRAFT, WAITING_COMMERCIAL_PARTITION)
     # PCP: APPROVED (fallback WAITING_MATERIAL)
@@ -369,7 +379,7 @@ async def get_kanban_board(
                 unit_cost = Decimal("0.00")
                 cost_meta = {}
                 if material:
-                    unit_cost = Decimal(str(material.custo_mp_kg)) / Decimal(str(material.rendimento)) if material.rendimento > 0 else Decimal("0.00")
+                    unit_cost = Decimal(str(material.custo_mp_kg)) * Decimal(str(material.rendimento))
                     cost_meta = {
                         "total_cost": float(unit_cost),
                         "cost_mp": float(unit_cost),
@@ -535,6 +545,11 @@ async def list_purchase_orders(
     # Apply pagination
     is_privileged = current_user.role.lower() in ["admin", "master"]
     pos = query.offset(skip).limit(limit).all()
+
+    # Salesperson isolation filter for Operador in COMERCIAL
+    sp_filter = get_salesperson_filter_name(current_user, db)
+    if sp_filter:
+        pos = filter_pos_by_salesperson(pos, sp_filter)
     
     # Convert to response models
     po_responses = []
@@ -549,7 +564,7 @@ async def list_purchase_orders(
             ).first()
             unit_cost = Decimal("0.00")
             if material:
-                unit_cost = Decimal(str(material.custo_mp_kg)) / Decimal(str(material.rendimento)) if material.rendimento > 0 else Decimal("0.00")
+                unit_cost = Decimal(str(material.custo_mp_kg)) * Decimal(str(material.rendimento))
             
             items.append(
                 POItemResponse(
@@ -652,6 +667,13 @@ async def get_purchase_order(
     ).first()
     
     if not po:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Purchase Order {po_id} not found"
+        )
+
+    sp_filter = get_salesperson_filter_name(current_user, db)
+    if sp_filter and not po_matches_salesperson(po, sp_filter):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Purchase Order {po_id} not found"

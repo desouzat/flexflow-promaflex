@@ -693,18 +693,14 @@ def delete_staging_session(
     Purge/clear the active Mesa de Conferência staging session for this tenant.
     Called when an operator cancels or discards the current staging session.
     """
-    from sqlalchemy import select as _select
     import uuid as _uuid
-
     try:
-        tenant_uuid = _uuid.UUID(str(current_user.tenant_id))
-        session = db.execute(
-            _select(StagingSession).where(StagingSession.tenant_id == tenant_uuid)
-        ).scalar_one_or_none()
+        tenant_id_val = current_user.tenant_id
+        if isinstance(tenant_id_val, str):
+            tenant_id_val = _uuid.UUID(tenant_id_val)
 
-        if session:
-            db.delete(session)
-            db.commit()
+        db.query(StagingSession).filter(StagingSession.tenant_id == tenant_id_val).delete(synchronize_session=False)
+        db.commit()
         return {"success": True, "message": "Sessão de staging descartada com sucesso."}
     except Exception as exc:
         db.rollback()

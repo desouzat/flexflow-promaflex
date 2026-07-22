@@ -23,6 +23,10 @@ from backend.schemas.auth_schema import UserInfo
 from backend.database import get_db
 from backend.routers.auth import get_current_user
 from backend.models import PurchaseOrder, OrderItem
+from backend.utils.salesperson_filter import (
+    get_salesperson_filter_name,
+    filter_pos_by_salesperson
+)
 
 router = APIRouter(prefix="/api/dashboard", tags=["Dashboard"])
 
@@ -98,6 +102,11 @@ async def get_dashboard_metrics(
         PurchaseOrder.tenant_id == current_user.tenant_id,
         PurchaseOrder.created_at >= cutoff_date
     ).all()
+
+    # Salesperson isolation filter for Operador in COMERCIAL
+    sp_filter = get_salesperson_filter_name(current_user, db)
+    if sp_filter:
+        pos = filter_pos_by_salesperson(pos, sp_filter)
     
     # 1. Margin Metrics
     metrics = calculate_po_metrics(pos)
@@ -142,6 +151,9 @@ async def get_dashboard_metrics(
     all_items = db.query(OrderItem).filter(
         OrderItem.tenant_id == current_user.tenant_id
     ).all()
+    if sp_filter:
+        allowed_po_ids = {po.id for po in pos}
+        all_items = [it for it in all_items if it.po_id in allowed_po_ids]
     
     # Count items by PO status
     status_counts = {}
@@ -193,11 +205,13 @@ async def get_dashboard_summary(
     pos = db.query(PurchaseOrder).filter(
         PurchaseOrder.tenant_id == current_user.tenant_id
     ).all()
-    
+
+    sp_filter = get_salesperson_filter_name(current_user, db)
+    if sp_filter:
+        pos = filter_pos_by_salesperson(pos, sp_filter)
+
     # Count items
-    total_items = db.query(OrderItem).filter(
-        OrderItem.tenant_id == current_user.tenant_id
-    ).count()
+    total_items = sum(len(po.items or []) for po in pos)
     
     # Status distribution
     status_counts = {}
@@ -258,6 +272,10 @@ async def get_margin_trend(
         PurchaseOrder.tenant_id == current_user.tenant_id,
         PurchaseOrder.created_at >= cutoff_date
     ).all()
+
+    sp_filter = get_salesperson_filter_name(current_user, db)
+    if sp_filter:
+        pos = filter_pos_by_salesperson(pos, sp_filter)
     
     # Group by date
     daily_data = {}
@@ -321,6 +339,10 @@ async def get_lead_time_distribution(
         PurchaseOrder.tenant_id == current_user.tenant_id,
         PurchaseOrder.status_macro == "COMPLETED"
     ).all()
+
+    sp_filter = get_salesperson_filter_name(current_user, db)
+    if sp_filter:
+        completed_pos = filter_pos_by_salesperson(completed_pos, sp_filter)
     
     # Calculate lead times
     lead_times = []
@@ -500,6 +522,10 @@ async def get_dashboard_alerts(
         PurchaseOrder.status_macro == "DRAFT",
         PurchaseOrder.created_at < week_ago
     ).all()
+
+    sp_filter = get_salesperson_filter_name(current_user, db)
+    if sp_filter:
+        stuck_pos = filter_pos_by_salesperson(stuck_pos, sp_filter)
     
     for po in stuck_pos:
         now = datetime.now(po.created_at.tzinfo) if po.created_at.tzinfo is not None else datetime.utcnow()

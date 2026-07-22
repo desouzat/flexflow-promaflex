@@ -32,6 +32,11 @@ except ModuleNotFoundError:
     from routers.auth import UserInfo, get_current_user
     from utils.business_hours import calculate_business_hours, get_sla_config_from_db
 
+from backend.utils.salesperson_filter import (
+    get_salesperson_filter_name,
+    filter_pos_by_salesperson
+)
+
 router = APIRouter(prefix="/api/reports", tags=["Reports"])
 
 # ── SLA area mapping ────────────────────────────────────────────────────────
@@ -327,6 +332,10 @@ async def export_pos_csv(
         .order_by(PurchaseOrder.created_at.desc())
         .all()
     )
+
+    sp_filter = get_salesperson_filter_name(current_user, db)
+    if sp_filter:
+        pos = filter_pos_by_salesperson(pos, sp_filter)
 
     # ── Load SLA config once for the tenant ──────────────────────────────
     sla_config = get_sla_config_from_db(db, current_user.tenant_id)
@@ -651,6 +660,10 @@ async def export_cancellations_csv(
         .order_by(PurchaseOrder.updated_at.desc())
         .all()
     )
+
+    sp_filter = get_salesperson_filter_name(current_user, db)
+    if sp_filter:
+        pos = filter_pos_by_salesperson(pos, sp_filter)
 
     # ── Build CSV in memory ───────────────────────────────────────────────
     output = io.StringIO()

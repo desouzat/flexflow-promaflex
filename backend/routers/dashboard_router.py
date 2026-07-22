@@ -10,6 +10,10 @@ from backend.routers.auth import get_current_user
 from backend.schemas.auth_schema import UserInfo
 from backend.models import PurchaseOrder, OrderItem, MaterialCost
 from backend.services.client_mapping_service import ClientMappingService
+from backend.utils.salesperson_filter import (
+    get_salesperson_filter_name,
+    filter_pos_by_salesperson
+)
 
 router = APIRouter(prefix="/api/dashboard", tags=["Dashboard Celso"])
 
@@ -76,6 +80,13 @@ async def get_celso_kpis(
     pos = db.query(PurchaseOrder).filter(PurchaseOrder.tenant_id == tenant_id).all()
     items = db.query(OrderItem).filter(OrderItem.tenant_id == tenant_id).all()
 
+    # Salesperson isolation filter for Operador in COMERCIAL
+    sp_filter = get_salesperson_filter_name(current_user, db)
+    if sp_filter:
+        pos = filter_pos_by_salesperson(pos, sp_filter)
+        allowed_po_ids = {po.id for po in pos}
+        items = [it for it in items if it.po_id in allowed_po_ids]
+
     # Create MaterialCost cache to avoid redundant queries
     material_costs = {
         mc.sku: mc for mc in db.query(MaterialCost).filter(MaterialCost.tenant_id == tenant_id).all()
@@ -90,7 +101,7 @@ async def get_celso_kpis(
         # Calculate cost
         material = material_costs.get(item.sku)
         if material:
-            unit_cost = Decimal(str(material.custo_mp_kg)) / Decimal(str(material.rendimento)) if material.rendimento > 0 else Decimal("0.00")
+            unit_cost = Decimal(str(material.custo_mp_kg)) * Decimal(str(material.rendimento))
             item_cost = unit_cost * qty
         else:
             # Fallback to 70% cost ratio
