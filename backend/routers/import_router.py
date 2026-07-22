@@ -681,6 +681,40 @@ def update_staging_session(
 
 
 # ============================================================================
+# NEW ENDPOINT: DELETE /staging-session  (clear/discard session)
+# ============================================================================
+
+@router.delete("/staging-session")
+def delete_staging_session(
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Purge/clear the active Mesa de Conferência staging session for this tenant.
+    Called when an operator cancels or discards the current staging session.
+    """
+    from sqlalchemy import select as _select
+    import uuid as _uuid
+
+    try:
+        tenant_uuid = _uuid.UUID(str(current_user.tenant_id))
+        session = db.execute(
+            _select(StagingSession).where(StagingSession.tenant_id == tenant_uuid)
+        ).scalar_one_or_none()
+
+        if session:
+            db.delete(session)
+            db.commit()
+        return {"success": True, "message": "Sessão de staging descartada com sucesso."}
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao descartar sessão de staging: {str(exc)}"
+        ) from exc
+
+
+# ============================================================================
 # HEARTBEAT ENDPOINTS — Concurrency Warning Banner
 # ============================================================================
 

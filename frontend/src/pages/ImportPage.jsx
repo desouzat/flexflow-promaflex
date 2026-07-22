@@ -1196,27 +1196,44 @@ const ImportPage = () => {
                 showSuccess('Mesa de Conferência: nenhuma sessão ativa no servidor.')
                 return
             }
-            setStagingData(prev => {
-                // Merge server po_list preserving local is_checked flags
-                const prevMap = {}
-                if (prev?.po_list) {
-                    prev.po_list.forEach(po => {
-                        po.items.forEach(item => { prevMap[item.id] = item })
-                    })
-                }
-                const merged = dbPoList.map((po, _pi) => ({
-                    ...po,
-                    items: (po.items || []).map((item, index) => {
-                        const local = prevMap[item.id || `${po.po_number}-${index + 1}`]
-                        return { ...item, is_checked: local ? local.is_checked : false }
-                    })
+            const transformed = dbPoList.map((po, _pi) => ({
+                ...po,
+                business_unit: po.business_unit || null,
+                packaging_type: po.packaging_type || null,
+                items: (po.items || []).map((item) => ({
+                    ...item,
+                    is_checked: item.is_checked || false
                 }))
-                return { isMultiPO: merged.length > 1, po_list: merged, total_pos: merged.length }
+            }))
+            setStagingData({
+                isMultiPO: transformed.length > 1,
+                po_list: transformed,
+                total_pos: transformed.length
             })
             const updatedBy = res.data?.updated_by
             showSuccess(`🔄 Mesa atualizada${updatedBy ? ` com edições de ${updatedBy}` : ''}.`)
         } catch {
             showError('Erro ao atualizar Mesa de Conferência do servidor.')
+        }
+    }
+
+    // ─── Purge/Discard DB & Local Staging Session ────────────────────────────
+    const handleClearStagingSession = async () => {
+        try {
+            await api.delete('/import/staging-session')
+        } catch (err) {
+            console.warn('Erro ao deletar sessão de staging no servidor:', err)
+        }
+        const storageKey = getStorageKey(user)
+        if (storageKey) {
+            try { localStorage.removeItem(storageKey) } catch (_) {}
+        }
+        setStagingData(null)
+        setSelectedFile(null)
+        setCurrentPage(1)
+        setSelectedPOIndex(0)
+        if (fileInputRef.current) {
+            fileInputRef.current.value = ''
         }
     }
 
@@ -2514,14 +2531,7 @@ const ImportPage = () => {
                             {/* Action Buttons */}
                             <div className="flex justify-between">
                                 <button
-                                    onClick={() => {
-                                        setStagingData(null)
-                                        setSelectedFile(null)
-                                        setCurrentPage(1)
-                                        if (fileInputRef.current) {
-                                            fileInputRef.current.value = ''
-                                        }
-                                    }}
+                                    onClick={handleClearStagingSession}
                                     className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
                                 >
                                     Cancelar
@@ -2859,22 +2869,29 @@ const ImportPage = () => {
                                             });
                                         }
                                         // Remove this PO from the staging list regardless
+                                        let isAllCleared = false
                                         setStagingData(prev => {
-                                            if (!prev || !prev.po_list) return prev;
-                                            const updatedList = prev.po_list.filter((_, idx) => idx !== selectedPOIndex);
-                                            if (updatedList.length === 0) return null; // All POs cancelled — clear staging
+                                            if (!prev || !prev.po_list) return prev
+                                            const updatedList = prev.po_list.filter((_, idx) => idx !== selectedPOIndex)
+                                            if (updatedList.length === 0) {
+                                                isAllCleared = true
+                                                return null
+                                            }
                                             return {
                                                 ...prev,
                                                 po_list: updatedList,
                                                 total_pos: updatedList.length
-                                            };
-                                        });
-                                        // Adjust selected index
-                                        setSelectedPOIndex(prev => Math.max(0, prev > 0 ? prev - 1 : 0));
-                                        setCurrentPage(1);
-                                        showSuccess(`✅ Pedido ${currentPO.po_number} cancelado e removido da fila.`);
-                                        setShowCancelImportModal(false);
-                                        setCancelImportJustification('');
+                                            }
+                                        })
+                                        if (isAllCleared) {
+                                            await handleClearStagingSession()
+                                        } else {
+                                            setSelectedPOIndex(prev => Math.max(0, prev > 0 ? prev - 1 : 0))
+                                            setCurrentPage(1)
+                                        }
+                                        showSuccess(`✅ Pedido ${currentPO.po_number} cancelado e removido da fila.`)
+                                        setShowCancelImportModal(false)
+                                        setCancelImportJustification('')
                                     } catch (err) {
                                         showError(err.response?.data?.detail || 'Erro ao cancelar pedido');
                                     } finally {
