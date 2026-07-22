@@ -47,6 +47,24 @@ const isValidSessionSchema = (parsed) => {
     return true
 }
 
+/**
+ * Generate or retrieve browser tab session ID to differentiate operators using shared logins.
+ */
+const getClientSessionId = () => {
+    try {
+        let id = sessionStorage.getItem('flexflow_client_session_id')
+        if (!id) {
+            id = typeof crypto !== 'undefined' && crypto.randomUUID
+                ? crypto.randomUUID()
+                : 'sess_' + Math.random().toString(36).substring(2, 11) + '_' + Date.now()
+            sessionStorage.setItem('flexflow_client_session_id', id)
+        }
+        return id
+    } catch (_) {
+        return 'sess_fallback_' + Date.now()
+    }
+}
+
 // Mock function to send finance notification
 const sendFinanceNotification = (poNumber, itemSku) => {
     console.log(`📧 EMAIL SENT TO FINANCE: PO [${poNumber}] - Item [${itemSku}] needs approval`)
@@ -1052,6 +1070,7 @@ const ImportPage = () => {
                     po_number: po.po_number,
                     client_name: po.client_name,
                     business_unit: po.business_unit || null,
+                    packaging_type: po.packaging_type || null,
                     freight_cost: po.freight_cost !== undefined ? po.freight_cost : sumFreight,
                     additional_costs: po.additional_costs || 0,
                     po_total_value: po.po_total_value || null,
@@ -1114,7 +1133,7 @@ const ImportPage = () => {
         })
     }, [user, sessionChecked]) // eslint-disable-line react-hooks/exhaustive-deps
 
-    // ─── DB Staging Session: auto-save on stagingData change (1s debounce) ─
+    // ─── DB Staging Session: auto-save on stagingData change (300ms debounce) ─
     const _autoSaveTimerRef = useRef(null)
     useEffect(() => {
         if (!user || !stagingData || !stagingData.po_list) return
@@ -1123,7 +1142,7 @@ const ImportPage = () => {
             api.put('/import/staging-session', { po_list: stagingData.po_list }).catch(() => {
                 /* Best-effort — silently swallow errors */
             })
-        }, 1000) // 1-second debounce
+        }, 300) // 300ms debounce for near-instant persistence
         return () => {
             if (_autoSaveTimerRef.current) clearTimeout(_autoSaveTimerRef.current)
         }
@@ -1133,12 +1152,13 @@ const ImportPage = () => {
     useEffect(() => {
         if (!user) return
         const userName = user.name || user.email || 'Operador'
+        const sessionId = getClientSessionId()
 
         const sendHeartbeat = () => {
-            api.post('/import/mesa-heartbeat', { user_name: userName }).catch(() => {})
+            api.post('/import/mesa-heartbeat', { user_name: userName, session_id: sessionId }).catch(() => {})
         }
         const checkLockStatus = () => {
-            api.get('/import/mesa-lock-status').then(res => {
+            api.get('/import/mesa-lock-status', { params: { session_id: sessionId } }).then(res => {
                 if (res.data?.locked) {
                     setConcurrentUser({
                         name: res.data.holder_name,
@@ -1163,7 +1183,7 @@ const ImportPage = () => {
         return () => {
             clearInterval(heartbeatInterval)
             clearInterval(pollInterval)
-            api.delete('/import/mesa-heartbeat').catch(() => {})
+            api.delete('/import/mesa-heartbeat', { params: { session_id: sessionId } }).catch(() => {})
         }
     }, [user]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1208,8 +1228,8 @@ const ImportPage = () => {
         try {
             const response = await api.get('/import/pending-s3-files')
             setS3Files(response.data)
-            // Pre-select all files on load
-            setSelectedS3Files(response.data.map(f => f.filename))
+            // Pre-select all files on load using file_key or filename
+            setSelectedS3Files(response.data.map(f => f.file_key || f.filename))
         } catch (error) {
             console.error('Error fetching S3 files:', error)
             showError('Erro ao buscar arquivos pendentes no S3.')
@@ -1225,7 +1245,8 @@ const ImportPage = () => {
 
         try {
             const response = await api.post('/import/sync-s3', {
-                filenames: selectedS3Files
+                filenames: selectedS3Files,
+                file_keys: selectedS3Files
             })
 
             dismissToast(toastId)
@@ -2914,7 +2935,7 @@ const ImportPage = () => {
                                                 checked={selectedS3Files.length === s3Files.length}
                                                 onChange={(e) => {
                                                     if (e.target.checked) {
-                                                        setSelectedS3Files(s3Files.map(f => f.filename))
+                                                        setSelectedS3Files(s3Files.map(f => f.file_key || f.filename))
                                                     } else {
                                                         setSelectedS3Files([])
                                                     }
@@ -2940,47 +2961,54 @@ const ImportPage = () => {
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-slate-100 text-slate-700 font-medium">
-                                                {s3Files.map((file) => (
-                                                    <tr 
-                                                        key={file.filename}
-                                                        className={`hover:bg-slate-50 transition-colors ${file.is_empty_template ? 'bg-slate-50/50' : ''}`}
-                                                    >
-                                                        <td className="px-4 py-3">
-                                                            <input 
-                                                                type="checkbox"
-                                                                checked={selectedS3Files.includes(file.filename)}
-                                                                onChange={(e) => {
-                                                                    if (e.target.checked) {
-                                                                        setSelectedS3Files(prev => [...prev, file.filename])
-                                                                    } else {
-                                                                        setSelectedS3Files(prev => prev.filter(name => name !== file.filename))
-                                                                    }
-                                                                }}
-                                                                className="w-4 h-4 rounded text-blue-600 border-slate-300 focus:ring-blue-500"
-                                                            />
-                                                        </td>
-                                                        <td className="px-4 py-3 font-mono text-xs max-w-[200px] truncate" title={file.filename}>
-                                                            {file.filename}
-                                                        </td>
-                                                        <td className="px-4 py-3 text-slate-600">
-                                                            {file.parsed_date}
-                                                        </td>
-                                                        <td className="px-4 py-3 text-slate-500">
-                                                            {(file.size_bytes / 1024).toFixed(1)} KB
-                                                        </td>
-                                                        <td className="px-4 py-3">
-                                                            {file.is_empty_template ? (
-                                                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-700 border border-gray-300">
-                                                                    Vazio - Final de Semana
-                                                                </span>
-                                                            ) : (
-                                                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700 border border-green-200">
-                                                                    Possui Dados
-                                                                </span>
-                                                            )}
-                                                        </td>
-                                                    </tr>
-                                                ))}
+                                                {s3Files.map((file) => {
+                                                    const fileId = file.file_key || file.filename
+                                                    return (
+                                                        <tr 
+                                                            key={fileId}
+                                                            className={`hover:bg-slate-50 transition-colors ${file.is_empty_template ? 'bg-slate-50/50' : ''}`}
+                                                        >
+                                                            <td className="px-4 py-3">
+                                                                <input 
+                                                                    type="checkbox"
+                                                                    checked={selectedS3Files.includes(fileId)}
+                                                                    onChange={(e) => {
+                                                                        if (e.target.checked) {
+                                                                            setSelectedS3Files(prev => [...prev, fileId])
+                                                                        } else {
+                                                                            setSelectedS3Files(prev => prev.filter(id => id !== fileId))
+                                                                        }
+                                                                    }}
+                                                                    className="w-4 h-4 rounded text-blue-600 border-slate-300 focus:ring-blue-500"
+                                                                />
+                                                            </td>
+                                                            <td className="px-4 py-3 font-mono text-xs max-w-[220px] truncate" title={file.filename}>
+                                                                {file.filename}
+                                                            </td>
+                                                            <td className="px-4 py-3 text-slate-600">
+                                                                {file.parsed_date}
+                                                            </td>
+                                                            <td className="px-4 py-3 text-slate-500">
+                                                                {(file.size_bytes / 1024).toFixed(1)} KB
+                                                            </td>
+                                                            <td className="px-4 py-3">
+                                                                {file.is_empty_template ? (
+                                                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-700 border border-gray-300">
+                                                                        Vazio - Final de Semana
+                                                                    </span>
+                                                                ) : file.is_processed ? (
+                                                                    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-blue-100 text-blue-800 border border-blue-300 shadow-2xs" title="Arquivo arquivado na pasta /processed. Clique para reprocessar.">
+                                                                        📂 Arquivado - Reprocessar
+                                                                    </span>
+                                                                ) : (
+                                                                    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs" title="Arquivo novo no diretório pendente.">
+                                                                        ✨ Pendente - Novo
+                                                                    </span>
+                                                                )}
+                                                            </td>
+                                                        </tr>
+                                                    )
+                                                })}
                                             </tbody>
                                         </table>
                                     </div>

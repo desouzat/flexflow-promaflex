@@ -686,6 +686,7 @@ def update_staging_session(
 
 class HeartbeatRequest(BaseModel):
     user_name: str
+    session_id: Optional[str] = None
 
 
 @router.post("/mesa-heartbeat")
@@ -707,6 +708,7 @@ def post_mesa_heartbeat(
         _active_mesa_users[tenant_key] = {
             "user_email": user_email,
             "user_name": payload.user_name,
+            "session_id": payload.session_id,
             "expires_at": expires_at
         }
     return {"success": True, "expires_at": expires_at.isoformat()}
@@ -714,12 +716,13 @@ def post_mesa_heartbeat(
 
 @router.get("/mesa-lock-status")
 def get_mesa_lock_status(
+    session_id: Optional[str] = None,
     current_user: UserInfo = Depends(get_current_user)
 ):
     """
     Check if another operator has the Mesa open for this tenant.
     Returns {locked: false} if no active session or if the current user owns it.
-    Returns {locked: true, holder_name, holder_email, since} if another user is active.
+    Returns {locked: true, holder_name, holder_email, since} if another session is active.
     """
     from datetime import datetime as _dt, timezone as _tz
     tenant_key = str(current_user.tenant_id)
@@ -737,7 +740,20 @@ def get_mesa_lock_status(
             _active_mesa_users.pop(tenant_key, None)
         return {"locked": False}
 
-    # If the caller is the lock holder, not locked for them
+    # Check session_id discrepancy first (handles shared logins e.g. comercial@promaflex.com.br)
+    holder_session_id = entry.get("session_id")
+    if holder_session_id and session_id:
+        if holder_session_id == session_id:
+            return {"locked": False}
+        else:
+            return {
+                "locked": True,
+                "holder_name": entry["user_name"],
+                "holder_email": entry["user_email"],
+                "since": entry["expires_at"].strftime("%H:%M")
+            }
+
+    # Fallback email comparison for legacy callers without session_id
     if entry["user_email"] == caller_email:
         return {"locked": False}
 
@@ -751,6 +767,7 @@ def get_mesa_lock_status(
 
 @router.delete("/mesa-heartbeat")
 def release_mesa_heartbeat(
+    session_id: Optional[str] = None,
     current_user: UserInfo = Depends(get_current_user)
 ):
     """
@@ -760,8 +777,13 @@ def release_mesa_heartbeat(
     caller_email = getattr(current_user, 'email', str(current_user.id))
     with _heartbeat_lock:
         entry = _active_mesa_users.get(tenant_key)
-        if entry and entry["user_email"] == caller_email:
-            _active_mesa_users.pop(tenant_key, None)
+        if entry:
+            holder_session_id = entry.get("session_id")
+            if holder_session_id and session_id:
+                if holder_session_id == session_id:
+                    _active_mesa_users.pop(tenant_key, None)
+            elif entry["user_email"] == caller_email:
+                _active_mesa_users.pop(tenant_key, None)
     return {"success": True}
 
 
