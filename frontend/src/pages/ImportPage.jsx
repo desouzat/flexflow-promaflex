@@ -273,14 +273,20 @@ const ImportPage = () => {
         setShowRestoreModal(false)
     }
 
-    const handleDiscardSession = () => {
+    const handleDiscardSession = async () => {
         const storageKey = getStorageKey(user)
         console.log('🗑️ [Session] Discarding saved session')
+        try {
+            await api.delete('/import/staging-session')
+        } catch (err) {
+            console.warn('Erro ao deletar sessão de staging no servidor:', err)
+        }
         if (storageKey) {
             try { localStorage.removeItem(storageKey) } catch (_) {}
         }
         setSessionChecked(true)
         setShowRestoreModal(false)
+        setStagingData(null)
     }
 
     // FF-HARDENING-004: Reset override checkbox whenever the operator navigates to a different PO
@@ -1801,7 +1807,7 @@ const ImportPage = () => {
                                             <option value="Indústria">Indústria</option>
                                             <option value="Construção Civil">Construção Civil</option>
                                             <option value="Varejo">Varejo</option>
-                                            <option value="Outros">Outros</option>
+                                            <option value="Site">Site</option>
                                         </select>
                                     </div>
                                 </div>

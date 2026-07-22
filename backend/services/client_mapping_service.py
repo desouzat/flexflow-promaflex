@@ -3,12 +3,12 @@ import re
 class ClientMappingService:
     """
     Service to classify clients into Business Units based on their names.
-    Units: 'Indústria', 'Construção Civil', 'Varejo', or default 'Outros'.
+    Units: 'Indústria', 'Construção Civil', 'Varejo', or default 'Site'.
     """
     @staticmethod
     def classify_client(client_name: str) -> str:
         if not client_name:
-            return "Outros"
+            return "Site"
         
         name = client_name.strip()
         
@@ -39,4 +39,4 @@ class ClientMappingService:
         elif industry_pattern.search(name):
             return "Indústria"
         else:
-            return "Outros"
+            return "Site"

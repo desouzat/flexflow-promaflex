@@ -262,6 +262,15 @@ async def lifespan(app: FastAPI):
             ]
         )
 
+        # Step 8 — Idempotent DML migration: Business Unit Outros -> Site
+        _run_ddl_step(
+            "business_unit_outros_to_site_migration",
+            [
+                "UPDATE client_preferences SET business_unit = 'Site' WHERE business_unit IN ('Outros', 'OUTROS');",
+                "UPDATE purchase_orders SET partition_metadata = jsonb_set(partition_metadata, '{business_unit}', '\"Site\"') WHERE partition_metadata->>'business_unit' IN ('Outros', 'OUTROS');"
+            ]
+        )
+
         print("[DEBUG] Background DB schema initialization completed.")
 
     async def init_db_background():

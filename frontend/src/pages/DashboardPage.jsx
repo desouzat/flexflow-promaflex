@@ -72,12 +72,12 @@ const DashboardPage = () => {
     }
 
     // Default fallbacks if backend returns empty/null
-    const portfolio = kpiData?.portfolio_by_unit || { "Indústria": 0, "Construção Civil": 0, "Varejo": 0, "Outros": 0 }
+    const portfolio = kpiData?.portfolio_by_unit || { "Indústria": 0, "Construção Civil": 0, "Varejo": 0, "Site": 0 }
     const margin = kpiData?.margin_by_unit || {
         "Indústria": { "total_margin": 0, "margin_percentage": 0 },
         "Construção Civil": { "total_margin": 0, "margin_percentage": 0 },
         "Varejo": { "total_margin": 0, "margin_percentage": 0 },
-        "Outros": { "total_margin": 0, "margin_percentage": 0 }
+        "Site": { "total_margin": 0, "margin_percentage": 0 }
     }
     const billing = kpiData?.billing_status || { "current_month": 0, "next_month": 0 }
     const readyNotBilled = kpiData?.ready_not_billed?.ready_not_billed_total ?? 0

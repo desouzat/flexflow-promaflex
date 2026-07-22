@@ -600,7 +600,7 @@ class ConfirmStagingPO(BaseModel):
     @field_validator("business_unit")
     @classmethod
     def validate_business_unit(cls, v):
-        allowed = ["Indústria", "Construção Civil", "Varejo", "Outros"]
+        allowed = ["Indústria", "Construção Civil", "Varejo", "Site"]
         if v not in allowed:
             raise ValueError(f"Business unit must be one of: {', '.join(allowed)}")
         return v

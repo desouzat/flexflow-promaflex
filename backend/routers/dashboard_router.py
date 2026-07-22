@@ -112,8 +112,8 @@ async def get_celso_kpis(
     # =========================================================================
     # KPI 1 & 2: Portfolio by Unit & Margin by Unit
     # =========================================================================
-    # Categories: 'Indústria', 'Construção Civil', 'Varejo', 'Outros'
-    units = ["Indústria", "Construção Civil", "Varejo", "Outros"]
+    # Categories: 'Indústria', 'Construção Civil', 'Varejo', 'Site'
+    units = ["Indústria", "Construção Civil", "Varejo", "Site"]
     portfolio_by_unit = {u: 0.0 for u in units}
     
     unit_values = {u: Decimal("0.00") for u in units}
@@ -126,7 +126,7 @@ async def get_celso_kpis(
     }
 
     for po in pos:
-        client_name = po.client_name or "Outros"
+        client_name = po.client_name or "Site"
         unit = client_prefs.get(client_name)
         if not unit and po.partition_metadata and "business_unit" in po.partition_metadata:
             unit = po.partition_metadata["business_unit"]
@@ -134,7 +134,7 @@ async def get_celso_kpis(
             unit = ClientMappingService.classify_client(client_name)
         
         if unit not in units:
-            unit = "Outros"
+            unit = "Site"
 
         
         # Calculate PO total value
