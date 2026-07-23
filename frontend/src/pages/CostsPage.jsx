@@ -279,10 +279,10 @@ const CostsPage = () => {
     }) : []
 
     const calculateCostPerUnit = (material) => {
-        const costPerKg = parseFloat(material.custo_mp_kg) || 0
-        const yield_kg = parseFloat(material.rendimento) || 0
-        if (yield_kg <= 0) return '0.00'
-        const baseCost = costPerKg / yield_kg
+        const costPerM2 = parseFloat(material.custo_mp_kg) || 0
+        const yield_m2 = parseFloat(material.rendimento) || 0
+        if (yield_m2 <= 0) return '0.00'
+        const baseCost = costPerM2 * yield_m2
         return baseCost.toFixed(2)
     }
 
@@ -435,7 +435,7 @@ const CostsPage = () => {
                                         </div>
                                         <div>
                                             <label className="block text-sm font-medium text-gray-700 mb-1">
-                                                Custo MP/kg (R$) *
+                                                Custo MP/m² (R$) *
                                             </label>
                                             <input
                                                 type="number"
@@ -448,7 +448,7 @@ const CostsPage = () => {
                                         </div>
                                         <div>
                                             <label className="block text-sm font-medium text-gray-700 mb-1">
-                                                Rendimento (kg/unidade) *
+                                                Rendimento (m²) *
                                             </label>
                                             <input
                                                 type="number"
@@ -498,7 +498,7 @@ const CostsPage = () => {
                                                 Cód Estruturado
                                             </th>
                                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                Custo
+                                                CUSTO M²
                                             </th>
                                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                                 Rendimento
@@ -507,7 +507,7 @@ const CostsPage = () => {
                                                 Impostos
                                             </th>
                                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                Custo M2
+                                                CUSTO KG
                                             </th>
                                             <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                                                 Ações
@@ -594,7 +594,7 @@ const CostsPage = () => {
                                                                 R$ {parseFloat(material.custo_mp_kg).toFixed(2)}
                                                             </td>
                                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                                                {parseFloat(material.rendimento).toFixed(4)} kg
+                                                                {parseFloat(material.rendimento).toFixed(4)} m²
                                                             </td>
                                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                                                                 {parseFloat(material.indice_impostos).toFixed(2)}%
