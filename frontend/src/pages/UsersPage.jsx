@@ -418,12 +418,13 @@ const UsersPage = () => {
                                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                                         required
                                     >
+                                        <option value="user">USUÁRIO</option>
                                         <option value="operator">OPERADOR</option>
                                         <option value="admin">LÍDER</option>
                                         <option value="master">MASTER</option>
                                     </select>
                                     <p className="mt-1 text-xs text-gray-500">
-                                        OPERADOR: PCP/Expedição/Comercial básico | LÍDER: Gerência | MASTER: Admin Total
+                                        USUÁRIO: Vendedor Restrito | OPERADOR: Backoffice / Operacional | LÍDER: Gerência | MASTER: Admin Total
                                     </p>
                                 </div>
 

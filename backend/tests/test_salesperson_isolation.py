@@ -22,15 +22,15 @@ def test_salesperson_filter_master_bypass():
     assert result is None
 
 
-def test_salesperson_filter_operador_comercial():
-    current_user = MagicMock(id="22222222-2222-2222-2222-222222222222", role="operador")
-    db_user = MagicMock(role="operador", area="COMERCIAL")
-    db_user.name = "ANDREA"
+def test_salesperson_filter_operador_comercial_backoffice_bypass():
+    current_user = MagicMock(id="22222222-2222-2222-2222-222222222222", role="operator")
+    db_user = MagicMock(role="operator", area="COMERCIAL")
+    db_user.name = "Mairla"
     db = MagicMock()
     db.query().filter().first.return_value = db_user
 
     result = get_salesperson_filter_name(current_user, db)
-    assert result == "ANDREA"
+    assert result is None
 
 
 def test_salesperson_filter_user_role_comercial():

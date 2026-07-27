@@ -6,15 +6,15 @@ from backend.models import User, PurchaseOrder
 
 def get_salesperson_filter_name(current_user: any, db: Session) -> Optional[str]:
     """
-    Check if current_user is an Operador under COMERCIAL area.
+    Check if current_user is an individual salesperson under COMERCIAL area (role='user').
     If yes, return db_user.name for salesperson isolation.
-    If MASTER, ADMIN, or non-COMERCIAL, return None (bypass filter).
+    If MASTER, ADMIN, OPERATOR (backoffice), or non-COMERCIAL, return None (bypass filter).
     """
     if not current_user or not getattr(current_user, 'id', None):
         return None
 
     role = (getattr(current_user, 'role', '') or '').lower()
-    if role in ['admin', 'master']:
+    if role in ['admin', 'master', 'operator', 'operador']:
         return None
 
     try:
@@ -23,7 +23,7 @@ def get_salesperson_filter_name(current_user: any, db: Session) -> Optional[str]
         if db_user:
             u_role = (db_user.role or '').lower()
             u_area = (db_user.area or '').upper()
-            if u_role not in ['admin', 'master'] and u_area == 'COMERCIAL':
+            if u_role in ['user', 'usuario', 'usuário'] and u_area == 'COMERCIAL':
                 return db_user.name
     except Exception:
         pass
