@@ -33,6 +33,17 @@ def test_salesperson_filter_operador_comercial():
     assert result == "ANDREA"
 
 
+def test_salesperson_filter_user_role_comercial():
+    current_user = MagicMock(id="33333333-3333-3333-3333-333333333333", role="user")
+    db_user = MagicMock(role="user", area="Comercial")
+    db_user.name = "ALEXANDRE RODRIGUES"
+    db = MagicMock()
+    db.query().filter().first.return_value = db_user
+
+    result = get_salesperson_filter_name(current_user, db)
+    assert result == "ALEXANDRE RODRIGUES"
+
+
 def test_po_matches_salesperson_matching():
     po = MagicMock()
     item1 = MagicMock(extra_metadata={"salesperson": "Andrea"})

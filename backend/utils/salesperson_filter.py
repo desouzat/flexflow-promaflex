@@ -23,7 +23,7 @@ def get_salesperson_filter_name(current_user: any, db: Session) -> Optional[str]
         if db_user:
             u_role = (db_user.role or '').lower()
             u_area = (db_user.area or '').upper()
-            if u_role == 'operador' and u_area == 'COMERCIAL':
+            if u_role not in ['admin', 'master'] and u_area == 'COMERCIAL':
                 return db_user.name
     except Exception:
         pass
