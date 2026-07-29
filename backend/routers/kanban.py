@@ -4,12 +4,15 @@ Endpoints for Kanban board operations and status management.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status, File, UploadFile
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload, joinedload
+from sqlalchemy import or_
 from typing import List, Optional, Any
 from decimal import Decimal
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pydantic import BaseModel, validator
 import uuid
+
+CONCLUDED_STATUSES = ["COMPLETED", "CANCELLED", "ARCHIVED", "ARCHIVED_PARTITIONED"]
 
 from backend.schemas.kanban_schema import (
     KanbanBoardResponse,
@@ -99,7 +102,13 @@ STATUS_FLOW = {
 }
 
 
-def _map_single_po(po: PurchaseOrder, db: Session, is_privileged: bool) -> POResponse:
+def _map_single_po(
+    po: PurchaseOrder, 
+    db: Session, 
+    is_privileged: bool,
+    material_map: Optional[dict] = None,
+    display_name_override: Optional[str] = None
+) -> POResponse:
     """Helper to serialize a single PurchaseOrder database model into a POResponse Pydantic schema."""
     from datetime import timedelta
     from backend.services.financial_service import FinancialService
@@ -108,10 +117,13 @@ def _map_single_po(po: PurchaseOrder, db: Session, is_privileged: bool) -> PORes
     
     items = []
     for item in po.items:
-        material = db.query(MaterialCost).filter(
-            MaterialCost.tenant_id == po.tenant_id,
-            MaterialCost.sku == item.sku
-        ).first()
+        if material_map is not None:
+            material = material_map.get(item.sku)
+        else:
+            material = db.query(MaterialCost).filter(
+                MaterialCost.tenant_id == po.tenant_id,
+                MaterialCost.sku == item.sku
+            ).first()
         
         unit_cost = Decimal("0.00")
         cost_meta = {}
@@ -134,7 +146,7 @@ def _map_single_po(po: PurchaseOrder, db: Session, is_privileged: bool) -> PORes
                 sku=item.sku,
                 quantity=item.quantity,
                 price=Decimal(str(item.price)),
-                                status_item=item.status_item,
+                status_item=item.status_item,
                 margin_item=(Decimal(str(item.price)) - unit_cost) if is_privileged else "***",
                 total_cost=unit_cost,
                 item_total_value=Decimal(str(item.item_total_value)) if item.item_total_value is not None else None,
@@ -198,7 +210,7 @@ def _map_single_po(po: PurchaseOrder, db: Session, is_privileged: bool) -> PORes
         client_name=getattr(po, 'client_name', None) or "Cliente Desconhecido",
         supplier_name=getattr(po, 'client_name', None) or "Cliente Desconhecido",
         status_macro=po.status_macro,
-        status=STATUS_DISPLAY_MAP.get(po.status_macro, po.status_macro),
+        status=display_name_override if display_name_override else STATUS_DISPLAY_MAP.get(po.status_macro, po.status_macro),
         items=items,
         items_count=len(items),
         total_value=Decimal(str(po.po_total_value)) if po.po_total_value is not None else metrics["total_value"],
@@ -323,9 +335,19 @@ async def get_kanban_board(
     
     is_privileged = current_user.role.lower() in ["admin", "master"]
     
-    # Query database for POs
-    pos = db.query(PurchaseOrder).filter(
-        PurchaseOrder.tenant_id == current_user.tenant_id
+    # Define 3-day stale cutoff for concluded statuses
+    stale_cutoff = datetime.now(timezone.utc) - timedelta(days=3)
+    
+    # Query database for POs with eager loading (selectinload, joinedload) and 3-day concluded card filter
+    pos = db.query(PurchaseOrder).options(
+        selectinload(PurchaseOrder.items),
+        joinedload(PurchaseOrder.creator)
+    ).filter(
+        PurchaseOrder.tenant_id == current_user.tenant_id,
+        or_(
+            PurchaseOrder.status_macro.notin_(CONCLUDED_STATUSES),
+            PurchaseOrder.updated_at >= stale_cutoff
+        )
     ).all()
     
     # Salesperson isolation filter for Operador in COMERCIAL
@@ -333,13 +355,21 @@ async def get_kanban_board(
     if sp_filter:
         pos = filter_pos_by_salesperson(pos, sp_filter)
     
+    # Bulk-load MaterialCosts for all retrieved PO items in a single query
+    all_skus = {item.sku for po in pos for item in po.items if item.sku}
+    if all_skus:
+        materials = db.query(MaterialCost).options(
+            joinedload(MaterialCost.updated_by_user)
+        ).filter(
+            MaterialCost.tenant_id == current_user.tenant_id,
+            MaterialCost.sku.in_(all_skus)
+        ).all()
+    else:
+        materials = []
+    
+    material_map = {m.sku: m for m in materials}
+    
     # Define status columns - FF-HARDENING-012.2: 6 Columns (Faturamento + Expedição split)
-    # Comercial: SUBMITTED (fallback DRAFT, WAITING_COMMERCIAL_PARTITION)
-    # PCP: APPROVED (fallback WAITING_MATERIAL)
-    # Produção/Embalagem: MANUFACTURING (fallback IN_PROGRESS)
-    # Faturamento: BILLING (new stage for NF-e emission)
-    # Expedição: SHIPPING (fallback WAITING_DISPATCH) — checklist + uploads
-    # Financeiro: FINANCE (fallback AUDIT_PENDING, ANALISE_CREDITO)
     status_columns = [
         ("Comercial", ["SUBMITTED", "DRAFT", "WAITING_COMMERCIAL_PARTITION"]),
         ("PCP", ["APPROVED", "WAITING_MATERIAL"]),
@@ -347,13 +377,12 @@ async def get_kanban_board(
         ("Faturamento", ["BILLING"]),
         ("Expedição", ["SHIPPING", "WAITING_DISPATCH"]),
         ("Financeiro", ["FINANCE", "AUDIT_PENDING", "ANALISE_CREDITO"]),
-        ("Concluídos", ["ARCHIVED", "ARCHIVED_PARTITIONED", "COMPLETED", "CANCELLED"])  # FF-HARDENING-013: cancelled cards render in Concluídos
+        ("Concluídos", ["ARCHIVED", "ARCHIVED_PARTITIONED", "COMPLETED", "CANCELLED"])
     ]
     
-    # Group POs by status
+    # Group POs by status column
     columns = []
     for display_name, db_statuses in status_columns:
-        # Filter POs for this column (may include multiple statuses), excluding child POs in WAITING_COMMERCIAL_PARTITION status to avoid duplicate board card rendering
         status_pos = [
             po for po in pos
             if po.status_macro in db_statuses and not (
@@ -361,137 +390,13 @@ async def get_kanban_board(
             )
         ]
         
-        # Convert to response models
-        po_responses = []
-        for po in status_pos:
-            # Calculate metrics
-            metrics = calculate_po_metrics(po)
-            
-            # Convert items resolving material costs
-            items = []
-            for item in po.items:
-                # Query MaterialCost to find cost industrial
-                material = db.query(MaterialCost).filter(
-                    MaterialCost.tenant_id == po.tenant_id,
-                    MaterialCost.sku == item.sku
-                ).first()
-                
-                unit_cost = Decimal("0.00")
-                cost_meta = {}
-                if material:
-                    unit_cost = Decimal(str(material.custo_mp_kg)) * Decimal(str(material.rendimento))
-                    cost_meta = {
-                        "total_cost": float(unit_cost),
-                        "cost_mp": float(unit_cost),
-                        "cost_updated_by": material.updated_by_user.name if material.updated_by_user else "Sistema",
-                        "cost_updated_at": material.updated_at.isoformat() if material.updated_at else None
-                    }
-                
-                item_extra = dict(item.extra_metadata or {})
-                if cost_meta:
-                    item_extra.update(cost_meta)
-                    
-                items.append(
-                    POItemResponse(
-                        id=str(item.id),
-                        sku=item.sku,
-                        quantity=item.quantity,
-                        price=Decimal(str(item.price)),
-                                                status_item=item.status_item,
-                        margin_item=(Decimal(str(item.price)) - unit_cost) if is_privileged else "***",
-                        total_cost=unit_cost,
-                        item_total_value=Decimal(str(item.item_total_value)) if item.item_total_value is not None else None,
-                        manual_commission_rate=Decimal(str(item.extra_metadata.get("manual_commission_rate"))) if item.extra_metadata and "manual_commission_rate" in item.extra_metadata else None,
-                        extra_metadata=item_extra,
-                        created_at=item.created_at,
-                        updated_at=item.updated_at
-                    )
-                )
-            
-            # Get commission rate from metadata or calculate
-            commission_rate = None
-            commission_value = Decimal("0.00")
-            if po.partition_metadata and "manual_commission_rate" in po.partition_metadata:
-                commission_rate = Decimal(str(po.partition_metadata["manual_commission_rate"]))
-            else:
-                # Use default commission calculation
-                from backend.services.financial_service import FinancialService
-                commission_rate, _, _ = FinancialService.get_commission_rate(
-                    metrics["margin_percentage"],
-                    client_code=None,
-                    manual_override=None
-                )
-            
-            commission_value = FinancialService.calculate_commission_value(
-                metrics["total_value"],
-                commission_rate
-            )
-            
-            # Get logistics checklist
-            logistics_checklist = None
-            if po.partition_metadata and "logistics_checklist" in po.partition_metadata:
-                logistics_checklist = po.partition_metadata["logistics_checklist"]
-            
-            # Calculate original delivery date and data_limite
-            from datetime import timedelta
-            orig_delivery = None
-            data_limite_val = None
-            if po.partition_metadata and "expected_delivery_date" in po.partition_metadata:
-                try:
-                    val = po.partition_metadata["expected_delivery_date"]
-                    if isinstance(val, str):
-                        orig_delivery = datetime.fromisoformat(val)
-                    elif isinstance(val, datetime):
-                        orig_delivery = val
-                except Exception:
-                    pass
-            if not orig_delivery:
-                for item in po.items:
-                    if item.extra_metadata and "delivery_date" in item.extra_metadata:
-                        try:
-                            val = item.extra_metadata["delivery_date"]
-                            if isinstance(val, str):
-                                if "/" in val:
-                                    d, m, y = val.split("/")
-                                    orig_delivery = datetime(int(y), int(m), int(d))
-                                else:
-                                    orig_delivery = datetime.fromisoformat(val)
-                            break
-                        except Exception:
-                            pass
-            if orig_delivery:
-                data_limite_val = orig_delivery - timedelta(days=2)
-
-            po_response = POResponse(
-                id=str(po.id),
-                po_number=po.po_number,
-                client_name=getattr(po, 'client_name', None) or "Cliente Desconhecido",
-                supplier_name=getattr(po, 'client_name', None) or "Cliente Desconhecido",
-                status_macro=po.status_macro,  # Raw database status macro (e.g. 'APPROVED' for PCP)
-                status=display_name,  # Alias for frontend compatibility
-                items=items,
-                items_count=len(items),
-                total_value=Decimal(str(po.po_total_value)) if po.po_total_value is not None else metrics["total_value"],
-                margin_global=metrics["margin_global"] if is_privileged else "***",
-                margin_percentage=metrics["margin_percentage"] if is_privileged else "***",
-                commission_rate=commission_rate,
-                commission_value=commission_value,
-                shipping_cost=Decimal(str(po.shipping_cost)),
-                expected_delivery_date=data_limite_val if data_limite_val else orig_delivery,
-                delivery_date=orig_delivery,
-                data_limite=data_limite_val,
-                extra_metadata=po.partition_metadata,
-                partition_metadata=po.partition_metadata,
-                logistics_checklist=logistics_checklist,
-                partition_reason=po.partition_reason,
-                created_at=po.created_at,
-                updated_at=po.updated_at,
-                created_by=str(po.creator.id) if (po.creator and po.creator.id) else (str(po.created_by) if po.created_by else None)
-            )
-            po_responses.append(po_response)
+        po_responses = [
+            _map_single_po(po, db, is_privileged, material_map=material_map, display_name_override=display_name)
+            for po in status_pos
+        ]
         
         column = KanbanColumn(
-            status=display_name,  # Use display name
+            status=display_name,
             count=len(po_responses),
             pos=po_responses
         )
@@ -528,8 +433,11 @@ async def list_purchase_orders(
     - List of Purchase Orders
     """
     
-    # Query database
-    query = db.query(PurchaseOrder).filter(
+    # Query database with eager loading
+    query = db.query(PurchaseOrder).options(
+        selectinload(PurchaseOrder.items),
+        joinedload(PurchaseOrder.creator)
+    ).filter(
         PurchaseOrder.tenant_id == current_user.tenant_id
     )
     
@@ -551,88 +459,24 @@ async def list_purchase_orders(
     if sp_filter:
         pos = filter_pos_by_salesperson(pos, sp_filter)
     
-    # Convert to response models
-    po_responses = []
-    for po in pos:
-        metrics = calculate_po_metrics(po)
-        
-        items = []
-        for item in po.items:
-            material = db.query(MaterialCost).filter(
-                MaterialCost.tenant_id == po.tenant_id,
-                MaterialCost.sku == item.sku
-            ).first()
-            unit_cost = Decimal("0.00")
-            if material:
-                unit_cost = Decimal(str(material.custo_mp_kg)) * Decimal(str(material.rendimento))
-            
-            items.append(
-                POItemResponse(
-                    id=str(item.id),
-                    sku=item.sku,
-                    quantity=item.quantity,
-                    price=Decimal(str(item.price)),
-                    status_item=item.status_item,
-                    margin_item=(Decimal(str(item.price)) - unit_cost) if is_privileged else "***",
-                    total_cost=unit_cost,
-                    item_total_value=Decimal(str(item.item_total_value)) if item.item_total_value is not None else None,
-                    manual_commission_rate=Decimal(str(item.extra_metadata.get("manual_commission_rate"))) if item.extra_metadata and "manual_commission_rate" in item.extra_metadata else None,
-                    extra_metadata=item.extra_metadata,
-                    created_at=item.created_at,
-                    updated_at=item.updated_at
-                )
-            )
-        
-        # Get commission rate
-        commission_rate = None
-        commission_value = Decimal("0.00")
-        if po.partition_metadata and "manual_commission_rate" in po.partition_metadata:
-            commission_rate = Decimal(str(po.partition_metadata["manual_commission_rate"]))
-        else:
-            from backend.services.financial_service import FinancialService
-            commission_rate, _, _ = FinancialService.get_commission_rate(
-                metrics["margin_percentage"],
-                client_code=None,
-                manual_override=None
-            )
-        
-        commission_value = FinancialService.calculate_commission_value(
-            metrics["total_value"],
-            commission_rate
-        )
-        
-        logistics_checklist = None
-        if po.partition_metadata and "logistics_checklist" in po.partition_metadata:
-            logistics_checklist = po.partition_metadata["logistics_checklist"]
-        
-        po_response = POResponse(
-            id=str(po.id),
-            po_number=po.po_number,
-            client_name=getattr(po, 'client_name', None) or "Cliente Desconhecido",
-            supplier_name=getattr(po, 'client_name', None) or "Cliente Desconhecido",
-            status_macro=STATUS_DISPLAY_MAP.get(po.status_macro, po.status_macro),
-            status=STATUS_DISPLAY_MAP.get(po.status_macro, po.status_macro),
-            items=items,
-            items_count=len(items),
-            total_value=Decimal(str(po.po_total_value)) if po.po_total_value is not None else metrics["total_value"],
-            margin_global=metrics["margin_global"] if is_privileged else "***",
-            margin_percentage=metrics["margin_percentage"] if is_privileged else "***",
-            commission_rate=commission_rate,
-            commission_value=commission_value,
-            shipping_cost=Decimal(str(po.shipping_cost)),
-            expected_delivery_date=getattr(po, 'expected_delivery_date', None),
-            extra_metadata=po.partition_metadata,
-            partition_metadata=po.partition_metadata,
-            logistics_checklist=logistics_checklist,
-            partition_reason=po.partition_reason,
-            parent_po_id=str(po.parent_po_id) if po.parent_po_id else None,
-            created_at=po.created_at,
-            updated_at=po.updated_at,
-            created_by=str(po.creator.id) if (po.creator and po.creator.id) else (str(po.created_by) if po.created_by else None)
-        )
-        po_responses.append(po_response)
+    # Bulk-load MaterialCosts for all retrieved PO items
+    all_skus = {item.sku for po in pos for item in po.items if item.sku}
+    if all_skus:
+        materials = db.query(MaterialCost).options(
+            joinedload(MaterialCost.updated_by_user)
+        ).filter(
+            MaterialCost.tenant_id == current_user.tenant_id,
+            MaterialCost.sku.in_(all_skus)
+        ).all()
+    else:
+        materials = []
     
-    return po_responses
+    material_map = {m.sku: m for m in materials}
+    
+    return [
+        _map_single_po(po, db, is_privileged, material_map=material_map)
+        for po in pos
+    ]
 
 
 @router.get("/pos/{po_id}", response_model=POResponse)
