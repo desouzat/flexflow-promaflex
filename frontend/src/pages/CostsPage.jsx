@@ -88,7 +88,7 @@ const CostsPage = () => {
         try {
             setLoading(true)
             setError(null)
-            const response = await api.get('/costs/materials')
+            const response = await api.get('/costs/materials?limit=1000')
             const data = response.data
             const materialsArray = Array.isArray(data) ? data : (data.items || [])
             setMaterials(materialsArray)

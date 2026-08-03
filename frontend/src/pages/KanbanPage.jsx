@@ -351,6 +351,7 @@ const KanbanPage = () => {
     const [error, setError] = useState(null)
     const [searchTerm, setSearchTerm] = useState('')
     const [compactView, setCompactView] = useState(false)
+    const [sortBy, setSortBy] = useState('delivery') // 'delivery' (SLA) or 'creation' (Data do Pedido)
     const [selectedPO, setSelectedPO] = useState(null)
     const [showDetailsModal, setShowDetailsModal] = useState(false)
     // FF-HARDENING-012.2 [Item 4]: Advanced filter state
@@ -1463,9 +1464,26 @@ const KanbanPage = () => {
         return decodeURIComponent(cleaned)
     }
 
+    const parseDateToTime = (val) => {
+        if (!val) return Infinity;
+        if (val instanceof Date) return val.getTime();
+        if (typeof val === 'string' && val.includes('/')) {
+            const parts = val.split('/');
+            if (parts.length === 3) {
+                const d = parseInt(parts[0], 10);
+                const m = parseInt(parts[1], 10) - 1;
+                const y = parseInt(parts[2], 10);
+                const dt = new Date(y, m, d);
+                if (!isNaN(dt.getTime())) return dt.getTime();
+            }
+        }
+        const t = new Date(val).getTime();
+        return isNaN(t) ? Infinity : t;
+    }
+
     const filterPOs = (pos) => {
         if (!pos || !Array.isArray(pos)) return []
-        return pos.filter((po) => {
+        const filtered = pos.filter((po) => {
             const poNumber = (po.po_number || '').toLowerCase()
             const clientName = (po.client_name || po.partition_metadata?.client_name || '').toLowerCase()
             const matchSearch = !searchTerm || poNumber.includes(searchTerm.toLowerCase()) || clientName.includes(searchTerm.toLowerCase())
@@ -1474,6 +1492,19 @@ const KanbanPage = () => {
             const matchDateStart = !filterDateStart || (po.created_at && new Date(po.created_at) >= new Date(filterDateStart))
             const matchDateEnd = !filterDateEnd || (po.created_at && new Date(po.created_at) <= new Date(filterDateEnd + 'T23:59:59'))
             return matchSearch && matchClient && matchDateStart && matchDateEnd
+        })
+
+        return filtered.sort((a, b) => {
+            if (sortBy === 'creation') {
+                const timeA = parseDateToTime(a.created_at || a.extra_metadata?.order_date || a.order_date)
+                const timeB = parseDateToTime(b.created_at || b.extra_metadata?.order_date || b.order_date)
+                return timeA - timeB
+            } else {
+                // Default: 'delivery' (Prazo de Entrega SLA)
+                const timeA = parseDateToTime(a.expected_delivery_date || a.delivery_date || a.data_limite)
+                const timeB = parseDateToTime(b.expected_delivery_date || b.delivery_date || b.data_limite)
+                return timeA - timeB
+            }
         })
     }
 
@@ -1836,6 +1867,22 @@ const KanbanPage = () => {
                                 />
                             </div>
 
+                            {/* Global Sorting Dropdown */}
+                            <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-300 rounded-lg px-2.5 py-1.5 shadow-sm">
+                                <label htmlFor="kanban-sort-by" className="text-xs font-semibold text-gray-600 whitespace-nowrap">
+                                    Ordenar por:
+                                </label>
+                                <select
+                                    id="kanban-sort-by"
+                                    value={sortBy}
+                                    onChange={(e) => setSortBy(e.target.value)}
+                                    className="text-xs font-bold text-gray-800 bg-transparent focus:outline-none cursor-pointer"
+                                >
+                                    <option value="delivery">Prazo de Entrega (SLA)</option>
+                                    <option value="creation">Data de Entrada (Pedido)</option>
+                                </select>
+                            </div>
+
                             {/* FF-HARDENING-012.2 [Item 4]: Advanced filter toggle */}
                             <button
                                 id="btn-toggle-filters"
@@ -2100,7 +2147,7 @@ const KanbanPage = () => {
                                             <span className="text-xs font-medium">Dt.Entrega (SLA)</span>
                                         </div>
                                         <p className="text-lg font-bold text-gray-900">
-                                            {formatDate(selectedPO.expected_delivery_date)}
+                                            {formatDate(selectedPO.expected_delivery_date || selectedPO.delivery_date || selectedPO.data_limite)}
                                         </p>
                                     </div>
                                     <div className="bg-gray-50 p-4 rounded-lg">
@@ -2121,19 +2168,18 @@ const KanbanPage = () => {
                                             {selectedPO.status || 'N/A'}
                                         </p>
                                     </div>
-                                    {/* ONET 2026-07-01: Data do Pedido — original order creation date
-                                         partition_metadata.order_date is exposed as extra_metadata.order_date by the API */}
+                                    {/* Data do Pedido — PO creation/entry date */}
                                     <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
                                         <div className="flex items-center gap-2 text-blue-600 mb-1">
                                             <Calendar className="w-4 h-4" />
                                             <span className="text-xs font-medium">Data do Pedido</span>
                                         </div>
                                         <p className="text-lg font-bold text-blue-900">
-                                            {(
+                                            {formatDate(
+                                                selectedPO.created_at ||
                                                 selectedPO.extra_metadata?.order_date ||
                                                 selectedPO.partition_metadata?.order_date ||
-                                                selectedPO.order_date ||
-                                                'N/A'
+                                                selectedPO.order_date
                                             )}
                                         </p>
                                     </div>
