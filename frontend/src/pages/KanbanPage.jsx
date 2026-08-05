@@ -2131,59 +2131,74 @@ const KanbanPage = () => {
                             {/* Modal Content */}
                             <div className="flex-1 overflow-y-auto p-6">
                                 {/* PO Summary — 5-card header: Vl.Pedido | SLA Entrega | Itens | Status | Data Pedido */}
-                                <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-                                    <div className="bg-gray-50 p-4 rounded-lg">
-                                        <div className="flex items-center gap-2 text-gray-600 mb-1">
-                                            <DollarSign className="w-4 h-4" />
-                                            <span className="text-xs font-medium">Vl.Pedido</span>
+                                {(() => {
+                                    const rawDate1 = selectedPO.created_at || selectedPO.extra_metadata?.order_date || selectedPO.partition_metadata?.order_date || selectedPO.order_date;
+                                    const rawDate2 = selectedPO.expected_delivery_date || selectedPO.delivery_date || selectedPO.data_limite;
+
+                                    let displayOrderDate = rawDate1;
+                                    let displayDeliveryDate = rawDate2;
+
+                                    if (rawDate1 && rawDate2) {
+                                        const time1 = parseDateToTime(rawDate1);
+                                        const time2 = parseDateToTime(rawDate2);
+                                        // Fail-safe swap: If order creation date is mathematically AFTER delivery date in DB, swap them
+                                        if (time1 !== Infinity && time2 !== Infinity && time1 > time2) {
+                                            displayOrderDate = rawDate2;
+                                            displayDeliveryDate = rawDate1;
+                                        }
+                                    }
+
+                                    return (
+                                        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+                                            <div className="bg-gray-50 p-4 rounded-lg">
+                                                <div className="flex items-center gap-2 text-gray-600 mb-1">
+                                                    <DollarSign className="w-4 h-4" />
+                                                    <span className="text-xs font-medium">Vl.Pedido</span>
+                                                </div>
+                                                <p className="text-lg font-bold text-gray-900">
+                                                    {formatCurrency(selectedPO.total_value)}
+                                                </p>
+                                            </div>
+                                            <div className="bg-gray-50 p-4 rounded-lg">
+                                                <div className="flex items-center gap-2 text-gray-600 mb-1">
+                                                    <Calendar className="w-4 h-4" />
+                                                    <span className="text-xs font-medium">Dt.Entrega (SLA)</span>
+                                                </div>
+                                                <p className="text-lg font-bold text-gray-900">
+                                                    {formatDate(displayDeliveryDate)}
+                                                </p>
+                                            </div>
+                                            <div className="bg-gray-50 p-4 rounded-lg">
+                                                <div className="flex items-center gap-2 text-gray-600 mb-1">
+                                                    <Package className="w-4 h-4" />
+                                                    <span className="text-xs font-medium">Itens</span>
+                                                </div>
+                                                <p className="text-lg font-bold text-gray-900">
+                                                    {selectedPO.items_count || 0}
+                                                </p>
+                                            </div>
+                                            <div className="bg-gray-50 p-4 rounded-lg">
+                                                <div className="flex items-center gap-2 text-gray-600 mb-1">
+                                                    <FileText className="w-4 h-4" />
+                                                    <span className="text-xs font-medium">Status</span>
+                                                </div>
+                                                <p className="text-lg font-bold text-gray-900 capitalize">
+                                                    {selectedPO.status || 'N/A'}
+                                                </p>
+                                            </div>
+                                            {/* Data do Pedido — PO creation/entry date */}
+                                            <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
+                                                <div className="flex items-center gap-2 text-blue-600 mb-1">
+                                                    <Calendar className="w-4 h-4" />
+                                                    <span className="text-xs font-medium">Data do Pedido</span>
+                                                </div>
+                                                <p className="text-lg font-bold text-blue-900">
+                                                    {formatDate(displayOrderDate)}
+                                                </p>
+                                            </div>
                                         </div>
-                                        <p className="text-lg font-bold text-gray-900">
-                                            {formatCurrency(selectedPO.total_value)}
-                                        </p>
-                                    </div>
-                                    <div className="bg-gray-50 p-4 rounded-lg">
-                                        <div className="flex items-center gap-2 text-gray-600 mb-1">
-                                            <Calendar className="w-4 h-4" />
-                                            <span className="text-xs font-medium">Dt.Entrega (SLA)</span>
-                                        </div>
-                                        <p className="text-lg font-bold text-gray-900">
-                                            {formatDate(selectedPO.expected_delivery_date || selectedPO.delivery_date || selectedPO.data_limite)}
-                                        </p>
-                                    </div>
-                                    <div className="bg-gray-50 p-4 rounded-lg">
-                                        <div className="flex items-center gap-2 text-gray-600 mb-1">
-                                            <Package className="w-4 h-4" />
-                                            <span className="text-xs font-medium">Itens</span>
-                                        </div>
-                                        <p className="text-lg font-bold text-gray-900">
-                                            {selectedPO.items_count || 0}
-                                        </p>
-                                    </div>
-                                    <div className="bg-gray-50 p-4 rounded-lg">
-                                        <div className="flex items-center gap-2 text-gray-600 mb-1">
-                                            <FileText className="w-4 h-4" />
-                                            <span className="text-xs font-medium">Status</span>
-                                        </div>
-                                        <p className="text-lg font-bold text-gray-900 capitalize">
-                                            {selectedPO.status || 'N/A'}
-                                        </p>
-                                    </div>
-                                    {/* Data do Pedido — PO creation/entry date */}
-                                    <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
-                                        <div className="flex items-center gap-2 text-blue-600 mb-1">
-                                            <Calendar className="w-4 h-4" />
-                                            <span className="text-xs font-medium">Data do Pedido</span>
-                                        </div>
-                                        <p className="text-lg font-bold text-blue-900">
-                                            {formatDate(
-                                                selectedPO.created_at ||
-                                                selectedPO.extra_metadata?.order_date ||
-                                                selectedPO.partition_metadata?.order_date ||
-                                                selectedPO.order_date
-                                            )}
-                                        </p>
-                                    </div>
-                                </div>
+                                    );
+                                })()}
 
                                 {/* SLA and Performance Control Dashboard */}
                                 {(() => {
