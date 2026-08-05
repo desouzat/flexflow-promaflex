@@ -33,6 +33,25 @@ from backend.models import OrderItem, AuditLog, PurchaseOrder, StagingSession
 
 router = APIRouter(prefix="/api/import", tags=["Import"])
 
+def require_staging_access(current_user: UserInfo = Depends(get_current_user)) -> UserInfo:
+    """
+    Dependency to restrict access to Mesa de Conferência (staging workspace).
+    Allowed:
+    - Official Commercial account: email == 'comercial@promaflex.com.br'
+    - Privileged roles: role in ['admin', 'master']
+    All other users (e.g. individual salespeople) receive HTTP 403 Forbidden.
+    """
+    user_email = (current_user.email or '').strip().lower()
+    user_role = (current_user.role or '').strip().lower()
+    is_official = user_email == "comercial@promaflex.com.br"
+    is_privileged = user_role in ["admin", "master"]
+    if not is_official and not is_privileged:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso negado. Apenas o canal comercial oficial ou administradores podem acessar a Mesa de Conferência."
+        )
+    return current_user
+
 import threading as _threading
 
 # In-memory storage for import configurations (replace with database in production)
@@ -49,7 +68,7 @@ _active_mesa_users: dict = {}
 async def upload_and_import_file(
     file: UploadFile = File(..., description="Excel or CSV file to import"),
     mapping_json: str = Form(..., description="JSON string of column mapping"),
-    current_user: UserInfo = Depends(get_current_user),
+    current_user: UserInfo = Depends(require_staging_access),
     db: Session = Depends(get_db)
 ):
     """
@@ -154,7 +173,7 @@ async def upload_and_import_file(
 @router.post("/headers")
 async def get_file_headers(
     file: UploadFile = File(..., description="Excel or CSV file"),
-    current_user: UserInfo = Depends(get_current_user),
+    current_user: UserInfo = Depends(require_staging_access),
     db: Session = Depends(get_db)
 ):
     """
@@ -205,7 +224,7 @@ async def get_file_headers(
 
 @router.get("/field-types")
 def get_available_field_types(
-    current_user: UserInfo = Depends(get_current_user)
+    current_user: UserInfo = Depends(require_staging_access)
 ):
     """
     Get list of available field types for mapping.
@@ -379,7 +398,7 @@ def get_available_field_types(
 def save_import_config(
     config_name: str,
     mapping: ImportMapping,
-    current_user: UserInfo = Depends(get_current_user)
+    current_user: UserInfo = Depends(require_staging_access)
 ):
     """
     Save an import configuration for reuse.
@@ -424,7 +443,7 @@ def save_import_config(
 
 @router.get("/configs")
 def list_import_configs(
-    current_user: UserInfo = Depends(get_current_user)
+    current_user: UserInfo = Depends(require_staging_access)
 ):
     """
     List all saved import configurations for current tenant.
@@ -448,7 +467,7 @@ def list_import_configs(
 @router.get("/configs/{config_name}")
 def get_import_config(
     config_name: str,
-    current_user: UserInfo = Depends(get_current_user)
+    current_user: UserInfo = Depends(require_staging_access)
 ):
     """
     Get a specific import configuration by name.
@@ -474,7 +493,7 @@ def get_import_config(
 @router.delete("/configs/{config_name}")
 def delete_import_config(
     config_name: str,
-    current_user: UserInfo = Depends(get_current_user)
+    current_user: UserInfo = Depends(require_staging_access)
 ):
     """
     Delete an import configuration.
@@ -504,7 +523,7 @@ def delete_import_config(
 @router.post("/upload-attachment")
 async def upload_attachment(
     file: UploadFile = File(..., description="Attachment file (PDF, JPG, PNG)"),
-    current_user: UserInfo = Depends(get_current_user)
+    current_user: UserInfo = Depends(require_staging_access)
 ):
     """
     Upload an attachment file for a personalized order item.
@@ -546,7 +565,7 @@ def validate_staging_item(
     is_new_client: bool = Form(...),
     customization_notes: Optional[str] = Form(None),
     attachment_path: Optional[str] = Form(None),
-    current_user: UserInfo = Depends(get_current_user)
+    current_user: UserInfo = Depends(require_staging_access)
 ):
     """
     Validate a staging item against business rules.
@@ -622,7 +641,7 @@ def _upsert_staging_session(db, tenant_id: str, po_list: list, updated_by: str) 
 
 @router.get("/staging-session")
 def get_staging_session(
-    current_user: UserInfo = Depends(get_current_user),
+    current_user: UserInfo = Depends(require_staging_access),
     db: Session = Depends(get_db)
 ):
     """
@@ -658,7 +677,7 @@ class StagingSessionUpdateRequest(BaseModel):
 @router.put("/staging-session")
 def update_staging_session(
     payload: StagingSessionUpdateRequest,
-    current_user: UserInfo = Depends(get_current_user),
+    current_user: UserInfo = Depends(require_staging_access),
     db: Session = Depends(get_db)
 ):
     """
@@ -686,7 +705,7 @@ def update_staging_session(
 
 @router.delete("/staging-session")
 def delete_staging_session(
-    current_user: UserInfo = Depends(get_current_user),
+    current_user: UserInfo = Depends(require_staging_access),
     db: Session = Depends(get_db)
 ):
     """
@@ -722,7 +741,7 @@ class HeartbeatRequest(BaseModel):
 @router.post("/mesa-heartbeat")
 def post_mesa_heartbeat(
     payload: HeartbeatRequest,
-    current_user: UserInfo = Depends(get_current_user)
+    current_user: UserInfo = Depends(require_staging_access)
 ):
     """
     Claim or refresh the heartbeat lock for the Mesa de Conferência.
@@ -747,7 +766,7 @@ def post_mesa_heartbeat(
 @router.get("/mesa-lock-status")
 def get_mesa_lock_status(
     session_id: Optional[str] = None,
-    current_user: UserInfo = Depends(get_current_user)
+    current_user: UserInfo = Depends(require_staging_access)
 ):
     """
     Check if another operator has the Mesa open for this tenant.
@@ -798,7 +817,7 @@ def get_mesa_lock_status(
 @router.delete("/mesa-heartbeat")
 def release_mesa_heartbeat(
     session_id: Optional[str] = None,
-    current_user: UserInfo = Depends(get_current_user)
+    current_user: UserInfo = Depends(require_staging_access)
 ):
     """
     Release the heartbeat lock immediately (called on page unmount).
@@ -819,7 +838,7 @@ def release_mesa_heartbeat(
 
 @router.get("/pending-s3-files")
 async def get_pending_s3_files(
-    current_user: UserInfo = Depends(get_current_user),
+    current_user: UserInfo = Depends(require_staging_access),
     db: Session = Depends(get_db)
 ):
     """
@@ -878,7 +897,7 @@ async def get_pending_s3_files(
 @router.post("/sync-s3")
 async def sync_s3_bucket(
     req: SyncS3Request,
-    current_user: UserInfo = Depends(get_current_user),
+    current_user: UserInfo = Depends(require_staging_access),
     db: Session = Depends(get_db)
 ):
     """
@@ -1011,7 +1030,7 @@ async def sync_s3_bucket(
 @router.post("/finance-decision", response_model=FinanceDecisionResponse)
 def record_finance_decision(
     request: FinanceDecisionRequest,
-    current_user: UserInfo = Depends(get_current_user),
+    current_user: UserInfo = Depends(require_staging_access),
     db: Session = Depends(get_db)
 ):
     """
@@ -1137,7 +1156,7 @@ def record_finance_decision(
 @router.post("/confirm-staging")
 def confirm_staging(
     payload: ConfirmStagingPayload,
-    current_user: UserInfo = Depends(get_current_user),
+    current_user: UserInfo = Depends(require_staging_access),
     db: Session = Depends(get_db)
 ):
     """
@@ -1584,7 +1603,7 @@ def confirm_staging(
 @router.post("/cancel-staging", status_code=status.HTTP_201_CREATED)
 def cancel_staging_po(
     payload: CancelStagingPayload,
-    current_user: UserInfo = Depends(get_current_user),
+    current_user: UserInfo = Depends(require_staging_access),
     db: Session = Depends(get_db),
 ):
     """

@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Upload, FileSpreadsheet, AlertCircle, CheckCircle, X, HelpCircle, Paperclip, Trash2, Cloud, ChevronLeft, ChevronRight, Globe, RefreshCw, DollarSign, CheckSquare, Square, Lock, Unlock, Package, Briefcase, Ban } from 'lucide-react'
 import api from '../utils/api'
 import { showSuccess, showError, showLoading, dismissToast } from '../utils/toast'
@@ -136,6 +137,21 @@ const ImportPage = () => {
     const fileInputRef = useRef(null)
     const { refreshNotifications } = useNotifications()
     const { user } = useAuth()
+    const navigate = useNavigate()
+
+    // ─── Security Access Protection ──────────────────────────────────────────────────────────
+    // Restricts Mesa de Conferência access to official commercial account or admins/masters.
+    useEffect(() => {
+        const userEmail = (user?.email || '').toLowerCase()
+        const userRole = (user?.role || '').toLowerCase()
+        const isOfficialComercial = userEmail === 'comercial@promaflex.com.br'
+        const isPrivileged = ['admin', 'master'].includes(userRole)
+
+        if (!isOfficialComercial && !isPrivileged) {
+            showError('Acesso negado. Apenas o canal comercial oficial ou administradores podem acessar a Mesa de Conferência.')
+            navigate('/kanban', { replace: true })
+        }
+    }, [user, navigate])
 
     // ─── Session Save Effect (debounced 300ms) ──────────────────────────────────────────────
     // Saves current staging state to tenant-scoped localStorage after a 300ms debounce.

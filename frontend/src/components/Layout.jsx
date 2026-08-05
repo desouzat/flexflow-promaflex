@@ -36,7 +36,7 @@ const Layout = () => {
 
     const navItems = [
         { path: '/kanban', icon: Kanban, label: 'Kanban Board', badge: 'kanban' },
-        { path: '/import', icon: Upload, label: 'Import POs', badge: 'import' },
+        { path: '/import', icon: Upload, label: 'Import POs', badge: 'import', importOfficialOnly: true },
         { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', badge: 'dashboard' },
         { path: '/costs', icon: DollarSign, label: 'Gerenciar Custos', badge: 'costs', adminOnly: true },
         { path: '/users', icon: Users, label: 'Gestão de Usuários', badge: 'users', strictAdminOnly: true },
@@ -109,6 +109,15 @@ const Layout = () => {
                 {/* Navigation */}
                 <nav className="flex-1 px-3 py-4 space-y-1">
                     {navItems.map((item) => {
+                        // Hide Mesa de Conferência (/import) if user is not comercial@promaflex.com.br and not admin/master
+                        if (item.importOfficialOnly) {
+                            const isOfficialComercial = (user?.email || '').toLowerCase() === 'comercial@promaflex.com.br'
+                            const isPrivileged = ['admin', 'master'].includes((user?.role || '').toLowerCase())
+                            if (!isOfficialComercial && !isPrivileged) {
+                                return null
+                            }
+                        }
+
                         // Hide strictAdminOnly items if user is not admin
                         if (item.strictAdminOnly && (user?.role || '').toLowerCase() !== 'admin') {
                             return null
