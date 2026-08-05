@@ -37,7 +37,7 @@ const Layout = () => {
     const navItems = [
         { path: '/kanban', icon: Kanban, label: 'Kanban Board', badge: 'kanban' },
         { path: '/import', icon: Upload, label: 'Import POs', badge: 'import', importOfficialOnly: true },
-        { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', badge: 'dashboard' },
+        { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', badge: 'dashboard', adminOnly: true },
         { path: '/costs', icon: DollarSign, label: 'Gerenciar Custos', badge: 'costs', adminOnly: true },
         { path: '/users', icon: Users, label: 'Gestão de Usuários', badge: 'users', strictAdminOnly: true },
         { path: '/settings', icon: Settings, label: 'Configurações', badge: 'settings', strictAdminOnly: true },

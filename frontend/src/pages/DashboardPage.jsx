@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { 
     BarChart3, 
     TrendingUp, 
@@ -30,12 +31,19 @@ import { useAuth } from '../context/AuthContext'
 
 const DashboardPage = () => {
     const { user } = useAuth()
+    const navigate = useNavigate()
     const [loading, setLoading] = useState(true)
     const [kpiData, setKpiData] = useState(null)
 
     useEffect(() => {
+        const userRole = (user?.role || '').toLowerCase()
+        if (!['admin', 'master'].includes(userRole)) {
+            showError('Acesso negado. Apenas administradores e diretores podem visualizar os Dashboards de métricas.')
+            navigate('/kanban', { replace: true })
+            return
+        }
         fetchCelsoKpis()
-    }, [])
+    }, [user, navigate])
 
     const fetchCelsoKpis = async () => {
         try {

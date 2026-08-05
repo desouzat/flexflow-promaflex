@@ -3,7 +3,7 @@ FlexFlow Dashboard Router
 Endpoints for dashboard metrics and analytics.
 """
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import Optional
@@ -29,6 +29,19 @@ from backend.utils.salesperson_filter import (
 )
 
 router = APIRouter(prefix="/api/dashboard", tags=["Dashboard"])
+
+
+def require_admin_or_master_role(current_user: UserInfo = Depends(get_current_user)) -> UserInfo:
+    """
+    Dependency helper to enforce that only admin and master roles can access Dashboard metrics.
+    """
+    user_role = (current_user.role or '').strip().lower()
+    if user_role not in ["admin", "master"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso negado. Apenas administradores e diretores podem visualizar os Dashboards de métricas."
+        )
+    return current_user
 
 
 # Status mapping: Database status -> Display name (Portuguese)
@@ -78,7 +91,7 @@ def calculate_po_metrics(pos: list) -> dict:
 @router.get("/metrics", response_model=DashboardMetrics)
 async def get_dashboard_metrics(
     days: int = Query(30, ge=1, le=365, description="Number of days to include in metrics"),
-    current_user: UserInfo = Depends(get_current_user),
+    current_user: UserInfo = Depends(require_admin_or_master_role),
     db: Session = Depends(get_db)
 ):
     """
@@ -189,7 +202,7 @@ async def get_dashboard_metrics(
 
 @router.get("/summary", response_model=DashboardSummary)
 async def get_dashboard_summary(
-    current_user: UserInfo = Depends(get_current_user),
+    current_user: UserInfo = Depends(require_admin_or_master_role),
     db: Session = Depends(get_db)
 ):
     """
@@ -251,7 +264,7 @@ async def get_dashboard_summary(
 @router.get("/margin-trend")
 async def get_margin_trend(
     days: int = Query(30, ge=7, le=365, description="Number of days for trend"),
-    current_user: UserInfo = Depends(get_current_user),
+    current_user: UserInfo = Depends(require_admin_or_master_role),
     db: Session = Depends(get_db)
 ):
     """
@@ -322,7 +335,7 @@ async def get_margin_trend(
 
 @router.get("/lead-time-distribution")
 async def get_lead_time_distribution(
-    current_user: UserInfo = Depends(get_current_user),
+    current_user: UserInfo = Depends(require_admin_or_master_role),
     db: Session = Depends(get_db)
 ):
     """
@@ -394,7 +407,7 @@ async def get_lead_time_distribution(
 @router.get("/top-clients")
 async def get_top_clients(
     limit: int = Query(10, ge=1, le=50, description="Number of top clients to return"),
-    current_user: UserInfo = Depends(get_current_user),
+    current_user: UserInfo = Depends(require_admin_or_master_role),
     db: Session = Depends(get_db)
 ):
     """
@@ -429,7 +442,7 @@ async def get_top_clients(
 @router.get("/status-timeline")
 async def get_status_timeline(
     po_id: Optional[str] = Query(None, description="Specific PO ID to get timeline for"),
-    current_user: UserInfo = Depends(get_current_user),
+    current_user: UserInfo = Depends(require_admin_or_master_role),
     db: Session = Depends(get_db)
 ):
     """
@@ -497,7 +510,7 @@ async def get_status_timeline(
 
 @router.get("/alerts")
 async def get_dashboard_alerts(
-    current_user: UserInfo = Depends(get_current_user),
+    current_user: UserInfo = Depends(require_admin_or_master_role),
     db: Session = Depends(get_db)
 ):
     """

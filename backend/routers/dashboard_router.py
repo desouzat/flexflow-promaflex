@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request, HTTPException
+from fastapi import APIRouter, Depends, Request, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 from datetime import datetime
@@ -16,6 +16,18 @@ from backend.utils.salesperson_filter import (
 )
 
 router = APIRouter(prefix="/api/dashboard", tags=["Dashboard Celso"])
+
+def require_admin_or_master_role(current_user: UserInfo = Depends(get_current_user)) -> UserInfo:
+    """
+    Dependency helper to enforce that only admin and master roles can access Dashboard metrics.
+    """
+    user_role = (current_user.role or '').strip().lower()
+    if user_role not in ["admin", "master"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso negado. Apenas administradores e diretores podem visualizar os Dashboards de métricas."
+        )
+    return current_user
 
 def parse_date(date_str: Any) -> Optional[datetime]:
     """Helper to parse various date formats safely."""
@@ -60,7 +72,7 @@ def format_date_to_br(dt: Optional[datetime]) -> str:
 
 @router.get("/celso-kpis")
 async def get_celso_kpis(
-    current_user: UserInfo = Depends(get_current_user),
+    current_user: UserInfo = Depends(require_admin_or_master_role),
     db: Session = Depends(get_db)
 ):
     """
