@@ -502,6 +502,17 @@ const KanbanPage = () => {
     const slaJustificationEditable = isUserPrivileged || isPOInPCP
 
     const fetchBoard = async () => {
+        // Scroll Position Preservation Shield: Capture current scroll positions of all columns before re-fetch
+        const savedScrollPositions = {}
+        try {
+            document.querySelectorAll('[data-column-container="true"]').forEach(el => {
+                const statusKey = el.getAttribute('data-column-status') || el.id
+                if (statusKey && el.scrollTop > 0) {
+                    savedScrollPositions[statusKey] = el.scrollTop
+                }
+            })
+        } catch (_) {}
+
         try {
             setLoading(true)
             setError(null)
@@ -534,6 +545,23 @@ const KanbanPage = () => {
             console.error('Error fetching board:', err)
         } finally {
             setLoading(false)
+            // Restore scroll position after DOM renders
+            if (Object.keys(savedScrollPositions).length > 0) {
+                const restoreScrolls = () => {
+                    try {
+                        document.querySelectorAll('[data-column-container="true"]').forEach(el => {
+                            const statusKey = el.getAttribute('data-column-status') || el.id
+                            if (statusKey && savedScrollPositions[statusKey] !== undefined) {
+                                el.scrollTop = savedScrollPositions[statusKey]
+                            }
+                        })
+                    } catch (_) {}
+                }
+                requestAnimationFrame(() => {
+                    setTimeout(restoreScrolls, 50)
+                    setTimeout(restoreScrolls, 150)
+                })
+            }
         }
     }
 

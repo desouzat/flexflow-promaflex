@@ -56,24 +56,36 @@ const KanbanColumn = ({ title, status, pos, onCardClick, onMoveCard, color = 'gr
             </div>
 
             {/* Column Content */}
-            <div className={`flex-1 p-3 border-2 border-t-0 rounded-b-lg ${colorClasses[color]} overflow-y-auto`}>
-                <div className="space-y-3">
-                    {pos.length === 0 ? (
-                        <div className="text-center py-8 text-gray-500 text-sm">
-                            Nenhum item nesta coluna
+            {(() => {
+                const cleanStatus = (title || status || '').trim()
+                const columnSlug = cleanStatus.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase()
+                const columnId = `column-container-${columnSlug}`
+                return (
+                    <div
+                        id={columnId}
+                        data-column-container="true"
+                        data-column-status={cleanStatus}
+                        className={`flex-1 p-3 border-2 border-t-0 rounded-b-lg ${colorClasses[color]} overflow-y-auto`}
+                    >
+                        <div className="space-y-3">
+                            {pos.length === 0 ? (
+                                <div className="text-center py-8 text-gray-500 text-sm">
+                                    Nenhum item nesta coluna
+                                </div>
+                            ) : (
+                                pos.map((po) => (
+                                    <KanbanCard
+                                        key={po.id}
+                                        po={po}
+                                        onCardClick={onCardClick}
+                                        compactView={compactView}
+                                    />
+                                ))
+                            )}
                         </div>
-                    ) : (
-                        pos.map((po) => (
-                            <KanbanCard
-                                key={po.id}
-                                po={po}
-                                onCardClick={onCardClick}
-                                compactView={compactView}
-                            />
-                        ))
-                    )}
-                </div>
-            </div>
+                    </div>
+                )
+            })()}
 
             {/* Help Modal */}
             <HelpModal
