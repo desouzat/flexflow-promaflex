@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Upload, FileSpreadsheet, AlertCircle, CheckCircle, X, HelpCircle, Paperclip, Trash2, Cloud, ChevronLeft, ChevronRight, Globe, RefreshCw, DollarSign, CheckSquare, Square, Lock, Unlock, Package, Briefcase, Ban } from 'lucide-react'
+import { Upload, FileSpreadsheet, AlertCircle, CheckCircle, X, HelpCircle, Paperclip, Trash2, Cloud, ChevronLeft, ChevronRight, Globe, RefreshCw, DollarSign, CheckSquare, Square, Lock, Unlock, Package, Briefcase, Ban, Download } from 'lucide-react'
 import api from '../utils/api'
 import { showSuccess, showError, showLoading, dismissToast } from '../utils/toast'
 import { useNotifications } from '../context/NotificationContext'
@@ -1274,6 +1274,45 @@ const ImportPage = () => {
             showError('Erro ao buscar arquivos pendentes no S3.')
         } finally {
             setFetchingS3Files(false)
+        }
+    }
+
+    const handleDownloadS3File = async (fileKey) => {
+        if (!fileKey) return
+        const toastId = showLoading('Baixando arquivo do S3...')
+        try {
+            const response = await api.get('/import/download-s3-file', {
+                params: { file_key: fileKey },
+                responseType: 'blob'
+            })
+
+            let filename = fileKey.split('/').pop() || 'arquivo.xlsx'
+            const disposition = response.headers['content-disposition']
+            if (disposition && disposition.includes('filename=')) {
+                const match = disposition.match(/filename="?([^";]+)"?/)
+                if (match && match[1]) {
+                    filename = match[1]
+                }
+            }
+
+            const blob = new Blob([response.data], {
+                type: response.headers['content-type'] || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            })
+            const url = window.URL.createObjectURL(blob)
+            const link = document.createElement('a')
+            link.href = url
+            link.setAttribute('download', filename)
+            document.body.appendChild(link)
+            link.click()
+            link.remove()
+            window.URL.revokeObjectURL(url)
+
+            showSuccess(`Download concluído: ${filename}`)
+        } catch (err) {
+            console.error('Error downloading S3 file:', err)
+            showError('Erro ao baixar arquivo do S3.')
+        } finally {
+            dismissToast(toastId)
         }
     }
 
@@ -2997,6 +3036,7 @@ const ImportPage = () => {
                                                     <th className="px-4 py-3">Data Ref</th>
                                                     <th className="px-4 py-3">Tamanho</th>
                                                     <th className="px-4 py-3">Status</th>
+                                                    <th className="px-4 py-3 text-center">Ações</th>
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-slate-100 text-slate-700 font-medium">
@@ -3044,6 +3084,19 @@ const ImportPage = () => {
                                                                         ✨ Pendente - Novo
                                                                     </span>
                                                                 )}
+                                                            </td>
+                                                            <td className="px-4 py-3 text-center">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation()
+                                                                        handleDownloadS3File(file.file_key || file.key || file.filename)
+                                                                    }}
+                                                                    className="p-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-md transition-colors cursor-pointer inline-flex items-center justify-center"
+                                                                    title="Baixar arquivo Excel/CSV"
+                                                                >
+                                                                    <Download className="w-4 h-4" />
+                                                                </button>
                                                             </td>
                                                         </tr>
                                                     )

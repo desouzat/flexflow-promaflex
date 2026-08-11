@@ -3,7 +3,7 @@ FlexFlow Import Router
 Endpoints for file upload and import configuration.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, Form, Query, Response
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import json
@@ -834,6 +834,54 @@ def release_mesa_heartbeat(
             elif entry["user_email"] == caller_email:
                 _active_mesa_users.pop(tenant_key, None)
     return {"success": True}
+
+
+@router.get("/download-s3-file")
+async def download_s3_file(
+    file_key: str = Query(..., description="S3 file key / path in bucket"),
+    current_user: UserInfo = Depends(require_staging_access),
+    db: Session = Depends(get_db)
+):
+    """
+    Download an Excel or CSV file directly from S3/GCS storage.
+    Protected by require_staging_access to allow authorized operators and admins.
+    """
+    from backend.services.s3_service import S3Service
+    
+    s3_service = S3Service(db)
+    if not s3_service.is_configured():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="S3 service not configured."
+        )
+
+    try:
+        content_bytes, filename = s3_service.download_file(file_key)
+        
+        lower_fn = filename.lower()
+        if lower_fn.endswith('.csv'):
+            media_type = 'text/csv'
+        elif lower_fn.endswith('.xlsx'):
+            media_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        elif lower_fn.endswith('.xls'):
+            media_type = 'application/vnd.ms-excel'
+        else:
+            media_type = 'application/octet-stream'
+
+        headers = {
+            'Content-Disposition': f'attachment; filename="{filename}"'
+        }
+
+        return Response(
+            content=content_bytes,
+            media_type=media_type,
+            headers=headers
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao baixar arquivo do S3: {str(e)}"
+        )
 
 
 @router.get("/pending-s3-files")
