@@ -680,6 +680,35 @@ async def export_pos_csv(
                 )
                 codigo_estruturado = str(codigo_estruturado) if codigo_estruturado else ""
 
+                # Extract raw untouched ONET date from item metadata first
+                raw_item_onet_date = (
+                    safe_get_field(meta, "billing_date")
+                    or safe_get_field(meta, "dt_faturamento")
+                    or safe_get_field(meta, "Dt.Faturamento")
+                    or safe_get_field(meta, "dt_entrega")
+                    or safe_get_field(meta, "Dt.Entrega")
+                )
+                if raw_item_onet_date:
+                    item_entrega_cliente = safe_format_date(raw_item_onet_date)
+                else:
+                    item_entrega_cliente = entrega_cliente
+
+                item_sla_cols = [
+                    etapa_atual,
+                    sla_status_label,
+                    elapsed_h_str,
+                    sla_deadline_str,
+                    overdue_h_str,
+                    justificativa,
+                    data_entrada,
+                    item_entrega_cliente,
+                    data_programada_pcp,
+                    hours_in_stage_str,
+                    tempo_pcp_str,
+                    tempo_producao_str,
+                    tempo_fatur_str,
+                ]
+
                 writer.writerow([
                     getattr(po, "po_number", ""),
                     item_client,
@@ -694,7 +723,7 @@ async def export_pos_csv(
                     status_producao,
                     qtd_real_str,
                     perda_str,
-                    *sla_cols,
+                    *item_sla_cols,
                 ])
         except Exception as po_err:
             logger.error(f"Error processing PO {getattr(po, 'po_number', 'unknown')} in po-export: {po_err}")
