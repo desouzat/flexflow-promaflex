@@ -24,9 +24,9 @@ except ImportError:
     pass  # openpyxl not installed — patch not needed
 # ─────────────────────────────────────────────────────────────────────────────
 
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Request, status, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.exceptions import RequestValidationError
 from contextlib import asynccontextmanager
 import time
@@ -666,14 +666,42 @@ async def download_uploaded_file(path: str):
 
 
 # ============================================================================
-# FRONTEND STATIC FILES MOUNT
+# FRONTEND STATIC FILES MOUNT & SPA CATCH-ALL ROUTE
 # ============================================================================
 import os
 from fastapi.staticfiles import StaticFiles
 
+# 1. Mount Vite compiled assets (/assets/index-*.js, /assets/index-*.css)
+assets_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "static", "assets"))
+if not os.path.exists(assets_dir):
+    assets_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "dist", "assets"))
+
+if os.path.exists(assets_dir):
+    app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+# 2. Mount root static directory if present
 static_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "static"))
+if not os.path.exists(static_dir):
+    static_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "dist"))
+
 if os.path.exists(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+# 3. Catch-all SPA route to serve fresh index.html for any non-API frontend route
+@app.get("/{full_path:path}", include_in_schema=False)
+async def serve_spa(full_path: str):
+    # Skip API, docs, openapi, assets, and static requests
+    if full_path.startswith(("api/", "docs", "redoc", "openapi.json", "assets/", "static/")):
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    index_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "static", "index.html"))
+    if not os.path.exists(index_file):
+        index_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "dist", "index.html"))
+
+    if os.path.exists(index_file):
+        return FileResponse(index_file)
+    
+    raise HTTPException(status_code=404, detail="SPA index.html not found")
 
 
 # ============================================================================
