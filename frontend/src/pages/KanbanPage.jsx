@@ -2603,11 +2603,11 @@ const KanbanPage = () => {
                                                                             </div>
                                                                             <div>
                                                                                 <span className="text-xs text-gray-500 font-semibold uppercase block">Data Entrega (ONET)</span>
-                                                                                <span className="font-medium text-gray-700">{formatDate(selectedPO.delivery_date)}</span>
+                                                                                <span className="font-medium text-gray-700">{formatDate(selectedPO.expected_delivery_date || selectedPO.delivery_date)}</span>
                                                                             </div>
                                                                             <div>
-                                                                                <span className="text-xs text-gray-500 font-semibold uppercase block">Data Estimada de Entrega</span>
-                                                                                <span className="font-medium text-gray-700">{formatDate(selectedPO.data_limite || selectedPO.expected_delivery_date)}</span>
+                                                                                <span className="text-xs text-gray-500 font-semibold uppercase block">Data Programada (PCP)</span>
+                                                                                <span className="font-medium text-gray-700">{formatDate(selectedPO.partition_metadata?.data_programada || selectedPO.extra_metadata?.data_programada || selectedPO.data_limite)}</span>
                                                                             </div>
                                                                         </div>
                                                                         

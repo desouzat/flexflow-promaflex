@@ -2976,7 +2976,7 @@ const ImportPage = () => {
             {/* S3 Sync Modal */}
             {showS3Modal && (
                 <div className="fixed inset-0 bg-slate-900 bg-opacity-50 backdrop-blur-xs flex items-center justify-center z-[9999] p-4 animate-fade-in">
-                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh] border border-slate-200">
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[85vh] border border-slate-200">
                         {/* Header */}
                         <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between">
                             <div className="flex items-center gap-2">

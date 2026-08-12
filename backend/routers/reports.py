@@ -367,7 +367,7 @@ async def export_pos_csv(
         "STATUS PRODUÇÃO",
         "QTD REAL PRODUZIDA",
         "PERDA TÉCNICA",
-        # ── SLA & Audit columns (12, Sponsor-approved) ────────────────────
+        # ── SLA & Audit columns (13 columns, Sponsor-approved — Celso) ──────
         "ETAPA ATUAL",
         "STATUS SLA",
         "HORAS SLA DECORRIDAS",
@@ -375,7 +375,8 @@ async def export_pos_csv(
         "HORAS DE ATRASO",
         "JUSTIFICATIVA OCORRÊNCIA",
         "DATA ENTRADA KANBAN",
-        "SLA ENTREGA CLIENTE",
+        "SLA ENTREGA CLIENTE (ONET)",
+        "DATA PROGRAMADA PCP",
         "TEMPO ETAPA ATUAL (h)",
         "TEMPO PCP (h)",
         "TEMPO PRODUÇÃO (h)",
@@ -454,7 +455,7 @@ async def export_pos_csv(
         except Exception:
             data_entrada = ""
 
-        # SLA Entrega ao Cliente — expected_delivery_date property
+        # SLA Entrega ao Cliente (ONET) — expected_delivery_date property
         entrega_cliente = ""
         edd = getattr(po, "expected_delivery_date", None)
         if edd is not None:
@@ -465,6 +466,26 @@ async def export_pos_csv(
                     entrega_cliente = str(edd)
             except Exception:
                 entrega_cliente = str(edd)
+
+        # DATA PROGRAMADA PCP — partition_metadata or extra_metadata data_programada
+        data_programada_pcp = ""
+        p_prog = (po.partition_metadata or {}).get("data_programada") or (po.extra_metadata or {}).get("data_programada")
+        if p_prog:
+            try:
+                if hasattr(p_prog, "strftime"):
+                    data_programada_pcp = p_prog.strftime("%d/%m/%Y")
+                else:
+                    p_str = str(p_prog).split("T")[0]
+                    if "-" in p_str:
+                        parts = p_str.split("-")
+                        if len(parts) == 3:
+                            data_programada_pcp = f"{parts[2]}/{parts[1]}/{parts[0]}"
+                        else:
+                            data_programada_pcp = p_str
+                    else:
+                        data_programada_pcp = p_str
+            except Exception:
+                data_programada_pcp = str(p_prog)
 
         # Stage timing from audit logs
         po_logs = audit_by_po.get(str(po.id), [])
@@ -500,6 +521,7 @@ async def export_pos_csv(
             justificativa,
             data_entrada,
             entrega_cliente,
+            data_programada_pcp,
             hours_in_stage_str,
             tempo_pcp_str,
             tempo_producao_str,
