@@ -10,6 +10,8 @@ to prevent cross-tenant data leaks.
 """
 import csv
 import io
+import json
+import logging
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
@@ -17,6 +19,43 @@ from typing import Dict, List, Optional
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
+
+def safe_format_date(dt) -> str:
+    """Format any date object or date string to dd/mm/yyyy safely."""
+    if not dt:
+        return ""
+    if hasattr(dt, 'strftime'):
+        return dt.strftime('%d/%m/%Y')
+    val_str = str(dt).strip()
+    if not val_str:
+        return ""
+    if len(val_str) == 10 and val_str[2] == '/' and val_str[5] == '/':
+        return val_str
+    if "-" in val_str:
+        try:
+            parts = val_str.split("T")[0].split("-")
+            if len(parts) == 3:
+                return f"{parts[2]}/{parts[1]}/{parts[0]}"
+        except Exception:
+            pass
+    return val_str
+
+def safe_get_dict_field(obj, key: str, default: any = None) -> any:
+    """Safely extract key from a dictionary or JSON-parsed object."""
+    if not obj:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    if isinstance(obj, str):
+        try:
+            parsed = json.loads(obj)
+            if isinstance(parsed, dict):
+                return parsed.get(key, default)
+        except Exception:
+            pass
+    return default
 
 try:
     from backend.database import get_db
@@ -384,251 +423,252 @@ async def export_pos_csv(
     ])
 
     for po in pos:
-        # ── Resolve client name ───────────────────────────────────────────
-        client_name = ""
-        if po.partition_metadata and "client_name" in po.partition_metadata:
-            client_name = po.partition_metadata["client_name"] or ""
-        if not client_name:
-            client_name = getattr(po, "client_name", "") or ""
-        if not client_name and po.items:
-            client_name = (
-                po.items[0].extra_metadata.get("client_name", "")
-                if po.items[0].extra_metadata
-                else ""
-            )
-
-        # ── Date received ─────────────────────────────────────────────────
         try:
-            date_received = po.created_at.strftime("%d/%m/%Y") if po.created_at else ""
-        except Exception:
-            date_received = ""
+            # ── Unpack metadata safely ──────────────────────────────────
+            partition_meta = po.partition_metadata if isinstance(po.partition_metadata, dict) else {}
+            if isinstance(po.partition_metadata, str):
+                try:
+                    partition_meta = json.loads(po.partition_metadata)
+                    if not isinstance(partition_meta, dict):
+                        partition_meta = {}
+                except Exception:
+                    partition_meta = {}
 
-        # ── SLA computations (PO-level, shared across all item rows) ──────
-        po_created_naive = po.created_at
-        if po_created_naive is not None and getattr(po_created_naive, 'tzinfo', None) is not None:
-            po_created_naive = po_created_naive.astimezone(timezone.utc).replace(tzinfo=None)
+            extra_meta = po.extra_metadata if isinstance(po.extra_metadata, dict) else {}
+            if isinstance(po.extra_metadata, str):
+                try:
+                    extra_meta = json.loads(po.extra_metadata)
+                    if not isinstance(extra_meta, dict):
+                        extra_meta = {}
+                except Exception:
+                    extra_meta = {}
 
-        is_finished = (po.status_macro or "") in _FINISHED_STATUSES
+            # ── Resolve client name ───────────────────────────────────────────
+            client_name = safe_get_dict_field(partition_meta, "client_name") or getattr(po, "client_name", "") or ""
+            if not client_name and po.items:
+                item0_meta = po.items[0].extra_metadata if isinstance(po.items[0].extra_metadata, dict) else {}
+                client_name = safe_get_dict_field(item0_meta, "client_name", "")
 
-        # Elapsed business hours (subtract any SLA freeze time)
-        elapsed_h = 0.0
-        sla_deadline_str = ""
-        sla_status_label = ""
-        overdue_h_str = ""
+            # ── Date received ─────────────────────────────────────────────────
+            date_received = safe_format_date(po.created_at)
 
-        if po_created_naive:
+            # ── SLA computations (PO-level, shared across all item rows) ──────
+            po_created_naive = po.created_at
+            if po_created_naive is not None and getattr(po_created_naive, 'tzinfo', None) is not None:
+                po_created_naive = po_created_naive.astimezone(timezone.utc).replace(tzinfo=None)
+
+            is_finished = (po.status_macro or "") in _FINISHED_STATUSES
+
+            # Elapsed business hours (subtract any SLA freeze time)
+            elapsed_h = 0.0
+            sla_deadline_str = ""
+            sla_status_label = ""
+            overdue_h_str = ""
+
+            if po_created_naive:
+                try:
+                    raw_elapsed_h = calculate_business_hours(po_created_naive, now_utc, sla_config)
+                    hold_h = float(getattr(po, "total_hold_time_seconds", 0) or 0) / 3600.0
+                    elapsed_h = max(0.0, raw_elapsed_h - hold_h)
+
+                    # SLA deadline: project sla_limit_h forward from created_at
+                    deadline_dt = _add_business_hours(po_created_naive, sla_limit_h, sla_config)
+                    sla_deadline_str = deadline_dt.strftime("%d/%m/%Y %H:%M")
+
+                    sla_status_label = _sla_label(elapsed_h, sla_limit_h, is_finished)
+                    overdue_h = max(0.0, elapsed_h - sla_limit_h) if not is_finished else 0.0
+                    overdue_h_str = f"{overdue_h:.2f}".replace(".", ",") if overdue_h > 0 else ""
+                except Exception:
+                    elapsed_h = 0.0
+                    sla_deadline_str = ""
+                    sla_status_label = ""
+                    overdue_h_str = ""
+
+            elapsed_h_str = f"{elapsed_h:.2f}".replace(".", ",")
+
+            # Justification: category + free-text
+            just_cat = getattr(po, "sla_justification_category", "") or ""
+            just_txt = getattr(po, "sla_justification_text", "") or ""
+            if just_cat and just_txt:
+                justificativa = f"{just_cat}: {just_txt}"
+            elif just_cat:
+                justificativa = just_cat
+            else:
+                justificativa = just_txt
+
+            # Data de entrada no Kanban (same as created_at, full timestamp)
             try:
-                raw_elapsed_h = calculate_business_hours(po_created_naive, now_utc, sla_config)
-                hold_h = float(getattr(po, "total_hold_time_seconds", 0) or 0) / 3600.0
-                elapsed_h = max(0.0, raw_elapsed_h - hold_h)
-
-                # SLA deadline: project sla_limit_h forward from created_at
-                deadline_dt = _add_business_hours(po_created_naive, sla_limit_h, sla_config)
-                sla_deadline_str = deadline_dt.strftime("%d/%m/%Y %H:%M")
-
-                sla_status_label = _sla_label(elapsed_h, sla_limit_h, is_finished)
-                overdue_h = max(0.0, elapsed_h - sla_limit_h) if not is_finished else 0.0
-                overdue_h_str = f"{overdue_h:.2f}".replace(".", ",") if overdue_h > 0 else ""
-            except Exception:
-                elapsed_h = 0.0
-                sla_deadline_str = ""
-                sla_status_label = ""
-                overdue_h_str = ""
-
-        elapsed_h_str = f"{elapsed_h:.2f}".replace(".", ",")
-
-        # Justification: category + free-text
-        just_cat = po.sla_justification_category or ""
-        just_txt = po.sla_justification_text or ""
-        if just_cat and just_txt:
-            justificativa = f"{just_cat}: {just_txt}"
-        elif just_cat:
-            justificativa = just_cat
-        else:
-            justificativa = just_txt
-
-        # Data de entrada no Kanban (same as created_at, full timestamp)
-        try:
-            data_entrada = (
-                po.created_at.strftime("%d/%m/%Y %H:%M") if po.created_at else ""
-            )
-        except Exception:
-            data_entrada = ""
-
-        # SLA Entrega ao Cliente (ONET) — expected_delivery_date property
-        entrega_cliente = ""
-        edd = getattr(po, "expected_delivery_date", None)
-        if edd is not None:
-            try:
-                if hasattr(edd, "strftime"):
-                    entrega_cliente = edd.strftime("%d/%m/%Y")
-                else:
-                    entrega_cliente = str(edd)
-            except Exception:
-                entrega_cliente = str(edd)
-
-        # DATA PROGRAMADA PCP — partition_metadata or extra_metadata data_programada
-        data_programada_pcp = ""
-        p_prog = (po.partition_metadata or {}).get("data_programada") or (po.extra_metadata or {}).get("data_programada")
-        if p_prog:
-            try:
-                if hasattr(p_prog, "strftime"):
-                    data_programada_pcp = p_prog.strftime("%d/%m/%Y")
-                else:
-                    p_str = str(p_prog).split("T")[0]
-                    if "-" in p_str:
-                        parts = p_str.split("-")
-                        if len(parts) == 3:
-                            data_programada_pcp = f"{parts[2]}/{parts[1]}/{parts[0]}"
-                        else:
-                            data_programada_pcp = p_str
-                    else:
-                        data_programada_pcp = p_str
-            except Exception:
-                data_programada_pcp = str(p_prog)
-
-        # Stage timing from audit logs
-        po_logs = audit_by_po.get(str(po.id), [])
-        try:
-            stage_data = _compute_stage_times(
-                logs=po_logs,
-                po_status_macro=po.status_macro or "",
-                po_created_at=po.created_at,
-                config=sla_config,
-                now=now_utc,
-            )
-        except Exception:
-            stage_data = {"hours_in_current_stage": 0.0, "hours_by_area": {}}
-        hours_in_stage_str = (
-            f"{stage_data['hours_in_current_stage']:.2f}".replace(".", ",")
-        )
-        hba = stage_data["hours_by_area"]
-        tempo_pcp_str = f"{hba.get('PCP', 0.0):.2f}".replace(".", ",")
-        tempo_producao_str = f"{hba.get('Produção', 0.0):.2f}".replace(".", ",")
-        tempo_fatur_str = f"{hba.get('Faturamento', 0.0):.2f}".replace(".", ",")
-
-        # ── Etapa Atual — friendly Portuguese label ───────────────────────────
-        raw_status = po.status_macro or ""
-        etapa_atual = _STATUS_TRANSLATION.get(raw_status, raw_status)
-
-        # ── Build SLA tuple shared across all rows for this PO ────────────
-        sla_cols = [
-            etapa_atual,
-            sla_status_label,
-            elapsed_h_str,
-            sla_deadline_str,
-            overdue_h_str,
-            justificativa,
-            data_entrada,
-            entrega_cliente,
-            data_programada_pcp,
-            hours_in_stage_str,
-            tempo_pcp_str,
-            tempo_producao_str,
-            tempo_fatur_str,
-        ]
-
-        if not po.items:
-            # PO with no items — emit one row with blanks for item fields
-            writer.writerow([
-                po.po_number,
-                client_name,
-                "",             # PRODUTO
-                "",             # CÓDIGO ESTRUTURADO
-                date_received,
-                "",             # UNIDADE MEDIDA
-                "",             # QTDE
-                "",             # PERSONALIZADO
-                "",             # LARGURA
-                "",             # COMPRIMENTO
-                "",             # STATUS PRODUÇÃO
-                "",             # QTD REAL PRODUZIDA
-                "",             # PERDA TÉCNICA
-                *sla_cols,
-            ])
-            continue
-
-        for item in po.items:
-            meta = item.extra_metadata or {}
-
-            # Produto / description
-            produto = (
-                meta.get("description")
-                or meta.get("product_description")
-                or item.sku
-                or ""
-            )
-
-            # Client name — prefer item-level if available
-            item_client = meta.get("client_name") or client_name
-
-            # Unit of measure
-            unit = (
-                meta.get("unit")
-                or meta.get("unidade_medida")
-                or meta.get("Unit")
-                or ""
-            )
-
-            # Quantity
-            qty = float(item.quantity) if item.quantity else 0
-            qty_str = f"{qty:g}"
-
-            # Personalized
-            personalizado = "Sim" if item.is_personalized else "Não"
-
-            # Dimensions — ORM columns first, then JSONB fallback
-            raw_largura = getattr(item, "width", None) or getattr(item, "largura", None)
-            if raw_largura is None:
-                raw_largura = (
-                    meta.get("largura") or meta.get("Largura")
-                    or meta.get("width") or meta.get("Width")
+                data_entrada = (
+                    po.created_at.strftime("%d/%m/%Y %H:%M") if po.created_at else ""
                 )
-            largura = str(raw_largura) if raw_largura not in (None, "") else ""
+            except Exception:
+                data_entrada = ""
 
-            raw_comprimento = (
-                getattr(item, "length", None) or getattr(item, "comprimento", None)
+            # SLA Entrega ao Cliente (ONET) — expected_delivery_date property
+            entrega_cliente = safe_format_date(getattr(po, "expected_delivery_date", None) or getattr(po, "delivery_date", None))
+
+            # DATA PROGRAMADA PCP — partition_metadata or extra_metadata data_programada
+            p_prog = safe_get_dict_field(partition_meta, "data_programada") or safe_get_dict_field(extra_meta, "data_programada")
+            data_programada_pcp = safe_format_date(p_prog)
+
+            # Stage timing from audit logs
+            po_logs = audit_by_po.get(str(po.id), [])
+            try:
+                stage_data = _compute_stage_times(
+                    logs=po_logs,
+                    po_status_macro=po.status_macro or "",
+                    po_created_at=po.created_at,
+                    config=sla_config,
+                    now=now_utc,
+                )
+            except Exception:
+                stage_data = {"hours_in_current_stage": 0.0, "hours_by_area": {}}
+            hours_in_stage_str = (
+                f"{stage_data['hours_in_current_stage']:.2f}".replace(".", ",")
             )
-            if raw_comprimento is None:
+            hba = stage_data["hours_by_area"]
+            tempo_pcp_str = f"{hba.get('PCP', 0.0):.2f}".replace(".", ",")
+            tempo_producao_str = f"{hba.get('Produção', 0.0):.2f}".replace(".", ",")
+            tempo_fatur_str = f"{hba.get('Faturamento', 0.0):.2f}".replace(".", ",")
+
+            # ── Etapa Atual — friendly Portuguese label ───────────────────────────
+            raw_status = po.status_macro or ""
+            etapa_atual = _STATUS_TRANSLATION.get(raw_status, raw_status)
+
+            # ── Build SLA tuple shared across all rows for this PO ────────────
+            sla_cols = [
+                etapa_atual,
+                sla_status_label,
+                elapsed_h_str,
+                sla_deadline_str,
+                overdue_h_str,
+                justificativa,
+                data_entrada,
+                entrega_cliente,
+                data_programada_pcp,
+                hours_in_stage_str,
+                tempo_pcp_str,
+                tempo_producao_str,
+                tempo_fatur_str,
+            ]
+
+            if not po.items:
+                # PO with no items — emit one row with blanks for item fields
+                writer.writerow([
+                    getattr(po, "po_number", ""),
+                    client_name,
+                    "",             # PRODUTO
+                    "",             # CÓDIGO ESTRUTURADO
+                    date_received,
+                    "",             # UNIDADE MEDIDA
+                    "",             # QTDE
+                    "",             # PERSONALIZADO
+                    "",             # LARGURA
+                    "",             # COMPRIMENTO
+                    "",             # STATUS PRODUÇÃO
+                    "",             # QTD REAL PRODUZIDA
+                    "",             # PERDA TÉCNICA
+                    *sla_cols,
+                ])
+                continue
+
+            for item in po.items:
+                meta = item.extra_metadata if isinstance(item.extra_metadata, dict) else {}
+                if isinstance(item.extra_metadata, str):
+                    try:
+                        meta = json.loads(item.extra_metadata)
+                        if not isinstance(meta, dict):
+                            meta = {}
+                    except Exception:
+                        meta = {}
+
+                # Produto / description
+                produto = (
+                    safe_get_dict_field(meta, "description")
+                    or safe_get_dict_field(meta, "product_description")
+                    or getattr(item, "sku", "")
+                    or ""
+                )
+
+                # Client name — prefer item-level if available
+                item_client = safe_get_dict_field(meta, "client_name") or client_name
+
+                # Unit of measure
+                unit = (
+                    safe_get_dict_field(meta, "unit")
+                    or safe_get_dict_field(meta, "unidade_medida")
+                    or safe_get_dict_field(meta, "Unit")
+                    or ""
+                )
+
+                # Quantity
+                qty = float(item.quantity) if item.quantity else 0
+                qty_str = f"{qty:g}"
+
+                # Personalized
+                personalizado = "Sim" if getattr(item, "is_personalized", False) else "Não"
+
+                # Dimensions — ORM columns first, then JSONB fallback
+                raw_largura = getattr(item, "width", None) or getattr(item, "largura", None)
+                if raw_largura is None:
+                    raw_largura = (
+                        safe_get_dict_field(meta, "largura") or safe_get_dict_field(meta, "Largura")
+                        or safe_get_dict_field(meta, "width") or safe_get_dict_field(meta, "Width")
+                    )
+                largura = str(raw_largura) if raw_largura not in (None, "") else ""
+
                 raw_comprimento = (
-                    meta.get("comprimento") or meta.get("Comprimento")
-                    or meta.get("length") or meta.get("Length")
+                    getattr(item, "length", None) or getattr(item, "comprimento", None)
                 )
-            comprimento = str(raw_comprimento) if raw_comprimento not in (None, "") else ""
+                if raw_comprimento is None:
+                    raw_comprimento = (
+                        safe_get_dict_field(meta, "comprimento") or safe_get_dict_field(meta, "Comprimento")
+                        or safe_get_dict_field(meta, "length") or safe_get_dict_field(meta, "Length")
+                    )
+                comprimento = str(raw_comprimento) if raw_comprimento not in (None, "") else ""
 
-            # FF-HARDENING-013 Item 13A: per-SKU production metrics
-            status_producao = meta.get("status_producao") or ""
-            qtd_real_produzida = meta.get("qtd_real_produzida")
-            qtd_real_str = str(qtd_real_produzida) if qtd_real_produzida is not None else ""
-            perda_tecnica = meta.get("perda_tecnica")
-            perda_str = str(perda_tecnica) if perda_tecnica is not None else ""
+                # FF-HARDENING-013 Item 13A: per-SKU production metrics
+                status_producao = safe_get_dict_field(meta, "status_producao", "")
+                qtd_real_produzida = safe_get_dict_field(meta, "qtd_real_produzida")
+                qtd_real_str = str(qtd_real_produzida) if qtd_real_produzida is not None else ""
+                perda_tecnica = safe_get_dict_field(meta, "perda_tecnica")
+                perda_str = str(perda_tecnica) if perda_tecnica is not None else ""
 
-            # Código Estruturado — from extra_metadata (various key aliases from ONET import)
-            codigo_estruturado = (
-                meta.get("codigo_estruturado")
-                or meta.get("cod_estruturado")
-                or meta.get("Código Estruturado")
-                or meta.get("codigo")
-                or getattr(item, "codigo_estruturado", None)
-                or ""
-            )
-            codigo_estruturado = str(codigo_estruturado) if codigo_estruturado else ""
+                # Código Estruturado — from extra_metadata (various key aliases from ONET import)
+                codigo_estruturado = (
+                    safe_get_dict_field(meta, "codigo_estruturado")
+                    or safe_get_dict_field(meta, "cod_estruturado")
+                    or safe_get_dict_field(meta, "Código Estruturado")
+                    or safe_get_dict_field(meta, "codigo")
+                    or getattr(item, "codigo_estruturado", None)
+                    or ""
+                )
+                codigo_estruturado = str(codigo_estruturado) if codigo_estruturado else ""
 
+                writer.writerow([
+                    getattr(po, "po_number", ""),
+                    item_client,
+                    produto,
+                    codigo_estruturado,
+                    date_received,
+                    unit,
+                    qty_str,
+                    personalizado,
+                    largura,
+                    comprimento,
+                    status_producao,
+                    qtd_real_str,
+                    perda_str,
+                    *sla_cols,
+                ])
+        except Exception as po_err:
+            logger.error(f"Error processing PO {getattr(po, 'po_number', 'unknown')} in po-export: {po_err}")
             writer.writerow([
-                po.po_number,
-                item_client,
-                produto,
-                codigo_estruturado,
-                date_received,
-                unit,
-                qty_str,
-                personalizado,
-                largura,
-                comprimento,
-                status_producao,
-                qtd_real_str,
-                perda_str,
-                *sla_cols,
+                getattr(po, "po_number", ""),
+                getattr(po, "client_name", ""),
+                "", "", "", "", "", "", "", "", "", "", "",
+                _STATUS_TRANSLATION.get(getattr(po, "status_macro", ""), getattr(po, "status_macro", "")),
+                "", "", "", "", "", "", "", "", "", "", ""
             ])
 
     # ── Stream with BOM for Excel UTF-8 compatibility ─────────────────────
