@@ -529,8 +529,19 @@ async def export_pos_csv(
             except Exception:
                 data_entrada = ""
 
-            # SLA Entrega ao Cliente (ONET) — expected_delivery_date property
-            entrega_cliente = safe_format_date(getattr(po, "expected_delivery_date", None) or getattr(po, "delivery_date", None))
+            # SLA Entrega ao Cliente (ONET) — Prefer raw un-overwritten ONET metadata key (dt_faturamento / dt_entrega)
+            raw_onet_date = (
+                safe_get_field(extra_meta, "dt_faturamento")
+                or safe_get_field(extra_meta, "Dt.Faturamento")
+                or safe_get_field(extra_meta, "dt_entrega")
+                or safe_get_field(extra_meta, "Dt.Entrega")
+                or safe_get_field(partition_meta, "dt_faturamento")
+                or safe_get_field(partition_meta, "dt_entrega")
+            )
+            if raw_onet_date:
+                entrega_cliente = safe_format_date(raw_onet_date)
+            else:
+                entrega_cliente = safe_format_date(getattr(po, "expected_delivery_date", None) or getattr(po, "delivery_date", None))
 
             # DATA PROGRAMADA PCP — partition_metadata or extra_metadata data_programada
             p_prog = safe_get_dict_field(partition_meta, "data_programada") or safe_get_dict_field(extra_meta, "data_programada")

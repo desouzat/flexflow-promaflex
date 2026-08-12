@@ -42,7 +42,7 @@ async def run_sample_export():
         tenant = Tenant(id=tenant_id, name="PromaFlex Tenant", cnpj="00000000000199")
         db.add(tenant)
 
-        # Sample PO 1
+        # Sample PO 1 (PO 213567 with raw dt_faturamento and PCP data_programada)
         po1 = PurchaseOrder(
             id=uuid.uuid4(),
             tenant_id=tenant_id,
@@ -50,8 +50,12 @@ async def run_sample_export():
             client_name="PROMA-CLIENTE ACME BRASIL",
             status_macro="APPROVED",
             created_at=datetime(2026, 8, 10, 10, 0),
-            expected_delivery_date=datetime(2026, 8, 19),
-            partition_metadata={"data_programada": "2026-08-21", "client_name": "PROMA-CLIENTE ACME BRASIL"}
+            expected_delivery_date=datetime(2026, 8, 21),  # Property returns programmed date if updated
+            partition_metadata={
+                "data_programada": "2026-08-21",
+                "client_name": "PROMA-CLIENTE ACME BRASIL",
+                "dt_faturamento": "19/08/2026"
+            }
         )
         item1 = OrderItem(
             id=uuid.uuid4(),
@@ -70,7 +74,8 @@ async def run_sample_export():
                 "comprimento": "100",
                 "status_producao": "EM PRODUCAO",
                 "qtd_real_produzida": 148,
-                "perda_tecnica": 2
+                "perda_tecnica": 2,
+                "dt_faturamento": "19/08/2026"
             }
         )
         po1.items.append(item1)
@@ -163,16 +168,23 @@ async def run_sample_export():
         sys.stdout.reconfigure(encoding='utf-8')
         
         print("\n" + "="*80)
-        print("PRACTICAL EXTRACTION VERIFICATION TEST RESULTS")
+        print("PRACTICAL EXTRACTION VERIFICATION TEST RESULTS (PO 213567 CHECK)")
         print("="*80)
         print(f"Total Rows Generated (including header): {len(lines)}")
         print("\n--- CSV HEADER ROW ---")
         if lines:
             print(lines[0])
             
-        print("\n--- FIRST 3 EXPORTED DATA ROWS ---")
-        for i, line in enumerate(lines[1:4], start=1):
+        print("\n--- EXPORTED DATA ROWS ---")
+        for i, line in enumerate(lines[1:], start=1):
             print(f"Row {i}: {line}")
+            if "213567" in line:
+                cols = line.split(";")
+                print("\n" + "-"*60)
+                print("AUDIT VERIFICATION FOR PO 213567:")
+                print(f"  Column U [SLA ENTREGA CLIENTE (ONET)] : {cols[20]}")
+                print(f"  Column V [DATA PROGRAMADA PCP]         : {cols[21]}")
+                print("-"*60 + "\n")
         print("="*80 + "\n")
         
     finally:
