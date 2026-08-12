@@ -18,7 +18,7 @@ from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 logger = logging.getLogger(__name__)
 
@@ -42,20 +42,43 @@ def safe_format_date(dt) -> str:
             pass
     return val_str
 
-def safe_get_dict_field(obj, key: str, default: any = None) -> any:
-    """Safely extract key from a dictionary or JSON-parsed object."""
-    if not obj:
+def safe_get_field(obj, attr: str, default: any = "") -> any:
+    """Safely extract key/attribute from a dictionary, ORM model, or JSON-parsed object."""
+    if obj is None:
         return default
     if isinstance(obj, dict):
-        return obj.get(key, default)
+        val = obj.get(attr)
+        return val if val is not None else default
     if isinstance(obj, str):
         try:
             parsed = json.loads(obj)
             if isinstance(parsed, dict):
-                return parsed.get(key, default)
+                val = parsed.get(attr)
+                return val if val is not None else default
         except Exception:
             pass
+        return default
+    if hasattr(obj, "extra_metadata"):
+        meta = getattr(obj, "extra_metadata", None)
+        if isinstance(meta, dict) and attr in meta:
+            val = meta.get(attr)
+            if val not in (None, ""):
+                return val
+        elif isinstance(meta, str):
+            try:
+                parsed = json.loads(meta)
+                if isinstance(parsed, dict) and attr in parsed:
+                    val = parsed.get(attr)
+                    if val not in (None, ""):
+                        return val
+            except Exception:
+                pass
+    if hasattr(obj, attr):
+        val = getattr(obj, attr, None)
+        return val if val not in (None, "") else default
     return default
+
+safe_get_dict_field = safe_get_field
 
 try:
     from backend.database import get_db
@@ -217,12 +240,12 @@ def _load_audit_logs_by_po(
     if not item_to_po:
         return {}
 
-    item_ids = list(item_to_po.keys())
+    item_id_objs = [row.id for row in items]
 
     # Step 2: load all audit logs for these items in one query
     logs = (
         db.query(AuditLog)
-        .filter(AuditLog.item_id.in_(item_ids))
+        .filter(AuditLog.item_id.in_(item_id_objs))
         .order_by(AuditLog.created_at.asc())
         .all()
     )
@@ -364,9 +387,10 @@ async def export_pos_csv(
     Security: Strictly filtered by current_user.tenant_id — no cross-tenant
     data can appear in the response.
     """
-    # ── Fetch POs — tenant-scoped ─────────────────────────────────────────
+    # ── Fetch POs — tenant-scoped with eager-loaded items ─────────────────
     pos = (
         db.query(PurchaseOrder)
+        .options(selectinload(PurchaseOrder.items))
         .filter(PurchaseOrder.tenant_id == current_user.tenant_id)
         .order_by(PurchaseOrder.created_at.desc())
         .all()
@@ -434,10 +458,11 @@ async def export_pos_csv(
                 except Exception:
                     partition_meta = {}
 
-            extra_meta = po.extra_metadata if isinstance(po.extra_metadata, dict) else {}
-            if isinstance(po.extra_metadata, str):
+            po_extra = getattr(po, "extra_metadata", None)
+            extra_meta = po_extra if isinstance(po_extra, dict) else {}
+            if isinstance(po_extra, str):
                 try:
-                    extra_meta = json.loads(po.extra_metadata)
+                    extra_meta = json.loads(po_extra)
                     if not isinstance(extra_meta, dict):
                         extra_meta = {}
                 except Exception:
@@ -584,63 +609,73 @@ async def export_pos_csv(
 
                 # Produto / description
                 produto = (
-                    safe_get_dict_field(meta, "description")
-                    or safe_get_dict_field(meta, "product_description")
-                    or getattr(item, "sku", "")
+                    safe_get_field(meta, "description")
+                    or safe_get_field(meta, "product_description")
+                    or safe_get_field(item, "description")
+                    or safe_get_field(item, "sku")
                     or ""
                 )
 
                 # Client name — prefer item-level if available
-                item_client = safe_get_dict_field(meta, "client_name") or client_name
+                item_client = safe_get_field(meta, "client_name") or safe_get_field(item, "client_name") or client_name
 
                 # Unit of measure
                 unit = (
-                    safe_get_dict_field(meta, "unit")
-                    or safe_get_dict_field(meta, "unidade_medida")
-                    or safe_get_dict_field(meta, "Unit")
+                    safe_get_field(meta, "unit")
+                    or safe_get_field(meta, "unidade_medida")
+                    or safe_get_field(meta, "Unit")
+                    or safe_get_field(item, "unit")
                     or ""
                 )
 
                 # Quantity
-                qty = float(item.quantity) if item.quantity else 0
-                qty_str = f"{qty:g}"
+                raw_qty = getattr(item, "quantity", None)
+                if raw_qty is None or raw_qty == "":
+                    raw_qty = safe_get_field(meta, "quantity", 0)
+                try:
+                    qty = float(raw_qty) if raw_qty else 0
+                    qty_str = f"{qty:g}"
+                except Exception:
+                    qty_str = str(raw_qty)
 
                 # Personalized
-                personalizado = "Sim" if getattr(item, "is_personalized", False) else "Não"
+                is_pers = getattr(item, "is_personalized", False)
+                if not is_pers:
+                    is_pers = bool(safe_get_field(meta, "is_personalized", False))
+                personalizado = "Sim" if is_pers else "Não"
 
                 # Dimensions — ORM columns first, then JSONB fallback
                 raw_largura = getattr(item, "width", None) or getattr(item, "largura", None)
-                if raw_largura is None:
+                if raw_largura in (None, ""):
                     raw_largura = (
-                        safe_get_dict_field(meta, "largura") or safe_get_dict_field(meta, "Largura")
-                        or safe_get_dict_field(meta, "width") or safe_get_dict_field(meta, "Width")
+                        safe_get_field(meta, "largura") or safe_get_field(meta, "Largura")
+                        or safe_get_field(meta, "width") or safe_get_field(meta, "Width")
                     )
                 largura = str(raw_largura) if raw_largura not in (None, "") else ""
 
-                raw_comprimento = (
-                    getattr(item, "length", None) or getattr(item, "comprimento", None)
-                )
-                if raw_comprimento is None:
+                raw_comprimento = getattr(item, "length", None) or getattr(item, "comprimento", None)
+                if raw_comprimento in (None, ""):
                     raw_comprimento = (
-                        safe_get_dict_field(meta, "comprimento") or safe_get_dict_field(meta, "Comprimento")
-                        or safe_get_dict_field(meta, "length") or safe_get_dict_field(meta, "Length")
+                        safe_get_field(meta, "comprimento") or safe_get_field(meta, "Comprimento")
+                        or safe_get_field(meta, "length") or safe_get_field(meta, "Length")
                     )
                 comprimento = str(raw_comprimento) if raw_comprimento not in (None, "") else ""
 
                 # FF-HARDENING-013 Item 13A: per-SKU production metrics
-                status_producao = safe_get_dict_field(meta, "status_producao", "")
-                qtd_real_produzida = safe_get_dict_field(meta, "qtd_real_produzida")
-                qtd_real_str = str(qtd_real_produzida) if qtd_real_produzida is not None else ""
-                perda_tecnica = safe_get_dict_field(meta, "perda_tecnica")
-                perda_str = str(perda_tecnica) if perda_tecnica is not None else ""
+                status_producao = safe_get_field(meta, "status_producao") or safe_get_field(item, "status_item", "")
+                qtd_real_produzida = safe_get_field(meta, "qtd_real_produzida")
+                qtd_real_str = str(qtd_real_produzida) if qtd_real_produzida not in (None, "") else ""
+                perda_tecnica = safe_get_field(meta, "perda_tecnica")
+                perda_str = str(perda_tecnica) if perda_tecnica not in (None, "") else ""
 
                 # Código Estruturado — from extra_metadata (various key aliases from ONET import)
                 codigo_estruturado = (
-                    safe_get_dict_field(meta, "codigo_estruturado")
-                    or safe_get_dict_field(meta, "cod_estruturado")
-                    or safe_get_dict_field(meta, "Código Estruturado")
-                    or safe_get_dict_field(meta, "codigo")
-                    or getattr(item, "codigo_estruturado", None)
+                    safe_get_field(meta, "codigo_estruturado")
+                    or safe_get_field(meta, "cod_estruturado")
+                    or safe_get_field(meta, "Código Estruturado")
+                    or safe_get_field(meta, "codigo")
+                    or safe_get_field(item, "codigo_estruturado")
+                    or safe_get_field(item, "sku")
                     or ""
                 )
                 codigo_estruturado = str(codigo_estruturado) if codigo_estruturado else ""
