@@ -15,7 +15,11 @@ def test_security_headers_injected():
     assert "default-src 'self'" in headers.get("Content-Security-Policy", "")
 
 def test_security_scanner_probes_blocked():
-    probe_paths = ["/wp-admin", "/wp-content/plugins", "/backup.zip", "/database/sql", "/db/dump", "/logs/app.log", "/config.env"]
+    probe_paths = ["/wp-admin", "/wp-content/plugins", "/backup.zip", "/database/sql", "/db/dump", "/logs/app.log", "/config.env", "/config/db.env"]
     for path in probe_paths:
         response = client.get(path)
         assert response.status_code == 404
+
+def test_legitimate_configuracoes_route_allowed():
+    response = client.get("/configuracoes")
+    assert response.status_code == 200

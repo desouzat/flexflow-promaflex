@@ -691,7 +691,10 @@ if not os.path.exists(static_dir):
 if os.path.exists(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
-PROBE_PATHS = ("wp-admin", "wp-content", "backup", "database", "db", "logs", "config", "admin/", "temp", "test")
+PROBE_PATHS = (
+    "wp-admin", "wp-content", "backup", "database/", "db/", 
+    "logs/", "config/", "config.", "admin/", "temp/", "test/"
+)
 
 # 3. Catch-all SPA route to serve fresh index.html for any non-API frontend route
 @app.get("/{full_path:path}", include_in_schema=False)
