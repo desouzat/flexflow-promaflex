@@ -429,7 +429,11 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-XSS-Protection"] = "1; mode=block"
-    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:;"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval';"
+    )
     return response
 
 
@@ -687,9 +691,15 @@ if not os.path.exists(static_dir):
 if os.path.exists(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
+PROBE_PATHS = ("wp-admin", "wp-content", "backup", "database", "db", "logs", "config", "admin/", "temp", "test")
+
 # 3. Catch-all SPA route to serve fresh index.html for any non-API frontend route
 @app.get("/{full_path:path}", include_in_schema=False)
 async def serve_spa(full_path: str):
+    # Explicit 404 for security scanner probes
+    if any(full_path.lower().startswith(p) for p in PROBE_PATHS):
+        raise HTTPException(status_code=404, detail="Not Found")
+
     # Skip API, docs, openapi, assets, and static requests
     if full_path.startswith(("api/", "docs", "redoc", "openapi.json", "assets/", "static/")):
         raise HTTPException(status_code=404, detail="Not Found")
