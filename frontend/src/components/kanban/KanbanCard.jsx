@@ -643,12 +643,12 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
                                              <span className="font-semibold font-mono text-white">{formatCurrency(marginInfo.breakdown.vp)}</span>
                                          </div>
                                          <div className="flex justify-between text-red-400 py-1">
-                                             <span className="text-slate-400">(-) Impostos (9.25% PIS/COFINS):</span>
+                                             <span className="text-slate-400">(-) Impostos (9.25% PIS/COFINS + {marginInfo.breakdown.icmsRate || 0}% ICMS):</span>
                                              <span className="font-mono">-{formatCurrency(marginInfo.breakdown.taxes)}</span>
                                          </div>
                                          {marginInfo.breakdown.commission > 0 && (
                                              <div className="flex justify-between text-red-400 py-1">
-                                                 <span className="text-slate-400">(-) Comissão:</span>
+                                                 <span className="text-slate-400">(-) Comissão (2.5%):</span>
                                                  <span className="font-mono">-{formatCurrency(marginInfo.breakdown.commission)}</span>
                                              </div>
                                          )}
@@ -659,13 +659,17 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
                                              </div>
                                          )}
                                          <div className="border-t border-slate-800 my-1"></div>
-                                         <div className="flex justify-between text-emerald-400 font-bold py-1">
-                                             <span className="text-slate-300">(=) Margem Absoluta:</span>
+                                         <div className="flex justify-between text-slate-300 py-1">
+                                             <span className="text-slate-400">(=) Receita Líquida:</span>
                                              <span className="font-mono text-white">{formatCurrency(marginInfo.breakdown.absoluteMargin)}</span>
                                          </div>
-                                         <div className="flex justify-between text-slate-300 py-1">
-                                             <span className="text-slate-400">(/) Custo Industrial:</span>
-                                             <span className="font-mono text-white">{formatCurrency(marginInfo.breakdown.costs)}</span>
+                                         <div className="flex justify-between text-red-400 py-1">
+                                             <span className="text-slate-400">(-) Custo Industrial:</span>
+                                             <span className="font-mono">-{formatCurrency(marginInfo.breakdown.costs)}</span>
+                                         </div>
+                                         <div className="flex justify-between text-emerald-400 font-bold py-1">
+                                             <span className="text-slate-300">(=) Lucro Líquido:</span>
+                                             <span className="font-mono text-white">{formatCurrency(marginInfo.breakdown.netProfit ?? (marginInfo.breakdown.absoluteMargin - marginInfo.breakdown.costs))}</span>
                                          </div>
                                          <div className="border-t border-slate-700 pt-1.5 flex justify-between items-center">
                                              <span className="font-bold text-white">Margem Final (%):</span>

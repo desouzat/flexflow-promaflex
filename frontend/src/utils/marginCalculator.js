@@ -56,10 +56,11 @@ export function parsePaymentTermsToDays(terms) {
 export function calculateDynamicMargin({
     gross,
     freight = 0,
-    commissionRate = 0,
+    commissionRate = 2.5,
     costs = 0,
     paymentDays = 0,
-    taxRate = 9.25  // FF-HARDENING-015: PIS/COFINS unified rate (was 22.25)
+    taxRate,
+    icmsRate = 0
 }) {
     // Null Safety check: If cost is missing, undefined, or <= 0, return PENDENTE_PCP
     const parsedCosts = parseFloat(costs);
@@ -76,7 +77,10 @@ export function calculateDynamicMargin({
     const parsedGross = parseFloat(gross) || 0;
     const parsedFreight = parseFloat(freight) || 0;
     const parsedCommissionRate = parseFloat(commissionRate) || 0;
-    const parsedTaxRate = parseFloat(taxRate) || 9.25;  // FF-HARDENING-015: PIS/COFINS fallback
+    const rawIcmsRate = parseFloat(icmsRate) || 0;
+    
+    // Total dynamic tax rate = 9.25% PIS/COFINS + Item's specific ONET % ICMS
+    const parsedTaxRate = taxRate !== undefined ? parseFloat(taxRate) : (9.25 + rawIcmsRate);
 
     // 1. VP (Present Value) = Gross / (1.025 ** (paymentDays / 30))
     const vpFactor = Math.pow(1.025, paymentDays / 30);
@@ -88,12 +92,16 @@ export function calculateDynamicMargin({
     // 3. Commission = VP * commissionRate%
     const commission = parseFloat((vp * (parsedCommissionRate / 100)).toFixed(4));
 
-    // 4. Contribution Margin (Numerator)
+    // 4. Contribution Margin / Net Revenue (VP - Taxes - Commission - Freight)
     const absoluteMargin = parseFloat((vp - taxes - commission - parsedFreight).toFixed(4));
 
-    // 5. CM = Absolute Margin / Costs
-    const marginRatio = parseFloat((absoluteMargin / parsedCosts).toFixed(6));
-    const marginPercentage = parseFloat((marginRatio * 100).toFixed(4));
+    // 5. Net Profit (Lucro Líquido) = Net Revenue - Costs
+    const netProfit = parseFloat((absoluteMargin - parsedCosts).toFixed(4));
+
+    // 6. Net Profit Margin Percentage over Gross Revenue (Margem Líquida sobre Vendas)
+    const revenueBase = parsedGross || vp || 1;
+    const marginRatio = parseFloat((netProfit / revenueBase).toFixed(6));
+    const marginPercentage = parseFloat((marginRatio * 100).toFixed(2));
 
     // Badge styling thresholds:
     // Red (< 10% or negative)
@@ -113,18 +121,21 @@ export function calculateDynamicMargin({
 
     return {
         status: 'OK',
-        margin: marginPercentage, // internal high precision
+        margin: marginPercentage, // internal precision
         badgeColor,
         formattedMargin,
         breakdown: {
             gross: parseFloat(parsedGross.toFixed(4)),
             vp: vp,
             vpDiscount: parseFloat((parsedGross - vp).toFixed(4)),
+            icmsRate: rawIcmsRate,
+            taxRate: parsedTaxRate,
             taxes: taxes,
             commission: commission,
             freight: parseFloat(parsedFreight.toFixed(4)),
             costs: parseFloat(parsedCosts.toFixed(4)),
-            absoluteMargin: absoluteMargin
+            absoluteMargin: absoluteMargin,
+            netProfit: netProfit
         }
     };
 }
@@ -153,11 +164,12 @@ export function calculatePOMargins(po) {
     let totalCommission = 0;
     let totalFreight = 0;
     let totalCosts = 0;
+    let weightedIcmsSum = 0;
     let hasPendingCost = false;
 
     // Sum up items
     po.items.forEach(item => {
-        const qty = parseInt(item.quantity) || 0;
+        const qty = parseFloat(item.quantity) || 0;
         if (qty <= 0) return;
 
         // Try standard fields or fallback to extra_metadata
@@ -183,14 +195,27 @@ export function calculatePOMargins(po) {
         
         const vpFactor = Math.pow(1.025, days / 30);
         const itemVP = itemGross / vpFactor;
-        const itemTaxes = itemVP * 0.0925;  // FF-HARDENING-015: PIS/COFINS 9.25% (was 0.2225)
+
+        // Dynamic ICMS rate from item metadata (default to 0% if missing)
+        const rawIcmsRate = parseFloat(
+            item.icms_rate ?? 
+            item.icms_percent ?? 
+            item.extra_metadata?.icms_rate ?? 
+            item.extra_metadata?.icms_percent ?? 
+            item.extra_metadata?.['% ICMS'] ?? 
+            0
+        ) || 0;
+
+        // Total dynamic tax rate = 9.25% PIS/COFINS + Item's specific ONET % ICMS
+        const itemTaxRate = 9.25 + rawIcmsRate;
+        const itemTaxes = itemVP * (itemTaxRate / 100);
 
         // Try getting commission rate from item or PO
         const commissionRate = 
             parseFloat(item.manual_commission_rate) || 
             parseFloat(item.extra_metadata?.manual_commission_rate) || 
             parseFloat(po.commission_rate) || 
-            0;
+            2.5;
         
         const itemCommission = itemVP * (commissionRate / 100);
         const itemFreight = parseFloat(item.freight) || 0;
@@ -201,6 +226,7 @@ export function calculatePOMargins(po) {
         totalCommission += itemCommission;
         totalFreight += itemFreight;
         totalCosts += (unitCost * qty);
+        weightedIcmsSum += (rawIcmsRate * itemGross);
     });
 
     // If costs are missing or zero for any item, mark PO as PCP pending
@@ -231,8 +257,11 @@ export function calculatePOMargins(po) {
     totalCosts = parseFloat(totalCosts.toFixed(4));
 
     const totalAbsoluteMargin = parseFloat((totalVP - totalTaxes - totalCommission - totalFreight).toFixed(4));
-    const marginRatio = parseFloat((totalAbsoluteMargin / totalCosts).toFixed(6));
-    const marginPercentage = parseFloat((marginRatio * 100).toFixed(4));
+    const totalNetProfit = parseFloat((totalAbsoluteMargin - totalCosts).toFixed(4));
+
+    const revenueBase = totalGross || totalVP || 1;
+    const marginRatio = parseFloat((totalNetProfit / revenueBase).toFixed(6));
+    const marginPercentage = parseFloat((marginRatio * 100).toFixed(2));
 
     let badgeColor = 'green';
     if (marginPercentage < 10) {
@@ -245,6 +274,8 @@ export function calculatePOMargins(po) {
 
     const formattedMargin = marginPercentage > 1000 ? '> 1000%' : `${marginPercentage.toFixed(2)}%`;
 
+    const averageIcmsRate = totalGross > 0 ? parseFloat((weightedIcmsSum / totalGross).toFixed(2)) : 0;
+
     return {
         status: 'OK',
         margin: marginPercentage,
@@ -254,11 +285,14 @@ export function calculatePOMargins(po) {
             gross: totalGross,
             vp: totalVP,
             vpDiscount: parseFloat((totalGross - totalVP).toFixed(4)),
+            icmsRate: averageIcmsRate,
+            taxRate: parseFloat((9.25 + averageIcmsRate).toFixed(2)),
             taxes: totalTaxes,
             commission: totalCommission,
             freight: totalFreight,
             costs: totalCosts,
-            absoluteMargin: totalAbsoluteMargin
+            absoluteMargin: totalAbsoluteMargin,
+            netProfit: totalNetProfit
         }
     };
 }

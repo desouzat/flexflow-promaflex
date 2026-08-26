@@ -2047,9 +2047,9 @@ const ImportPage = () => {
                                                                                         <span className="font-semibold font-mono text-white">{formatCurrency(marginResult.breakdown.vp)}</span>
                                                                                     </div>
                                                                                     <div className="flex justify-between text-red-400 py-1">
-                                                                                        <span className="text-slate-400">(-) Impostos (22.25%):</span>
-                                                                                        <span className="font-mono">-{formatCurrency(marginResult.breakdown.taxes)}</span>
-                                                                                    </div>
+                                                                                         <span className="text-slate-400">(-) Impostos (9.25% PIS/COFINS + {marginResult.breakdown.icmsRate || 0}% ICMS):</span>
+                                                                                         <span className="font-mono">-{formatCurrency(marginResult.breakdown.taxes)}</span>
+                                                                                     </div>
                                                                                     {marginResult.breakdown.commission > 0 && (
                                                                                         <div className="flex justify-between text-red-400 py-1">
                                                                                             <span className="text-slate-400">(-) Comissão ({commRate}%):</span>
@@ -2063,13 +2063,17 @@ const ImportPage = () => {
                                                                                         </div>
                                                                                     )}
                                                                                     <div className="border-t border-slate-800 my-1"></div>
-                                                                                    <div className="flex justify-between text-emerald-400 font-bold py-1">
-                                                                                        <span className="text-slate-300">(=) Margem Absoluta:</span>
+                                                                                    <div className="flex justify-between text-slate-300 py-1">
+                                                                                        <span className="text-slate-400">(=) Receita Líquida:</span>
                                                                                         <span className="font-mono text-white">{formatCurrency(marginResult.breakdown.absoluteMargin)}</span>
                                                                                     </div>
-                                                                                    <div className="flex justify-between text-slate-300 py-1">
-                                                                                        <span className="text-slate-400">(/) Custo Industrial:</span>
-                                                                                        <span className="font-mono text-white">{formatCurrency(marginResult.breakdown.costs)}</span>
+                                                                                    <div className="flex justify-between text-red-400 py-1">
+                                                                                        <span className="text-slate-400">(-) Custo Industrial:</span>
+                                                                                        <span className="font-mono">-{formatCurrency(marginResult.breakdown.costs)}</span>
+                                                                                    </div>
+                                                                                    <div className="flex justify-between text-emerald-400 font-bold py-1">
+                                                                                        <span className="text-slate-300">(=) Lucro Líquido:</span>
+                                                                                        <span className="font-mono text-white">{formatCurrency(marginResult.breakdown.netProfit ?? (marginResult.breakdown.absoluteMargin - marginResult.breakdown.costs))}</span>
                                                                                     </div>
                                                                                     <div className="border-t border-slate-700 pt-1.5 flex justify-between items-center">
                                                                                         <span className="font-bold text-white">Margem Final (%):</span>

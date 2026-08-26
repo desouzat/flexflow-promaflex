@@ -104,10 +104,10 @@ async def get_celso_kpis(
         mc.sku: mc for mc in db.query(MaterialCost).filter(MaterialCost.tenant_id == tenant_id).all()
     }
 
-    # Helper to calculate individual item cost and value
+    # Helper to calculate individual item cost, value, and net profit
     def get_item_financials(item: OrderItem):
         price = Decimal(str(item.price or item.unit_value or 0.0))
-        qty = item.quantity
+        qty = Decimal(str(item.quantity or 0.0))
         item_value = price * qty
         
         # Calculate cost
@@ -119,7 +119,21 @@ async def get_celso_kpis(
             # Fallback to 70% cost ratio
             item_cost = item_value * Decimal("0.70")
             
-        return item_value, item_cost
+        extra = item.extra_metadata or {}
+        icms_rate = Decimal(str(
+            extra.get("icms_rate") or 
+            extra.get("icms_percent") or 
+            extra.get("% ICMS") or 
+            0.0
+        ))
+        total_tax_rate = Decimal("9.25") + icms_rate
+        item_taxes = item_value * (total_tax_rate / Decimal("100"))
+        item_commission = item_value * Decimal("0.025")
+        
+        net_revenue = item_value - item_taxes - item_commission
+        net_profit = net_revenue - item_cost
+
+        return item_value, item_cost, net_profit
 
     # =========================================================================
     # KPI 1 & 2: Portfolio by Unit & Margin by Unit
@@ -130,6 +144,7 @@ async def get_celso_kpis(
     
     unit_values = {u: Decimal("0.00") for u in units}
     unit_costs = {u: Decimal("0.00") for u in units}
+    unit_net_profits = {u: Decimal("0.00") for u in units}
 
     from backend.models import ClientPreference
     client_prefs = {
@@ -149,19 +164,22 @@ async def get_celso_kpis(
             unit = "Site"
 
         
-        # Calculate PO total value
+        # Calculate PO total value & net profit
         po_val = Decimal("0.00")
         po_cost = Decimal("0.00")
+        po_net_profit = Decimal("0.00")
         for item in po.items:
-            val, cost = get_item_financials(item)
+            val, cost, net_profit = get_item_financials(item)
             po_val += val
             po_cost += cost
+            po_net_profit += net_profit
             
         # Use po_total_value if available, otherwise sum of items
         final_po_val = Decimal(str(po.po_total_value)) if po.po_total_value is not None else po_val
         
         unit_values[unit] += final_po_val
         unit_costs[unit] += po_cost
+        unit_net_profits[unit] += po_net_profit
 
     # Populating KPI 1 response
     for u in units:
@@ -177,11 +195,10 @@ async def get_celso_kpis(
             }
         else:
             val = unit_values[u]
-            cost = unit_costs[u]
-            margin_abs = val - cost
-            margin_pct = (margin_abs / val * 100) if val > 0 else Decimal("0.00")
+            net_profit = unit_net_profits[u]
+            margin_pct = (net_profit / val * 100) if val > 0 else Decimal("0.00")
             margin_by_unit[u] = {
-                "total_margin": round(float(margin_abs), 2),
+                "total_margin": round(float(net_profit), 2),
                 "margin_percentage": round(float(margin_pct), 2)
             }
 

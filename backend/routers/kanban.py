@@ -299,23 +299,44 @@ def log_po_status_transition(
 
 
 def calculate_po_metrics(po: PurchaseOrder) -> dict:
-    """Calculate metrics for a Purchase Order"""
+    """Calculate metrics for a Purchase Order with dynamic ICMS and Net Profit margin"""
     total_value = Decimal("0.00")
     total_cost = Decimal("0.00")
+    total_taxes = Decimal("0.00")
+    total_commission = Decimal("0.00")
     
     for item in po.items:
-        item_total = Decimal(str(item.price)) * item.quantity
+        qty = Decimal(str(item.quantity or 0.0))
+        price = Decimal(str(item.price or 0.0))
+        item_total = price * qty
         total_value += item_total
-        # Assuming 70% cost ratio if no cost data available
-        total_cost += item_total * Decimal("0.70")
+        
+        extra = item.extra_metadata or {}
+        unit_cost = Decimal(str(extra.get("total_cost") or extra.get("cost_mp") or 0.0))
+        item_cost = (unit_cost * qty) if unit_cost > 0 else (item_total * Decimal("0.70"))
+        total_cost += item_cost
+        
+        icms_rate = Decimal(str(
+            extra.get("icms_rate") or 
+            extra.get("icms_percent") or 
+            extra.get("% ICMS") or 
+            0.0
+        ))
+        total_tax_rate = Decimal("9.25") + icms_rate
+        item_taxes = item_total * (total_tax_rate / Decimal("100"))
+        item_commission = item_total * Decimal("0.025")
+        
+        total_taxes += item_taxes
+        total_commission += item_commission
     
-    margin_global = total_value - total_cost
-    margin_percentage = (margin_global / total_value * 100) if total_value > 0 else Decimal("0.00")
+    net_revenue = total_value - total_taxes - total_commission
+    net_profit = net_revenue - total_cost
+    margin_percentage = (net_profit / total_value * Decimal("100")) if total_value > 0 else Decimal("0.00")
     
     return {
         "total_value": total_value,
-        "margin_global": margin_global,
-        "margin_percentage": margin_percentage
+        "margin_global": net_profit,
+        "margin_percentage": margin_percentage.quantize(Decimal("0.01"))
     }
 
 
