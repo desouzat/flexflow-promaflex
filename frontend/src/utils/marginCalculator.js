@@ -191,7 +191,23 @@ export function calculatePOMargins(po) {
             0;
 
         const itemGross = priceUnit * qty;
-        const days = parsePaymentTermsToDays(item.payment_terms || po.payment_terms || po.extra_metadata?.payment_terms);
+        const paymentTermsStr = 
+            item.payment_terms || 
+            item.extra_metadata?.payment_terms || 
+            item.extra_metadata?.['Cond.Pgto'] || 
+            item.extra_metadata?.['Cond. Pgto'] || 
+            item.extra_metadata?.['Cond.Pagto'] || 
+            item.extra_metadata?.['Condição de Pagamento'] || 
+            po.payment_terms || 
+            po.extra_metadata?.payment_terms || 
+            po.extra_metadata?.['Cond.Pgto'] || 
+            po.extra_metadata?.['Cond. Pgto'] || 
+            po.extra_metadata?.['Cond.Pagto'] || 
+            po.extra_metadata?.['Condição de Pagamento'] || 
+            po.partition_metadata?.payment_terms || 
+            po.partition_metadata?.['Cond.Pgto'];
+
+        const days = parsePaymentTermsToDays(paymentTermsStr);
         
         const vpFactor = Math.pow(1.025, days / 30);
         const itemVP = itemGross / vpFactor;

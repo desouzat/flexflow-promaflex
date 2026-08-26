@@ -104,12 +104,32 @@ async def get_celso_kpis(
         mc.sku: mc for mc in db.query(MaterialCost).filter(MaterialCost.tenant_id == tenant_id).all()
     }
 
-    # Helper to calculate individual item cost, value, and net profit
-    def get_item_financials(item: OrderItem):
+    # Helper to calculate individual item cost, value, and net profit with VP factor
+    def get_item_financials(item: OrderItem, po: PurchaseOrder = None):
         price = Decimal(str(item.price or item.unit_value or 0.0))
         qty = Decimal(str(item.quantity or 0.0))
         item_value = price * qty
         
+        extra = item.extra_metadata or {}
+        part_meta = (po.partition_metadata or {}) if po else {}
+        po_extra = getattr(po, 'extra_metadata', None) or {} if po else {}
+        payment_terms_str = (
+            getattr(item, 'payment_terms', None) or
+            extra.get('payment_terms') or
+            extra.get('Cond.Pgto') or
+            extra.get('Cond. Pgto') or
+            extra.get('Cond.Pagto') or
+            extra.get('Condição de Pagamento') or
+            (getattr(po, 'payment_terms', None) if po else None) or
+            po_extra.get('payment_terms') or
+            po_extra.get('Cond.Pgto') or
+            part_meta.get('payment_terms')
+        )
+        from backend.routers.kanban import parse_payment_terms_to_days
+        payment_days = parse_payment_terms_to_days(payment_terms_str)
+        vp_factor = Decimal(str(pow(1.025, payment_days / 30.0)))
+        item_vp = item_value / vp_factor if vp_factor > 0 else item_value
+
         # Calculate cost
         material = material_costs.get(item.sku)
         if material:
@@ -119,7 +139,6 @@ async def get_celso_kpis(
             # Fallback to 70% cost ratio
             item_cost = item_value * Decimal("0.70")
             
-        extra = item.extra_metadata or {}
         icms_rate = Decimal(str(
             extra.get("icms_rate") or 
             extra.get("icms_percent") or 
@@ -127,10 +146,10 @@ async def get_celso_kpis(
             0.0
         ))
         total_tax_rate = Decimal("9.25") + icms_rate
-        item_taxes = item_value * (total_tax_rate / Decimal("100"))
-        item_commission = item_value * Decimal("0.025")
+        item_taxes = item_vp * (total_tax_rate / Decimal("100"))
+        item_commission = item_vp * Decimal("0.025")
         
-        net_revenue = item_value - item_taxes - item_commission
+        net_revenue = item_vp - item_taxes - item_commission
         net_profit = net_revenue - item_cost
 
         return item_value, item_cost, net_profit

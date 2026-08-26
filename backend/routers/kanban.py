@@ -298,9 +298,23 @@ def log_po_status_transition(
         db.add(audit_entry)
 
 
+def parse_payment_terms_to_days(terms) -> float:
+    if not terms:
+        return 0.0
+    t = str(terms).lower().strip()
+    if any(k in t for k in ['à vista', 'a vista', 'imediato', 'cash', '0 dias']):
+        return 0.0
+    import re
+    numbers = [float(n) for n in re.findall(r'\d+', t)]
+    if not numbers:
+        return 0.0
+    return sum(numbers) / len(numbers)
+
+
 def calculate_po_metrics(po: PurchaseOrder) -> dict:
-    """Calculate metrics for a Purchase Order with dynamic ICMS and Net Profit margin"""
+    """Calculate metrics for a Purchase Order with VP discount and dynamic ICMS margin"""
     total_value = Decimal("0.00")
+    total_vp = Decimal("0.00")
     total_cost = Decimal("0.00")
     total_taxes = Decimal("0.00")
     total_commission = Decimal("0.00")
@@ -312,6 +326,29 @@ def calculate_po_metrics(po: PurchaseOrder) -> dict:
         total_value += item_total
         
         extra = item.extra_metadata or {}
+        part_meta = po.partition_metadata or {}
+        po_extra = getattr(po, 'extra_metadata', None) or {}
+
+        payment_terms_str = (
+            getattr(item, 'payment_terms', None) or
+            extra.get('payment_terms') or
+            extra.get('Cond.Pgto') or
+            extra.get('Cond. Pgto') or
+            extra.get('Cond.Pagto') or
+            extra.get('Condição de Pagamento') or
+            getattr(po, 'payment_terms', None) or
+            po_extra.get('payment_terms') or
+            po_extra.get('Cond.Pgto') or
+            po_extra.get('Cond. Pgto') or
+            po_extra.get('Cond.Pagto') or
+            part_meta.get('payment_terms') or
+            part_meta.get('Cond.Pgto')
+        )
+        payment_days = parse_payment_terms_to_days(payment_terms_str)
+        vp_factor = Decimal(str(pow(1.025, payment_days / 30.0)))
+        item_vp = item_total / vp_factor if vp_factor > 0 else item_total
+        total_vp += item_vp
+
         unit_cost = Decimal(str(extra.get("total_cost") or extra.get("cost_mp") or 0.0))
         item_cost = (unit_cost * qty) if unit_cost > 0 else (item_total * Decimal("0.70"))
         total_cost += item_cost
@@ -323,19 +360,19 @@ def calculate_po_metrics(po: PurchaseOrder) -> dict:
             0.0
         ))
         total_tax_rate = Decimal("9.25") + icms_rate
-        item_taxes = item_total * (total_tax_rate / Decimal("100"))
-        item_commission = item_total * Decimal("0.025")
+        item_taxes = item_vp * (total_tax_rate / Decimal("100"))
+        item_commission = item_vp * Decimal("0.025")
         
         total_taxes += item_taxes
         total_commission += item_commission
     
-    net_revenue = total_value - total_taxes - total_commission
+    net_revenue = total_vp - total_taxes - total_commission
     net_profit = net_revenue - total_cost
     margin_percentage = (net_profit / total_value * Decimal("100")) if total_value > 0 else Decimal("0.00")
     
     return {
         "total_value": total_value,
-        "margin_global": net_profit,
+        "margin_global": net_profit.quantize(Decimal("0.01")),
         "margin_percentage": margin_percentage.quantize(Decimal("0.01"))
     }
 
