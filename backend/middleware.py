@@ -400,7 +400,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
     
     def _extract_token(self, request: Request) -> Optional[str]:
         """
-        Extract JWT token from Authorization header.
+        Extract JWT token from Authorization header safely.
         Expected format: "Bearer <token>"
         """
         auth_header = request.headers.get("Authorization")
@@ -408,28 +408,30 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         if not auth_header:
             return None
         
-        parts = auth_header.split()
+        # Use split with maxsplit=1 to guarantee maximum 2 parts
+        parts = auth_header.strip().split(None, 1)
         
         if len(parts) != 2 or parts[0].lower() != "bearer":
             return None
         
-        return parts[1]
+        return parts[1].strip()
     
     def _get_client_ip(self, request: Request) -> str:
         """
-        Extract client IP address from request.
+        Extract client IP address from request safely.
         Checks X-Forwarded-For header first (for proxies), then falls back to client.host
         """
         # Check X-Forwarded-For header (for requests through proxies/load balancers)
         forwarded_for = request.headers.get("X-Forwarded-For")
         if forwarded_for:
             # X-Forwarded-For can contain multiple IPs, take the first one
-            return forwarded_for.split(",")[0].strip()
+            parts = forwarded_for.split(",", 1)
+            return parts[0].strip() if parts else "unknown"
         
         # Check X-Real-IP header
         real_ip = request.headers.get("X-Real-IP")
         if real_ip:
-            return real_ip
+            return real_ip.strip()
         
         # Fall back to direct client IP
         if request.client:
