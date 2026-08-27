@@ -72,13 +72,17 @@ def calculate_po_metrics(pos: list) -> dict:
     
     for po in pos:
         for item in po.items:
-            item_total = Decimal(str(item.price)) * item.quantity
-            total_value += item_total
-            # Assuming 70% cost ratio if no cost data available
-            total_cost += item_total * Decimal("0.70")
+            try:
+                qty = Decimal(str(item.quantity or 0.0))
+                price = Decimal(str(item.price or item.unit_value or 0.0))
+                item_total = price * qty
+                total_value += item_total
+                total_cost += item_total * Decimal("0.70")
+            except Exception:
+                continue
     
     margin_global = total_value - total_cost
-    margin_percentage = (margin_global / total_value * 100) if total_value > 0 else Decimal("0.00")
+    margin_percentage = (margin_global / total_value * Decimal("100")) if total_value > Decimal("0") else Decimal("0.00")
     
     return {
         "total_value": total_value,

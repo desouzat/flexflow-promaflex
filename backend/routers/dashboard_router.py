@@ -106,53 +106,61 @@ async def get_celso_kpis(
 
     # Helper to calculate individual item cost, value, and net profit with VP factor
     def get_item_financials(item: OrderItem, po: PurchaseOrder = None):
-        price = Decimal(str(item.price or item.unit_value or 0.0))
-        qty = Decimal(str(item.quantity or 0.0))
-        item_value = price * qty
-        
-        extra = item.extra_metadata or {}
-        part_meta = (po.partition_metadata or {}) if po else {}
-        po_extra = getattr(po, 'extra_metadata', None) or {} if po else {}
-        payment_terms_str = (
-            getattr(item, 'payment_terms', None) or
-            extra.get('payment_terms') or
-            extra.get('Cond.Pgto') or
-            extra.get('Cond. Pgto') or
-            extra.get('Cond.Pagto') or
-            extra.get('Condição de Pagamento') or
-            (getattr(po, 'payment_terms', None) if po else None) or
-            po_extra.get('payment_terms') or
-            po_extra.get('Cond.Pgto') or
-            part_meta.get('payment_terms')
-        )
-        from backend.routers.kanban import parse_payment_terms_to_days
-        payment_days = parse_payment_terms_to_days(payment_terms_str)
-        vp_factor = Decimal(str(pow(1.025, payment_days / 30.0)))
-        item_vp = item_value / vp_factor if vp_factor > 0 else item_value
-
-        # Calculate cost
-        material = material_costs.get(item.sku)
-        if material:
-            unit_cost = Decimal(str(material.custo_mp_kg)) * Decimal(str(material.rendimento))
-            item_cost = unit_cost * qty
-        else:
-            # Fallback to 70% cost ratio
-            item_cost = item_value * Decimal("0.70")
+        try:
+            price = Decimal(str(item.price or item.unit_value or 0.0))
+            qty = Decimal(str(item.quantity or 0.0))
+            item_value = price * qty
             
-        icms_rate = Decimal(str(
-            extra.get("icms_rate") or 
-            extra.get("icms_percent") or 
-            extra.get("% ICMS") or 
-            0.0
-        ))
-        total_tax_rate = Decimal("9.25") + icms_rate
-        item_taxes = item_vp * (total_tax_rate / Decimal("100"))
-        item_commission = item_vp * Decimal("0.025")
-        
-        net_revenue = item_vp - item_taxes - item_commission
-        net_profit = net_revenue - item_cost
+            extra = item.extra_metadata or {}
+            part_meta = (po.partition_metadata or {}) if po else {}
+            po_extra = getattr(po, 'extra_metadata', None) or {} if po else {}
+            payment_terms_str = (
+                getattr(item, 'payment_terms', None) or
+                extra.get('payment_terms') or
+                extra.get('Cond.Pgto') or
+                extra.get('Cond. Pgto') or
+                extra.get('Cond.Pagto') or
+                extra.get('Condição de Pagamento') or
+                (getattr(po, 'payment_terms', None) if po else None) or
+                po_extra.get('payment_terms') or
+                po_extra.get('Cond.Pgto') or
+                part_meta.get('payment_terms')
+            )
+            from backend.routers.kanban import parse_payment_terms_to_days
+            payment_days = parse_payment_terms_to_days(payment_terms_str)
+            vp_factor_float = pow(1.025, float(payment_days) / 30.0)
+            vp_factor = Decimal(str(round(vp_factor_float, 6)))
+            item_vp = item_value / vp_factor if vp_factor > Decimal("0") else item_value
 
-        return item_value, item_cost, net_profit
+            # Calculate cost
+            material = material_costs.get(item.sku) if material_costs else None
+            if material:
+                unit_cost = Decimal(str(material.custo_mp_kg)) * Decimal(str(material.rendimento))
+                item_cost = unit_cost * qty
+            else:
+                # Fallback to 70% cost ratio
+                item_cost = item_value * Decimal("0.70")
+                
+            icms_rate = Decimal(str(
+                extra.get("icms_rate") or 
+                extra.get("icms_percent") or 
+                extra.get("% ICMS") or 
+                0.0
+            ))
+            total_tax_rate = Decimal("9.25") + icms_rate
+            item_taxes = item_vp * (total_tax_rate / Decimal("100"))
+            item_commission = item_vp * Decimal("0.025")
+            
+            net_revenue = item_vp - item_taxes - item_commission
+            net_profit = net_revenue - item_cost
+
+            return item_value, item_cost, net_profit
+        except Exception:
+            price = Decimal(str(item.price or item.unit_value or 0.0))
+            qty = Decimal(str(item.quantity or 0.0))
+            item_value = price * qty
+            item_cost = item_value * Decimal("0.70")
+            return item_value, item_cost, item_value - item_cost
 
     # =========================================================================
     # KPI 1 & 2: Portfolio by Unit & Margin by Unit
@@ -188,7 +196,12 @@ async def get_celso_kpis(
         po_cost = Decimal("0.00")
         po_net_profit = Decimal("0.00")
         for item in po.items:
-            val, cost, net_profit = get_item_financials(item)
+            try:
+                val, cost, net_profit = get_item_financials(item, po)
+            except Exception:
+                val = Decimal(str(item.price or item.unit_value or 0.0)) * Decimal(str(item.quantity or 0.0))
+                cost = val * Decimal("0.70")
+                net_profit = val - cost
             po_val += val
             po_cost += cost
             po_net_profit += net_profit

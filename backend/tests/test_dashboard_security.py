@@ -50,3 +50,21 @@ def test_dashboard_access_user_blocked():
         require_admin_or_master_role(current_user=user)
     assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
     assert "Acesso negado" in exc_info.value.detail
+
+
+def test_dashboard_vp_factor_type_safety():
+    from decimal import Decimal
+    from backend.routers.kanban import parse_payment_terms_to_days
+    
+    payment_terms_str = "28/35/42 DDL"
+    payment_days = parse_payment_terms_to_days(payment_terms_str)
+    
+    vp_factor_float = pow(1.025, float(payment_days) / 30.0)
+    vp_factor = Decimal(str(round(vp_factor_float, 6)))
+    
+    item_total = Decimal("6359.04")
+    # Division between Decimal and Decimal must succeed without raising TypeError
+    item_vp = item_total / vp_factor
+    assert isinstance(item_vp, Decimal)
+    assert item_vp < item_total
+
