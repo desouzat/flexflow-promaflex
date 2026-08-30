@@ -1,6 +1,6 @@
 /**
  * FlexFlow - Dynamic Margin Engine
- * Celso's Formula and Payment Term Parsers
+ * Celso's Formula, Unit-Aware Cost Calculation Engine, and Payment Term Parsers
  */
 
 /**
@@ -36,6 +36,105 @@ export function parsePaymentTermsToDays(terms) {
     // Return average of all installments (e.g. "30/60/90" -> 60)
     const averageDays = days.reduce((sum, val) => sum + val, 0) / days.length;
     return parseFloat(averageDays.toFixed(4));
+}
+
+/**
+ * Unit-Aware Cost Calculation Engine
+ * Calculates item total cost strictly respecting item unit of measurement (M2, KG, RL, UN).
+ * 
+ * Rules:
+ * - KG: cost = qty_kg * (cost_m2 * yield_m2_per_kg)
+ * - M2: cost = qty_m2 * cost_m2
+ * - RL / UN: total_m2 = (width_m * length_m * qty), cost = total_m2 * cost_m2
+ * - Fallback: cost = qty * cost_m2
+ * 
+ * @param {object} item - Item object
+ * @param {object} [material] - Optional MaterialCost object
+ * @returns {number} Total cost for the item
+ */
+export function calculateUnitAwareItemCost(item, material = null) {
+    if (!item) return 0;
+
+    const mat = material || item.material || item.material_cost || item.extra_metadata?.material || {};
+    const costPerM2 = parseFloat(
+        mat.custo_mp_kg ?? 
+        item.custo_mp_kg ?? 
+        item.cost_mp ?? 
+        item.extra_metadata?.custo_mp_kg ?? 
+        item.extra_metadata?.cost_mp ?? 
+        0
+    ) || 0;
+    
+    const yieldValue = parseFloat(
+        mat.rendimento ?? 
+        item.rendimento ?? 
+        item.extra_metadata?.rendimento ?? 
+        1
+    ) || 1;
+
+    const unit = (
+        item.unidade_medida ||
+        item.unit ||
+        item.extra_metadata?.unidade_medida ||
+        item.extra_metadata?.unit ||
+        item.extra_metadata?.['Un. Med.'] ||
+        item.extra_metadata?.['Unidade'] ||
+        'M2'
+    ).toString().toUpperCase().trim();
+
+    const qty = parseFloat(
+        item.quantity ?? 
+        item.qty ?? 
+        item.quantidade ?? 
+        item.extra_metadata?.quantity ?? 
+        item.extra_metadata?.quantidade ?? 
+        0
+    ) || 0;
+
+    if (costPerM2 <= 0) {
+        const fallbackCost = parseFloat(
+            item.total_cost ?? 
+            item.cost_mp ?? 
+            item.extra_metadata?.total_cost ?? 
+            item.extra_metadata?.cost_mp ?? 
+            0
+        ) || 0;
+        if (fallbackCost > 0) return fallbackCost * qty;
+        return 0;
+    }
+
+    if (unit === 'KG') {
+        // For KG orders: cost = qty_kg * (cost_m2 * yield_m2_per_kg)
+        const costPerKg = costPerM2 * yieldValue;
+        return qty * costPerKg;
+    } else if (unit === 'M2') {
+        // For M2 orders: cost = qty_m2 * cost_m2
+        return qty * costPerM2;
+    } else if (unit === 'RL' || unit === 'UN') {
+        // For Rolls/Units: calculate total m2 area = (width_mm / 1000) * length_m * qty
+        const widthMm = parseFloat(
+            item.width ?? 
+            item.largura ?? 
+            item.extra_metadata?.width ?? 
+            item.extra_metadata?.largura ?? 
+            item.extra_metadata?.['Largura (mm)'] ?? 
+            0
+        ) || 0;
+        const lengthM = parseFloat(
+            item.length ?? 
+            item.comprimento ?? 
+            item.extra_metadata?.length ?? 
+            item.extra_metadata?.comprimento ?? 
+            item.extra_metadata?.['Comprimento (m)'] ?? 
+            0
+        ) || 0;
+        const widthM = widthMm / 1000.0;
+        const totalAreaM2 = (widthM > 0 && lengthM > 0) ? (widthM * lengthM * qty) : qty;
+        return totalAreaM2 * costPerM2;
+    } else {
+        // Fallback: cost = qty * cost_m2
+        return qty * costPerM2;
+    }
 }
 
 /**
@@ -103,11 +202,6 @@ export function calculateDynamicMargin({
     const marginRatio = parseFloat((netProfit / revenueBase).toFixed(6));
     const marginPercentage = parseFloat((marginRatio * 100).toFixed(2));
 
-    // Badge styling thresholds:
-    // Red (< 10% or negative)
-    // Orange (< 19%)
-    // Yellow (< 30%)
-    // Green (>= 30%)
     let badgeColor = 'green';
     if (marginPercentage < 10) {
         badgeColor = 'red';
@@ -169,19 +263,25 @@ export function calculatePOMargins(po) {
 
     // Sum up items
     po.items.forEach(item => {
-        const qty = parseFloat(item.quantity) || 0;
+        const qty = parseFloat(item.quantity ?? item.qty ?? item.quantidade) || 0;
         if (qty <= 0) return;
 
-        // Try standard fields or fallback to extra_metadata
-        const unitCost = 
-            parseFloat(item.total_cost) || 
-            parseFloat(item.cost_mp) || 
-            parseFloat(item.extra_metadata?.total_cost) || 
-            parseFloat(item.extra_metadata?.cost_mp) || 
-            0;
+        // Calculate item total cost using unit-aware calculation engine
+        let itemTotalCost = calculateUnitAwareItemCost(item);
 
-        if (unitCost <= 0) {
-            hasPendingCost = true;
+        if (itemTotalCost <= 0) {
+            // Check legacy cost_mp fallback
+            const legacyUnitCost = 
+                parseFloat(item.total_cost) || 
+                parseFloat(item.cost_mp) || 
+                parseFloat(item.extra_metadata?.total_cost) || 
+                parseFloat(item.extra_metadata?.cost_mp) || 
+                0;
+            if (legacyUnitCost > 0) {
+                itemTotalCost = legacyUnitCost * qty;
+            } else {
+                hasPendingCost = true;
+            }
         }
 
         const priceUnit = 
@@ -241,7 +341,7 @@ export function calculatePOMargins(po) {
         totalTaxes += itemTaxes;
         totalCommission += itemCommission;
         totalFreight += itemFreight;
-        totalCosts += (unitCost * qty);
+        totalCosts += itemTotalCost;
         weightedIcmsSum += (rawIcmsRate * itemGross);
     });
 

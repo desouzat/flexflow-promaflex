@@ -102,6 +102,78 @@ STATUS_FLOW = {
 }
 
 
+def calculate_unit_aware_item_cost(item: Any, material: Optional[MaterialCost] = None) -> tuple[Decimal, Decimal]:
+    """
+    Calculates unit-aware total cost and per-unit cost for an OrderItem based on material and unit of measurement.
+    
+    Rules:
+    - KG: cost = qty_kg * (cost_m2 * yield_m2_per_kg)
+    - M2: cost = qty_m2 * cost_m2
+    - RL / UN: total_m2 = (width_m * length_m * qty), cost = total_m2 * cost_m2
+    - Fallback: cost = qty * cost_m2
+    
+    Returns: (total_item_cost: Decimal, unit_cost: Decimal)
+    """
+    cost_per_m2 = Decimal("0.00")
+    yield_val = Decimal("1.00")
+    
+    if material:
+        cost_per_m2 = Decimal(str(getattr(material, 'custo_mp_kg', 0.0) or 0.0))
+        yield_val = Decimal(str(getattr(material, 'rendimento', 1.0) or 1.0))
+    elif isinstance(item, dict):
+        cost_per_m2 = Decimal(str(item.get('custo_mp_kg') or item.get('cost_mp') or 0.0))
+        yield_val = Decimal(str(item.get('rendimento') or 1.0))
+    else:
+        extra_mat = (getattr(item, 'extra_metadata', None) or {})
+        cost_per_m2 = Decimal(str(extra_mat.get('custo_mp_kg') or extra_mat.get('cost_mp') or getattr(item, 'custo_mp_kg', 0.0) or 0.0))
+        yield_val = Decimal(str(extra_mat.get('rendimento') or getattr(item, 'rendimento', 1.0) or 1.0))
+        
+    if yield_val <= Decimal("0"):
+        yield_val = Decimal("1.00")
+        
+    extra = (item.extra_metadata if hasattr(item, 'extra_metadata') else (item if isinstance(item, dict) else {})) or {}
+    
+    unit_str = str(
+        getattr(item, 'unidade_medida', None) or 
+        extra.get('unidade_medida') or 
+        extra.get('unit') or 
+        extra.get('Un. Med.') or 
+        extra.get('Unidade') or 
+        'M2'
+    ).upper().strip()
+    
+    qty = Decimal(str(getattr(item, 'quantity', None) or extra.get('quantity') or extra.get('quantidade') or 0.0))
+    
+    if cost_per_m2 <= Decimal("0"):
+        fallback_cost = Decimal(str(extra.get("total_cost") or extra.get("cost_mp") or 0.0))
+        if fallback_cost > Decimal("0"):
+            return fallback_cost * qty, fallback_cost
+        return Decimal("0.00"), Decimal("0.00")
+
+    if unit_str == 'KG':
+        cost_per_kg = cost_per_m2 * yield_val
+        total_cost = qty * cost_per_kg
+        unit_cost = cost_per_kg
+    elif unit_str == 'M2':
+        total_cost = qty * cost_per_m2
+        unit_cost = cost_per_m2
+    elif unit_str in ('RL', 'UN'):
+        width_mm = Decimal(str(getattr(item, 'width', None) or extra.get('width') or extra.get('largura') or extra.get('Largura (mm)') or 0.0))
+        length_m = Decimal(str(getattr(item, 'length', None) or extra.get('length') or extra.get('comprimento') or extra.get('Comprimento (m)') or 0.0))
+        width_m = width_mm / Decimal("1000.0")
+        if width_m > Decimal("0") and length_m > Decimal("0"):
+            total_area_m2 = width_m * length_m * qty
+        else:
+            total_area_m2 = qty
+        total_cost = total_area_m2 * cost_per_m2
+        unit_cost = total_cost / qty if qty > Decimal("0") else cost_per_m2
+    else:
+        total_cost = qty * cost_per_m2
+        unit_cost = cost_per_m2
+
+    return total_cost, unit_cost
+
+
 def _map_single_po(
     po: PurchaseOrder, 
     db: Session, 
@@ -128,13 +200,18 @@ def _map_single_po(
         unit_cost = Decimal("0.00")
         cost_meta = {}
         if material:
-            unit_cost = Decimal(str(material.custo_mp_kg)) * Decimal(str(material.rendimento))
+            total_item_cost, unit_cost = calculate_unit_aware_item_cost(item, material)
             cost_meta = {
                 "total_cost": float(unit_cost),
                 "cost_mp": float(unit_cost),
+                "item_total_cost": float(total_item_cost),
+                "custo_mp_kg": float(material.custo_mp_kg),
+                "rendimento": float(material.rendimento),
                 "cost_updated_by": material.updated_by_user.name if material.updated_by_user else "Sistema",
                 "cost_updated_at": material.updated_at.isoformat() if material.updated_at else None
             }
+        else:
+            total_item_cost, unit_cost = calculate_unit_aware_item_cost(item)
         
         item_extra = dict(item.extra_metadata or {})
         if cost_meta:
@@ -349,8 +426,13 @@ def calculate_po_metrics(po: PurchaseOrder) -> dict:
         item_vp = item_total / vp_factor if vp_factor > 0 else item_total
         total_vp += item_vp
 
-        unit_cost = Decimal(str(extra.get("total_cost") or extra.get("cost_mp") or 0.0))
-        item_cost = (unit_cost * qty) if unit_cost > 0 else (item_total * Decimal("0.70"))
+        item_cost, _ = calculate_unit_aware_item_cost(item)
+        if item_cost <= Decimal("0"):
+            unit_cost = Decimal(str(extra.get("total_cost") or extra.get("cost_mp") or 0.0))
+            if unit_cost > Decimal("0"):
+                item_cost = unit_cost * qty
+            else:
+                item_cost = item_total * Decimal("0.70")
         total_cost += item_cost
         
         icms_rate = Decimal(str(

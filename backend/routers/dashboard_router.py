@@ -136,12 +136,11 @@ async def get_celso_kpis(
                 vp_factor = Decimal(str(round(vp_factor_float, 6)))
                 item_vp = item_value / vp_factor if vp_factor > Decimal("0") else item_value
 
-                # Calculate cost
+                # Calculate cost using unit-aware calculation engine
+                from backend.routers.kanban import calculate_unit_aware_item_cost
                 material = material_costs.get(item.sku) if material_costs else None
-                if material:
-                    unit_cost = Decimal(str(material.custo_mp_kg)) * Decimal(str(material.rendimento))
-                    item_cost = unit_cost * qty
-                else:
+                item_cost, _ = calculate_unit_aware_item_cost(item, material)
+                if item_cost <= Decimal("0"):
                     # Fallback to 70% cost ratio
                     item_cost = item_value * Decimal("0.70")
                     
