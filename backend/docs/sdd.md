@@ -1,7 +1,7 @@
 # FlexFlow — System Design Document (SDD)
 
 > **Maintained by:** Engineering team  
-> **Last updated:** 2026-07-01  
+> **Last updated:** 2026-09-23  
 > **Rule 3.1 compliance:** All architectural changes must be reflected here before merging to production.
 
 ---
@@ -31,13 +31,20 @@ FlexFlow is a multi-tenant, SaaS Kanban-based production-order (PO) management s
 |---|---|
 | `purchase_orders` | PO header — one row per PO |
 | `order_items` | Line items — FK to `purchase_orders` |
+| `staging_sessions` | Staging preview state — JSONB auto-saved staging drafts |
+| `material_costs` | Reference material unit costs (m²/kg, yield) by SKU |
 | `audit_logs` | Immutable blockchain-hash chained audit trail |
 | `handoff_history` | Stage transition records |
 | `client_preferences` | Persisted client → business_unit preference memory |
 
-### 2.2 JSONB Columns
+### 2.2 JSONB Columns & Staging Sessions
 
-Two JSONB columns carry all metadata not modelled as explicit columns:
+Three JSONB structures carry all transient and non-relational metadata:
+
+#### `staging_sessions.data` & `session_metadata`
+Stores live preview sessions for Mesa de Conferência imports:
+- **Auto-Save Debounce:** Frontend changes to staging rows trigger a 300ms debounced auto-save to `POST /api/import/staging-session`.
+- **Concurrent Safety:** Each session uses a unique `session_id` and timestamped heartbeats to prevent multi-user overwrites.
 
 #### `purchase_orders.partition_metadata`
 Contains PO-level fields:
@@ -138,6 +145,12 @@ Prior to this change, `BILLING` and `SHIPPING` were combined into a single "Fatu
 - **Faturamento (BILLING):** Collects NF-e number, Transportadora, NF-e emission date, and at least one invoice PDF/XML attachment. The "Avançar para Expedição" button requires `isBillingDocReady()` → at least one of `invoice_pdf_path` or `invoice_pdf_path_2` populated.
 - **Expedição (SHIPPING):** Collects logistics photos (truck load + canhoto), checklist (endereço conferido, peso validado, etiquetas impressas). Advancing to `WAITING_DISPATCH` / `COMPLETED` requires all checklist items checked.
 
+### 3.4 Performance Bulk Loading & Hygiene Filter
+
+To eliminate N+1 query bottlenecks on `GET /api/kanban/board`:
+- **Bulk Relationship Preloading:** Eagerly loads `po.items` using SQLAlchemy `selectinload`/`joinedload`.
+- **Concluded Cards Hygiene Filter:** Concluded/Archived cards (`COMPLETED`, `ARCHIVED`, `CANCELLED`) updated more than 3 days ago are automatically filtered out from active board payloads, keeping active payload response times under 50ms while preserving recent completed cards.
+
 ---
 
 ## 4. ONET Final Production Excel Schema (2026-07-01)
@@ -187,6 +200,7 @@ FlexFlow uses RS256-signed JWTs issued by Supabase. User roles are read from `to
 | `master` | Full access, Settings, User Management |
 | `admin` | Full Kanban, Import, Reports, Settings read |
 | `operator` | Kanban only (limited stages) |
+| `user` | Salesperson view (restricted to own sales orders) |
 
 ### 5.2 `is_sla_manager` Field
 
@@ -195,17 +209,16 @@ A new claim `is_sla_manager` can be embedded in the JWT `app_metadata` to grant 
 - Override SLA justification categories
 - Access the SLA management panel in Settings
 
-**JWT delegation logic:**
-```python
-# backend/auth.py (UserInfo)
-is_sla_manager: bool = Field(
-    default=False,
-    description="Grants SLA visibility to non-admin users. "
-                "Set via Supabase app_metadata.is_sla_manager = true."
-)
-```
+### 5.3 Role-Based Separation of Duties (SoD) in Sales Filtering
 
-The frontend checks `user?.is_sla_manager` (from `/api/auth/me` response) to conditionally render SLA-manager-only UI elements without requiring a full `admin` role.
+Implemented in `backend/utils/salesperson_filter.py`:
+- **`user` Role:** Strictly restricted to filtering and viewing sales orders where `extra_metadata.salesperson` matches the user's name/email.
+- **`operator`, `admin`, `master` Roles:** Bypass salesperson restrictions to manage all orders across the pipeline.
+
+### 5.4 Endpoint Security Gating
+
+- **`/import` Endpoints:** Restricted to `comercial@promaflex.com.br` or users with `admin` / `master` roles.
+- **`/dashboard` & KPI Endpoints:** Restricted strictly to `admin` / `master` roles.
 
 ---
 
@@ -225,6 +238,7 @@ POST /api/import/upload
     
 Mesa de Conferência UI (ImportPage.jsx)
     │  operator reviews, checks items, sets flags
+    │  auto-saves draft to staging_sessions (300ms debounce)
     ▼
 POST /api/import/confirm-staging
     │  → import_router.confirm_staging()
@@ -236,33 +250,48 @@ POST /api/import/confirm-staging
 PostgreSQL (flexflow_prod)
 ```
 
-### 6.1 Auto-Mapping
-
-The frontend sends a hardcoded `defaultMapping` array on every upload (no operator intervention needed for standard ONET files). The array is updated to reflect the final production schema.
-
-### 6.2 Multi-PO Support
-
-A single Excel file can contain multiple POs (grouped by `Nº do Pedido`). The parser returns `po_data_list` (a list of `ImportPOData` objects). The frontend renders each PO independently in the staging review.
-
 ---
 
-## 7. Invoice & Logistics File Upload
+## 7. Unit-Aware Material Cost & Financial Margin Engine
 
-All file uploads use the **Callback Ref + Native Event Listener** pattern (not React synthetic `onChange`) to guarantee correct firing in all browsers:
+Financial metrics are calculated in `frontend/src/utils/marginCalculator.js` and `backend/routers/kanban.py` via `calculate_unit_aware_item_cost`:
 
-```jsx
-<input
-  type="file"
-  ref={(node) => {
-    if (node) {
-      node.onchange = (e) => { /* handle upload */ };
-    }
-  }}
-  style={{ display: 'none' }}
-/>
-```
+### 7.1 Tax Burden & Present Value (VP) Discounting
 
-Files are uploaded to GCS via `POST /api/kanban/pos/{po_id}/upload-invoice-pdf`. The GCS path is stored in `partition_metadata` with `flag_modified(po, "partition_metadata")` called before `db.commit()` to guarantee PostgreSQL JSONB mutation detection.
+- **Tax Index Calculation:**
+  $$\text{Tax Rate} = \frac{9.25\% \text{ (PIS/COFINS)} + \text{ICMS \% (from ONET item)}}{100}$$
+  $$\text{Net Revenue} = \text{Gross Revenue} \times (1 - \text{Tax Rate})$$
+
+- **Present Value (VP) Financial Discount:**
+  For orders with deferred payment terms (`Cond.Pgto` / `payment_terms`), revenue is discounted to present value at a rate of 2.5% per 30 days:
+  $$\text{Days} = \text{parse\_payment\_term\_days}(payment\_terms)$$
+  $$\text{VP Net Revenue} = \frac{\text{Net Revenue}}{1 + 0.025 \times (\text{Days} / 30)}$$
+
+### 7.2 Unit-Aware Industrial Cost Engine
+
+Calculates item cost according to the item's unit of measurement (`unidade_medida`):
+
+- **M2 (Square Meters):**
+  $$\text{Total Cost} = \text{Quantity}_{\text{m2}} \times \text{Custo}_{\text{m2}}$$
+
+- **KG (Kilograms):**
+  $$\text{Cost}_{\text{kg}} = \text{Custo}_{\text{m2}} \times \text{Rendimento}_{\text{m2/kg}}$$
+  $$\text{Total Cost} = \text{Quantity}_{\text{kg}} \times \text{Cost}_{\text{kg}}$$
+
+- **RL / UN (Rolls / Units):**
+  $$\text{Width}_{\text{m}} = \frac{\text{Width}_{\text{mm}}}{1000}$$
+  $$\text{Total Area}_{\text{m2}} = \text{Width}_{\text{m}} \times \text{Length}_{\text{m}} \times \text{Quantity}$$
+  $$\text{Total Cost} = \text{Total Area}_{\text{m2}} \times \text{Custo}_{\text{m2}}$$
+
+- **Fallback:**
+  $$\text{Total Cost} = \text{Quantity} \times \text{Custo}_{\text{m2}}$$
+
+### 7.3 Net Profit Margin Calculation
+
+$$\text{Net Profit} = \text{VP Net Revenue} - \text{Total Industrial Cost}$$
+$$\text{Net Profit Margin \%} = \left(\frac{\text{Net Profit}}{\text{Gross Revenue}}\right) \times 100$$
+
+> **Cap:** Net profit margin is capped strictly at $\le 100.0\%$ to prevent mathematical anomalies.
 
 ---
 
@@ -303,6 +332,7 @@ On modal open, `localFields.transportadora` is pre-seeded from `partition_metada
 ### 9.4 ImportPage Mesa de Conferência
 - **Item header:** `codigo_estruturado` rendered as indigo badge under Descrição do Produto.
 - **Date strip:** Expanded from 6 → 7 cells. Seventh cell (blue) shows `Data do Pedido` when present.
+- **Auto-Save:** Draft changes in Mesa de Conferência trigger a 300ms debounced auto-save to `staging_sessions`.
 
 ---
 
