@@ -1,7 +1,7 @@
 # FlexFlow — System Design Document (SDD)
 
 > **Maintained by:** Engineering team  
-> **Last updated:** 2026-09-23  
+> **Last updated:** 2026-09-24  
 > **Rule 3.1 compliance:** All architectural changes must be reflected here before merging to production.
 
 ---
@@ -150,6 +150,13 @@ Prior to this change, `BILLING` and `SHIPPING` were combined into a single "Fatu
 To eliminate N+1 query bottlenecks on `GET /api/kanban/board`:
 - **Bulk Relationship Preloading:** Eagerly loads `po.items` using SQLAlchemy `selectinload`/`joinedload`.
 - **Concluded Cards Hygiene Filter:** Concluded/Archived cards (`COMPLETED`, `ARCHIVED`, `CANCELLED`) updated more than 3 days ago are automatically filtered out from active board payloads, keeping active payload response times under 50ms while preserving recent completed cards.
+
+### 3.5 CR-F4 Alt+Tab Silent Refresh Architecture
+
+In `frontend/src/pages/KanbanPage.jsx`:
+- **Silent Background Fetch:** `fetchBoard(isBackground = true)` bypasses full-screen loading spinners (`setLoading(true/false)`) when triggered by window focus (`handleFocus`), eliminating intrusive spinner flashing and UI lockup when operators Alt+Tab between FlexFlow and ONET ERP.
+- **Silent Catch Guard:** Errors encountered during background focus refresh log a warning to console (`console.warn('[FF-CR-F4] Silent background auto-sync failed gracefully:', err)`) without interrupting operator interaction.
+- **Scroll Position Shield:** Double-buffered frame preservation (`requestAnimationFrame` + `setTimeout(50ms, 150ms)`) locks column scroll positions during background re-renders.
 
 ---
 
@@ -302,7 +309,8 @@ $$\text{Net Profit Margin \%} = \left(\frac{\text{Net Profit}}{\text{Gross Reven
 | `FF-HARDENING-004` | Financial mismatch detection: sum(item_total + IPI) vs. PO total. Operator must explicitly override. Creates immutable audit log. |
 | `FF-HARDENING-006` | SLA justification persistence in `purchase_orders.sla_justification_category` + `sla_justification_text`. |
 | `FF-HARDENING-012.2` | Faturamento stage gate: NF-e number + Transportadora + emission date + at least one invoice PDF required before advancing. |
-| ERP Noise Guard | `clean_brazilian_number()` coerces values `< -9,999,999` to `0.0`. Prevents legacy ONET NULL sentinel crashes. |
+| `CR-F7` | Dynamic financial export in `GET /api/reports/po-export` gated by RBAC/SoD (`role in ['admin', 'master']` OR `area in ['FATURAMENTO', 'FINANCEIRO', 'DIRETORIA']`). Adds 3 currency-formatted columns (`VALOR UNITARIO (R$)`, `VALOR TOTAL ITEM (R$)`, `VALOR TOTAL PEDIDO (R$)`) totaling 29 columns for authorized users, while enforcing 26 baseline columns for non-authorized users. |
+| ERP Noise Guard | `clean_brazilian_number()` & `safe_format_currency()` coerce values `< -9,999,999` to `0.0`. Prevents legacy ONET NULL sentinel crashes. |
 | `NullPool` | Database connection pool strategy — see §2.3. |
 | Startup DDL | `_run_ddl_step()` in `main.py` runs idempotent DDL on startup (e.g. `BILLING` constraint, index creation). |
 

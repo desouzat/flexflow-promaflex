@@ -501,7 +501,7 @@ const KanbanPage = () => {
     const isPOInPCP = selectedPO ? PCP_STATUS_MACROS.includes(selectedPO.status_macro) || selectedPO.status === 'PCP' : false
     const slaJustificationEditable = isUserPrivileged || isPOInPCP
 
-    const fetchBoard = async () => {
+    const fetchBoard = async (isBackground = false) => {
         // Scroll Position Preservation Shield: Capture current scroll positions of all columns before re-fetch
         const savedScrollPositions = {}
         try {
@@ -514,7 +514,7 @@ const KanbanPage = () => {
         } catch (_) {}
 
         try {
-            setLoading(true)
+            if (!isBackground) setLoading(true)
             setError(null)
             const response = await api.get('/kanban/board')
             setBoardData(response.data)
@@ -539,12 +539,16 @@ const KanbanPage = () => {
                 }
             }
         } catch (err) {
-            const errorMsg = err.response?.data?.detail || 'Falha ao carregar o quadro Kanban'
-            setError(errorMsg)
-            showError(errorMsg)
+            if (!isBackground) {
+                const errorMsg = err.response?.data?.detail || 'Falha ao carregar o quadro Kanban'
+                setError(errorMsg)
+                showError(errorMsg)
+            } else {
+                console.warn('[FF-CR-F4] Silent background auto-sync failed gracefully:', err)
+            }
             console.error('Error fetching board:', err)
         } finally {
-            setLoading(false)
+            if (!isBackground) setLoading(false)
             // Restore scroll position after DOM renders
             if (Object.keys(savedScrollPositions).length > 0) {
                 const restoreScrolls = () => {
@@ -753,8 +757,8 @@ const KanbanPage = () => {
                 console.log('[FF-HARDENING-008] focus event skipped — file picker active, suppressing fetchBoard()')
                 return
             }
-            console.log('Window focused, triggering auto-sync...');
-            fetchBoard();
+            console.log('Window focused, triggering silent auto-sync...');
+            fetchBoard(true);
         };
         window.addEventListener('focus', handleFocus);
         return () => {

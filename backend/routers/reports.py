@@ -12,6 +12,7 @@ import csv
 import io
 import json
 import logging
+import math
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
@@ -21,6 +22,18 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, selectinload
 
 logger = logging.getLogger(__name__)
+
+def safe_format_currency(val: any) -> str:
+    """Format numeric value into BRL currency (R$ 1.234,56) with ERP noise guard."""
+    if val is None or val == "":
+        return "R$ 0,00"
+    try:
+        num = float(val)
+        if math.isnan(num) or math.isinf(num) or num < -9999999 or num < 0:
+            num = 0.0
+        return f"R$ {num:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    except Exception:
+        return "R$ 0,00"
 
 def safe_format_date(dt) -> str:
     """Format any date object or date string to dd/mm/yyyy safely."""
@@ -400,6 +413,23 @@ async def export_pos_csv(
     if sp_filter:
         pos = filter_pos_by_salesperson(pos, sp_filter)
 
+    # ── RBAC / SoD Financial Column Authorization Check (CR-F7) ───────────
+    user_role = (getattr(current_user, "role", "") or "").lower()
+    user_area = (getattr(current_user, "area", "") or "").upper()
+    if not user_area and getattr(current_user, "id", None):
+        try:
+            from backend.models import User
+            db_user = db.query(User).filter(User.id == current_user.id).first()
+            if db_user and db_user.area:
+                user_area = db_user.area.upper()
+        except Exception:
+            pass
+
+    is_financial_authorized = (
+        user_role in ["admin", "master"] or
+        user_area in ["FATURAMENTO", "FINANCEIRO", "DIRETORIA"]
+    )
+
     # ── Load SLA config once for the tenant ──────────────────────────────
     sla_config = get_sla_config_from_db(db, current_user.tenant_id)
     sla_limit_h = float(sla_config.get("sla_total_hours", 240))
@@ -414,8 +444,8 @@ async def export_pos_csv(
     output = io.StringIO()
     writer = csv.writer(output, delimiter=";", quoting=csv.QUOTE_MINIMAL)
 
-    # Header row — 25 columns
-    writer.writerow([
+    # Header row — 26 baseline columns + 3 financial columns if authorized (total 29 columns)
+    header_cols = [
         # ── Core PO & Item data ───────────────────────────────────────────
         "Nº PO",
         "CLIENTE",
@@ -427,10 +457,18 @@ async def export_pos_csv(
         "PERSONALIZADO",
         "LARGURA",
         "COMPRIMENTO",
+    ]
+    if is_financial_authorized:
+        header_cols.extend([
+            "VALOR UNITARIO (R$)",
+            "VALOR TOTAL ITEM (R$)",
+            "VALOR TOTAL PEDIDO (R$)",
+        ])
+    header_cols.extend([
         "STATUS PRODUÇÃO",
         "QTD REAL PRODUZIDA",
         "PERDA TÉCNICA",
-        # ── SLA & Audit columns (13 columns, Sponsor-approved — Celso) ──────
+        # ── SLA & Audit columns ───────────────────────────────────────────
         "ETAPA ATUAL",
         "STATUS SLA",
         "HORAS SLA DECORRIDAS",
@@ -445,9 +483,34 @@ async def export_pos_csv(
         "TEMPO PRODUÇÃO (h)",
         "TEMPO FATURAMENTO (h)",
     ])
+    writer.writerow(header_cols)
 
     for po in pos:
         try:
+            # ── Pre-calculate total PO financial value ────────────────────
+            po_total_val = 0.0
+            for it in (po.items or []):
+                it_meta = it.extra_metadata if isinstance(it.extra_metadata, dict) else {}
+                if isinstance(it.extra_metadata, str):
+                    try:
+                        it_meta = json.loads(it.extra_metadata) or {}
+                    except Exception:
+                        it_meta = {}
+                val = (
+                    getattr(it, "item_total_value", None)
+                    or getattr(it, "total_price", None)
+                    or safe_get_field(it_meta, "item_total_value")
+                    or safe_get_field(it_meta, "total_price")
+                    or safe_get_field(it_meta, "valor_total")
+                )
+                if val not in (None, ""):
+                    try:
+                        num = float(val)
+                        if not (math.isnan(num) or math.isinf(num) or num < -9999999 or num < 0):
+                            po_total_val += num
+                    except Exception:
+                        pass
+
             # ── Unpack metadata safely ──────────────────────────────────
             partition_meta = po.partition_metadata if isinstance(po.partition_metadata, dict) else {}
             if isinstance(po.partition_metadata, str):
@@ -579,7 +642,7 @@ async def export_pos_csv(
 
             if not po.items:
                 # PO with no items — emit one row with blanks for item fields
-                writer.writerow([
+                empty_item_row = [
                     getattr(po, "po_number", ""),
                     client_name,
                     "",             # PRODUTO
@@ -590,11 +653,20 @@ async def export_pos_csv(
                     "",             # PERSONALIZADO
                     "",             # LARGURA
                     "",             # COMPRIMENTO
+                ]
+                if is_financial_authorized:
+                    empty_item_row.extend([
+                        safe_format_currency(0),
+                        safe_format_currency(0),
+                        safe_format_currency(po_total_val),
+                    ])
+                empty_item_row.extend([
                     "",             # STATUS PRODUÇÃO
                     "",             # QTD REAL PRODUZIDA
                     "",             # PERDA TÉCNICA
                     *sla_cols,
                 ])
+                writer.writerow(empty_item_row)
                 continue
 
             for item in po.items:
@@ -661,6 +733,22 @@ async def export_pos_csv(
                     )
                 comprimento = str(raw_comprimento) if raw_comprimento not in (None, "") else ""
 
+                # Financial item fields
+                unit_price_val = (
+                    getattr(item, "unit_price", None)
+                    or getattr(item, "valor_unitario", None)
+                    or safe_get_field(meta, "unit_price")
+                    or safe_get_field(meta, "valor_unitario")
+                    or safe_get_field(meta, "preco_unitario")
+                )
+                item_total_val = (
+                    getattr(item, "item_total_value", None)
+                    or getattr(item, "total_price", None)
+                    or safe_get_field(meta, "item_total_value")
+                    or safe_get_field(meta, "total_price")
+                    or safe_get_field(meta, "valor_total")
+                )
+
                 # FF-HARDENING-013 Item 13A: per-SKU production metrics
                 status_producao = safe_get_field(meta, "status_producao") or safe_get_field(item, "status_item", "")
                 qtd_real_produzida = safe_get_field(meta, "qtd_real_produzida")
@@ -709,7 +797,7 @@ async def export_pos_csv(
                     tempo_fatur_str,
                 ]
 
-                writer.writerow([
+                row_data = [
                     getattr(po, "po_number", ""),
                     item_client,
                     produto,
@@ -720,20 +808,35 @@ async def export_pos_csv(
                     personalizado,
                     largura,
                     comprimento,
+                ]
+                if is_financial_authorized:
+                    row_data.extend([
+                        safe_format_currency(unit_price_val),
+                        safe_format_currency(item_total_val),
+                        safe_format_currency(po_total_val),
+                    ])
+                row_data.extend([
                     status_producao,
                     qtd_real_str,
                     perda_str,
                     *item_sla_cols,
                 ])
+                writer.writerow(row_data)
         except Exception as po_err:
             logger.error(f"Error processing PO {getattr(po, 'po_number', 'unknown')} in po-export: {po_err}")
-            writer.writerow([
+            fallback_row = [
                 getattr(po, "po_number", ""),
                 getattr(po, "client_name", ""),
-                "", "", "", "", "", "", "", "", "", "", "",
+                "", "", "", "", "", "", "", "",
+            ]
+            if is_financial_authorized:
+                fallback_row.extend(["", "", ""])
+            fallback_row.extend([
+                "", "", "",
                 _STATUS_TRANSLATION.get(getattr(po, "status_macro", ""), getattr(po, "status_macro", "")),
                 "", "", "", "", "", "", "", "", "", "", ""
             ])
+            writer.writerow(fallback_row)
 
     # ── Stream with BOM for Excel UTF-8 compatibility ─────────────────────
     csv_content = "\ufeff" + output.getvalue()

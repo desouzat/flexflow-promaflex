@@ -3,7 +3,7 @@
 > **Document Version:** 2.0 (Production Master)  
 > **Author:** Antigravity Systems Engineering Team  
 > **Target Audience:** Incoming Systems Engineers, Lead Architects, and DevOps Operators  
-> **Last Updated:** 2026-09-23  
+> **Last Updated:** 2026-09-24  
 > **Rule 3.1 Compliance:** Single Source of Truth for live production architecture, schema, security, and calculation engines.
 
 ---
@@ -216,7 +216,7 @@ Order cards transition through six distinct columns:
 
 - **N+1 Query Elimination:** `GET /api/kanban/board` bulk-preloads all item relationships using SQLAlchemy `selectinload` / `joinedload`.
 - **Concluded Cards Hygiene Filter:** Orders in terminal states (`COMPLETED`, `ARCHIVED`, `CANCELLED`) updated more than **3 days ago** are automatically excluded from the active board payload. This maintains active Kanban board response times below **50ms** regardless of database size.
-- **Scroll Preservation:** Frontend Kanban board uses a multi-step `requestAnimationFrame` and `setTimeout` scroll preservation loop to maintain column scroll positions during real-time refetches.
+- **Scroll Preservation & Alt+Tab Silent Refresh (CR-F4):** Frontend `KanbanPage.jsx` uses `fetchBoard(isBackground = true)` on window focus (`handleFocus`), skipping full-screen loading spinners and preventing UI flashing while preserving column scroll positions via a double-buffered `requestAnimationFrame` and `setTimeout(50ms, 150ms)` loop. Errant background sync attempts fail silently with `console.warn`.
 
 ---
 
@@ -315,10 +315,10 @@ Below is the active backlog of 7 work fronts under client evaluation, highlighti
 | **CR-F1** | **Módulo de Estoque em M² + Endereçamento** | Full inventory tracking in M², physical rack/aisle location addressing (`A-01-02`), and real-time roll availability check during PCP linking. | **Phase 1 Priority** | 🔴 HIGH |
 | **CR-F2** | **Alterações ONET + [Atributo]** | Parsing structured attribute tags `[Atributo]` from ONET item notes. | Blocked (Awaiting Ewaldo/ONET) | 🟡 MED |
 | **CR-F3** | **Cancelamento Comercial c/ Flag + Devolução Expressa** | Flag commercial cancellations on client preferences & express return workflow from Faturamento back to Comercial. | **Phase 1 Priority** | 🔴 HIGH |
-| **CR-F4** | **Alt+Tab sem Spinner** | Silent background refetching on window focus without triggering global loading spinners. | **Phase 1 Priority** | 🟢 QUICK |
+| **CR-F4** | **Alt+Tab sem Spinner** | Silent background refetching on window focus without triggering global loading spinners (`fetchBoard(true)`). | 🟢 **COMPLETED (Live Production)** | 🟢 QUICK |
 | **CR-F5** | **Calculadora de Apontamento + Medidas no Card do PCP** | On-card dimension calculator (width $\times$ length $\times$ qty) directly visible on PCP Kanban cards. | **Phase 1 Priority** | 🔴 HIGH |
 | **CR-F6** | **Picking List da Logística** | Automated truck loading picking list generation. | Blocked (Awaiting Ewaldo/ONET) | 🟡 MED |
-| **CR-F7** | **Relatório do Kanban com Valores Financeiros** | Financial report export for Faturamento showing revenue, ICMS, taxes, and net margins. | **Phase 1 Priority** | 🔴 HIGH |
+| **CR-F7** | **Relatório do Kanban com Valores Financeiros** | Financial report export for Faturamento (`GET /api/reports/po-export`) with RBAC/SoD gating (29 cols vs 26 cols) and currency formatting. | 🟢 **COMPLETED (Live Production)** | 🔴 HIGH |
 
 ---
 

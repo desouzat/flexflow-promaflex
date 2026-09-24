@@ -26,6 +26,7 @@ from backend.routers.reports import (
     _compute_stage_times,
     _sla_label,
 )
+from backend.routers.auth import UserInfo
 
 DEFAULT_CONFIG = {
     "sla_total_hours": 240,
@@ -245,17 +246,20 @@ class TestCsvColumns:
         yield session, tenant.id
         session.close()
 
-    def _call_route(self, tenant_id, db):
+    def _call_route(self, tenant_id, db, user=None):
         """Call the async route handler synchronously via asyncio."""
         import asyncio
         from unittest.mock import MagicMock
         from backend.routers.reports import export_pos_csv
 
-        mock_user = MagicMock()
-        mock_user.tenant_id = tenant_id
+        if user is None:
+            user = MagicMock()
+            user.tenant_id = tenant_id
+            user.role = "operator"
+            user.area = "PRODUCAO"
 
         async def _run():
-            response = await export_pos_csv(current_user=mock_user, db=db)
+            response = await export_pos_csv(current_user=user, db=db)
             # body_iterator may be sync (iter) or async — drain both
             chunks = []
             it = response.body_iterator
@@ -273,13 +277,13 @@ class TestCsvColumns:
         raw = raw_bytes.decode("utf-8-sig")
         return list(csv.reader(io.StringIO(raw), delimiter=";"))
 
-    def test_header_has_25_columns(self, db_session):
+    def test_header_has_26_baseline_columns(self, db_session):
         session, tid = db_session
         raw = self._call_route(tid, session)
         rows = self._parse_csv(raw)
         assert len(rows) >= 1, "CSV must have at least a header row"
-        assert len(rows[0]) == 25, (
-            f"Expected 25 columns, got {len(rows[0])}.\n"
+        assert len(rows[0]) == 26, (
+            f"Expected 26 baseline columns, got {len(rows[0])}.\n"
             f"Header: {rows[0]}"
         )
 
@@ -296,7 +300,7 @@ class TestCsvColumns:
             "HORAS DE ATRASO",
             "JUSTIFICATIVA OCORRÊNCIA",
             "DATA ENTRADA KANBAN",
-            "SLA ENTREGA CLIENTE",
+            "SLA ENTREGA CLIENTE (ONET)",
             "TEMPO ETAPA ATUAL (h)",
             "TEMPO PCP (h)",
             "TEMPO PRODUÇÃO (h)",
@@ -304,6 +308,21 @@ class TestCsvColumns:
         ]
         missing = [c for c in required if c not in header]
         assert not missing, f"Missing SLA columns: {missing}"
+
+    def test_financial_columns_for_authorized_users(self, db_session):
+        session, tid = db_session
+        from unittest.mock import MagicMock
+        admin_user = MagicMock()
+        admin_user.id = str(uuid.uuid4())
+        admin_user.tenant_id = tid
+        admin_user.role = "admin"
+        admin_user.area = "FINANCEIRO"
+        raw = self._call_route(tid, session, user=admin_user)
+        header = self._parse_csv(raw)[0]
+        assert len(header) == 29, f"Expected 29 columns for authorized admin user, got {len(header)}"
+        assert "VALOR UNITARIO (R$)" in header
+        assert "VALOR TOTAL ITEM (R$)" in header
+        assert "VALOR TOTAL PEDIDO (R$)" in header
 
     def test_empty_tenant_produces_header_only(self, db_session):
         """A tenant with no POs should produce exactly 1 row (header)."""
