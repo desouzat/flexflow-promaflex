@@ -734,13 +734,6 @@ async def export_pos_csv(
                 comprimento = str(raw_comprimento) if raw_comprimento not in (None, "") else ""
 
                 # Financial item fields
-                unit_price_val = (
-                    getattr(item, "unit_price", None)
-                    or getattr(item, "valor_unitario", None)
-                    or safe_get_field(meta, "unit_price")
-                    or safe_get_field(meta, "valor_unitario")
-                    or safe_get_field(meta, "preco_unitario")
-                )
                 item_total_val = (
                     getattr(item, "item_total_value", None)
                     or getattr(item, "total_price", None)
@@ -748,6 +741,51 @@ async def export_pos_csv(
                     or safe_get_field(meta, "total_price")
                     or safe_get_field(meta, "valor_total")
                 )
+
+                # 1. Primary attribute check
+                unit_price = getattr(item, "unit_price", None)
+
+                # 2. JSONB extra_metadata fallback check
+                try:
+                    unit_price_check = float(unit_price or 0)
+                except Exception:
+                    unit_price_check = 0.0
+
+                if unit_price is None or unit_price_check <= 0:
+                    extra_meta = getattr(item, "extra_metadata", {}) or {}
+                    if isinstance(extra_meta, str):
+                        try:
+                            parsed_meta = json.loads(extra_meta)
+                            extra_meta = parsed_meta if isinstance(parsed_meta, dict) else {}
+                        except Exception:
+                            extra_meta = {}
+                    if isinstance(extra_meta, dict):
+                        unit_price = (
+                            extra_meta.get("unit_price")
+                            or extra_meta.get("preco_unitario")
+                            or extra_meta.get("valor_unitario")
+                        )
+
+                # 3. Mathematical Fallback: (item_total_value / quantity)
+                try:
+                    unit_price_check = float(unit_price or 0)
+                except Exception:
+                    unit_price_check = 0.0
+
+                if unit_price is None or unit_price_check <= 0:
+                    try:
+                        item_total = float(item_total_val or 0)
+                        item_qty = float(getattr(item, "quantity", 0) or safe_get_field(meta, "quantity", 0) or 0)
+                        if item_total > 0 and item_qty > 0:
+                            unit_price = item_total / item_qty
+                    except Exception:
+                        unit_price = 0.0
+
+                # Coerce to float safely
+                try:
+                    final_unit_price = float(unit_price or 0.0)
+                except Exception:
+                    final_unit_price = 0.0
 
                 # FF-HARDENING-013 Item 13A: per-SKU production metrics
                 status_producao = safe_get_field(meta, "status_producao") or safe_get_field(item, "status_item", "")
@@ -811,7 +849,7 @@ async def export_pos_csv(
                 ]
                 if is_financial_authorized:
                     row_data.extend([
-                        safe_format_currency(unit_price_val),
+                        safe_format_currency(final_unit_price),
                         safe_format_currency(item_total_val),
                         safe_format_currency(po_total_val),
                     ])
