@@ -138,6 +138,7 @@ async def get_current_user(
         permissions=payload.get("permissions", []),
         is_active=True,
         is_sla_manager=payload.get("is_sla_manager", False),  # FF-HARDENING-011
+        can_cancel_commercial=payload.get("can_cancel_commercial", False),  # CR-F3
     )
     
     return user_info
@@ -213,6 +214,7 @@ async def login(
         "role": user.role,
         "permissions": permissions,
         "is_sla_manager": bool(getattr(user, 'is_sla_manager', False)),  # FF-HARDENING-011
+        "can_cancel_commercial": bool(getattr(user, 'can_cancel_commercial', False)),  # CR-F3
     }
     print("\n" + "="*80)
     print("[AUTH LOGIN] Token Payload BEFORE encoding:")
@@ -250,6 +252,7 @@ async def login(
         "permissions": permissions,
         "is_active": user.is_active,
         "is_sla_manager": bool(getattr(user, 'is_sla_manager', False)),  # FF-HARDENING-011
+        "can_cancel_commercial": bool(getattr(user, 'can_cancel_commercial', False)),  # CR-F3
     }
     
     return TokenResponse(

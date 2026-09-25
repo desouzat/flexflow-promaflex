@@ -17,6 +17,7 @@ const UsersPage = () => {
         role: 'user',
         area: '',
         is_sla_manager: false,  // FF-HARDENING-011
+        can_cancel_commercial: false,  // CR-F3
     })
 
     useEffect(() => {
@@ -80,6 +81,7 @@ const UsersPage = () => {
             role: u.role,
             area: u.area === 'N/A' ? '' : (u.area || ''),
             is_sla_manager: Boolean(u.is_sla_manager),  // FF-HARDENING-011
+            can_cancel_commercial: Boolean(u.can_cancel_commercial),  // CR-F3
         })
         setShowModal(true)
     }
@@ -92,6 +94,7 @@ const UsersPage = () => {
             role: 'user',
             area: '',
             is_sla_manager: false,  // FF-HARDENING-011
+            can_cancel_commercial: false,  // CR-F3
         })
         setEditingUser(null)
         setShowModal(false)
@@ -122,6 +125,8 @@ const UsersPage = () => {
                     area: formData.area,
                     // FF-HARDENING-011: include is_sla_manager in PUT (only relevant for master)
                     is_sla_manager: formData.role === 'master' ? Boolean(formData.is_sla_manager) : false,
+                    // CR-F3: Commercial cancellation delegation
+                    can_cancel_commercial: Boolean(formData.can_cancel_commercial),
                 }
                 if (formData.password) {
                     payload.password = formData.password
@@ -280,6 +285,10 @@ const UsersPage = () => {
                                                             {/* FF-HARDENING-011: show SLA manager badge */}
                                                             {u.is_sla_manager && (
                                                                 <span className="ml-2 text-[10px] bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-full px-2 py-0.5 font-semibold">SLA</span>
+                                                            )}
+                                                            {/* CR-F3: show Commercial Cancellation badge */}
+                                                            {u.can_cancel_commercial && (
+                                                                <span className="ml-1.5 text-[10px] bg-red-100 text-red-700 border border-red-200 rounded-full px-2 py-0.5 font-semibold">CANCELAMENTO</span>
                                                             )}
                                                         </div>
                                                     </div>
@@ -464,6 +473,25 @@ const UsersPage = () => {
                                             <span className="block text-xs text-indigo-600 mt-0.5">
                                                 Permite que este usuário acesse e edite os Parâmetros de SLA Industrial nas Configurações do Sistema,
                                                 sem precisar de perfil admin.
+                                            </span>
+                                        </label>
+                                    </div>
+                                )}
+
+                                {/* CR-F3: Commercial Cancellation delegation checkbox */}
+                                {editingUser && (
+                                    <div className="flex items-start gap-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+                                        <input
+                                            id="chk-can-cancel-commercial"
+                                            type="checkbox"
+                                            checked={Boolean(formData.can_cancel_commercial)}
+                                            onChange={(e) => setFormData({ ...formData, can_cancel_commercial: e.target.checked })}
+                                            className="mt-0.5 h-4 w-4 rounded border-red-300 text-red-600 focus:ring-red-500 cursor-pointer"
+                                        />
+                                        <label htmlFor="chk-can-cancel-commercial" className="cursor-pointer">
+                                            <span className="block text-sm font-semibold text-red-800">Permitir Cancelamento Comercial (CR-F3)</span>
+                                            <span className="block text-xs text-red-600 mt-0.5">
+                                                Permite que este usuário cancele pedidos na fase Comercial (SUBMITTED/DRAFT) diretamente no sistema.
                                             </span>
                                         </label>
                                     </div>

@@ -42,6 +42,8 @@ class UserUpdate(BaseModel):
     password: Optional[str] = None
     # FF-HARDENING-011: SLA manager delegation flag (only meaningful for 'master' role)
     is_sla_manager: Optional[bool] = None
+    # CR-F3: Commercial cancellation delegation flag
+    can_cancel_commercial: Optional[bool] = None
 
 
 class UserResponse(BaseModel):
@@ -54,6 +56,7 @@ class UserResponse(BaseModel):
     tenant_id: str
     created_at: str
     is_sla_manager: bool = False  # FF-HARDENING-011
+    can_cancel_commercial: bool = False  # CR-F3
 
     class Config:
         from_attributes = True
@@ -105,6 +108,7 @@ async def list_users(
                 tenant_id=str(user.tenant_id),
                 created_at=user.created_at.isoformat() if user.created_at else "",
                 is_sla_manager=bool(getattr(user, 'is_sla_manager', False)),  # FF-HARDENING-011
+                can_cancel_commercial=bool(getattr(user, 'can_cancel_commercial', False)),  # CR-F3
             ))
         
         return user_list
@@ -202,6 +206,7 @@ async def create_user(
             tenant_id=str(new_user.tenant_id),
             created_at=new_user.created_at.isoformat() if new_user.created_at else "",
             is_sla_manager=bool(getattr(new_user, 'is_sla_manager', False)),  # FF-HARDENING-011
+            can_cancel_commercial=bool(getattr(new_user, 'can_cancel_commercial', False)),  # CR-F3
         )
         
     except HTTPException:
@@ -333,6 +338,9 @@ async def update_user(
             else:
                 # Silently reset if role is not master (safety guard)
                 user.is_sla_manager = False
+        # CR-F3: Commercial cancellation delegation flag
+        if user_data.can_cancel_commercial is not None:
+            user.can_cancel_commercial = user_data.can_cancel_commercial
         user.updated_at = datetime.utcnow()
         
         db.add(user)
@@ -350,6 +358,7 @@ async def update_user(
             tenant_id=str(user.tenant_id),
             created_at=user.created_at.isoformat() if user.created_at else "",
             is_sla_manager=bool(getattr(user, 'is_sla_manager', False)),  # FF-HARDENING-011
+            can_cancel_commercial=bool(getattr(user, 'can_cancel_commercial', False)),  # CR-F3
         )
         
     except HTTPException:

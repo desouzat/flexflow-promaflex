@@ -9,7 +9,7 @@ from sqlalchemy import or_
 from typing import List, Optional, Any
 from decimal import Decimal
 from datetime import datetime, timezone, timedelta
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, validator, root_validator, Field
 import uuid
 
 CONCLUDED_STATUSES = ["COMPLETED", "CANCELLED", "ARCHIVED", "ARCHIVED_PARTITIONED"]
@@ -1246,13 +1246,19 @@ async def save_production_per_sku(
 
 # ─── FF-HARDENING-012.1: Cancel PO endpoint ───────────────────────────────
 class CancelPORequest(BaseModel):
-    justification: str
+    reason: Optional[str] = Field(None, description="Motivo obrigatório do cancelamento")
+    justification: Optional[str] = Field(None, description="Justificativa do cancelamento (legado)")
 
-    @validator('justification')
-    def justification_must_be_meaningful(cls, v):
-        if not v or len(v.strip()) < 10:
-            raise ValueError('Justificativa de cancelamento deve ter no mínimo 10 caracteres')
-        return v.strip()
+    @root_validator(pre=True)
+    def check_reason_or_justification(cls, values):
+        if not isinstance(values, dict):
+            return values
+        r = values.get('reason') or values.get('justification')
+        if not r or len(str(r).strip()) < 3:
+            raise ValueError('Motivo obrigatório do cancelamento (mínimo 3 caracteres)')
+        values['reason'] = str(r).strip()
+        values['justification'] = str(r).strip()
+        return values
 
 
 @router.post("/pos/{po_id}/cancel")
@@ -1263,18 +1269,17 @@ async def cancel_purchase_order(
     db: Session = Depends(get_db)
 ):
     """
-    FF-HARDENING-012.1 [Item 1 & 2] — Cancel a Purchase Order with mandatory justification.
-
-    Sets status_macro = "CANCELLED", persists the cancellation justification to
-    sla_justification_text (along with who cancelled and when), and writes an
-    immutable AuditLog entry so the action is fully traceable.
-
-    A cancelled PO will never appear on the Kanban board (board query excludes
-    statuses not in the active column list, and CANCELLED maps to 'Cancelado'
-    which is not rendered as a column).
-
-    Accessible to: all authenticated users (operator, leader, master, admin).
+    CR-F3 / FF-HARDENING-012.1 — Cancel a Purchase Order with mandatory reason and permission check.
+    Accessible to: admin, master, or users with can_cancel_commercial delegation.
     """
+    is_admin = current_user.role.lower() in ['admin', 'master']
+    has_flag = getattr(current_user, 'can_cancel_commercial', False)
+    if not (is_admin or has_flag):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permissão insuficiente para cancelar pedidos."
+        )
+
     po = db.query(PurchaseOrder).filter(
         PurchaseOrder.id == po_id,
         PurchaseOrder.tenant_id == current_user.tenant_id
@@ -1299,32 +1304,38 @@ async def cancel_purchase_order(
         )
 
     from_status = po.status_macro
+    effective_reason = (body.reason or body.justification or "").strip()
 
     # Persist cancellation
     po.status_macro = "CANCELLED"
-    po.sla_justification_text = body.justification
+    po.sla_justification_text = effective_reason
     po.sla_justification_user = current_user.name or current_user.email
     po.sla_justification_at = datetime.utcnow()
     po.sla_justification_category = "CANCELAMENTO"
     po.updated_at = datetime.utcnow()
+
+    # Cascade cancellation to all items
+    for item in po.items:
+        if hasattr(item, 'status_item'): item.status_item = "CANCELLED"
+        if hasattr(item, 'status'): item.status = "CANCELLED"
 
     # Write to partition_metadata for extra auditability
     from sqlalchemy.orm.attributes import flag_modified as _flag_modified
     meta = dict(po.partition_metadata or {})
     meta["cancelled_by"] = current_user.name or current_user.email
     meta["cancelled_at"] = po.sla_justification_at.isoformat()
-    meta["cancellation_justification"] = body.justification
+    meta["cancellation_justification"] = effective_reason
     po.partition_metadata = meta
     _flag_modified(po, "partition_metadata")
 
-    # Audit log
+    # Immutable Ledger V2 Audit Log
     log_po_status_transition(
         db=db,
         po=po,
         from_status=from_status,
         to_status="CANCELLED",
         current_user=current_user,
-        justification=body.justification,
+        justification=f"Cancelamento Comercial: {effective_reason}",
         is_exception=False,
         extra_data={
             "action_type": "CANCEL_PO",
@@ -1333,10 +1344,6 @@ async def cancel_purchase_order(
     )
 
     # FF-HARDENING-012.4 Item 2: Cascade cancellation to child POs.
-    # When the parent is in WAITING_COMMERCIAL_PARTITION, the child POs (C1/C2) are
-    # in SUBMITTED status and appear in the Comercial column.  Cancelling only the
-    # parent leaves those cards orphaned on the board.  We cascade CANCELLED to each
-    # child so they physically leave the Comercial column immediately.
     if from_status == "WAITING_COMMERCIAL_PARTITION":
         child_pos = db.query(PurchaseOrder).filter(
             PurchaseOrder.parent_po_id == po.id,
@@ -1347,15 +1354,18 @@ async def cancel_purchase_order(
             if child.status_macro not in ("CANCELLED", "ARCHIVED", "ARCHIVED_PARTITIONED", "COMPLETED"):
                 child_from_status = child.status_macro
                 child.status_macro = "CANCELLED"
-                child.sla_justification_text = body.justification
+                child.sla_justification_text = effective_reason
                 child.sla_justification_user = current_user.name or current_user.email
                 child.sla_justification_at = po.sla_justification_at
                 child.sla_justification_category = "CANCELAMENTO"
                 child.updated_at = datetime.utcnow()
+                for citem in child.items:
+                    if hasattr(citem, 'status_item'): citem.status_item = "CANCELLED"
+                    if hasattr(citem, 'status'): citem.status = "CANCELLED"
                 child_meta = dict(child.partition_metadata or {})
                 child_meta["cancelled_by"] = current_user.name or current_user.email
                 child_meta["cancelled_at"] = cancelled_at_str
-                child_meta["cancellation_justification"] = body.justification
+                child_meta["cancellation_justification"] = effective_reason
                 child_meta["cancelled_with_parent"] = str(po.id)
                 child.partition_metadata = child_meta
                 _flag_modified(child, "partition_metadata")
@@ -1365,7 +1375,7 @@ async def cancel_purchase_order(
                     from_status=child_from_status,
                     to_status="CANCELLED",
                     current_user=current_user,
-                    justification=f"Cancelamento em cascata do pedido pai {po.po_number}: {body.justification}",
+                    justification=f"Cancelamento em cascata do pedido pai {po.po_number}: {effective_reason}",
                     is_exception=False,
                     extra_data={
                         "action_type": "CANCEL_PO_CASCADE",
@@ -1379,13 +1389,14 @@ async def cancel_purchase_order(
     db.refresh(po)
 
     return {
+        "status": "success",
         "success": True,
         "message": f"Pedido {po.po_number} cancelado com sucesso.",
-        "po_id": po_id,
+        "po_id": str(po.id),
         "po_number": po.po_number,
         "from_status": from_status,
         "to_status": "CANCELLED",
-        "justification": body.justification,
+        "justification": effective_reason,
         "cancelled_by": current_user.name or current_user.email,
         "cancelled_at": po.sla_justification_at.isoformat()
     }
@@ -2125,27 +2136,40 @@ async def advance_po_status(
     }
 
 
+class ReturnPORequest(BaseModel):
+    reason: Optional[str] = None
+
+
 @router.post("/return-status")
+@router.post("/pos/{po_id}/return")
 async def return_po_status(
-    po_id: str,
-    reason: str,
+    po_id: Optional[str] = None,
+    reason: Optional[str] = None,
+    payload: Optional[ReturnPORequest] = None,
     current_user: UserInfo = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
-    Return PO to the previous status in the workflow.
-    Requires a mandatory reason (min 10 chars) and logs in AuditLog.
-    Enforces the mandatory return labels dropdown.
+    CR-F3 — Return PO to the previous status in the workflow, or express return to Comercial (SUBMITTED)
+    if reason starts with [Cancelamento de Pedido].
+    Requires a mandatory reason (min 10 chars) and logs in AuditLog (which populates handoff_history).
     """
-    if not reason or len(reason.strip()) < 10:
+    effective_reason = (reason or (payload.reason if payload else "") or "").strip()
+    if not effective_reason or len(effective_reason) < 10:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Motivo da devolução deve ter pelo menos 10 caracteres"
         )
     
     # Enforce dropdown return labels
-    valid_labels = ["[Particionamento]", "[Ajuste de Personalização]", "[Erro de Dados ONET]", "[Outros]"]
-    reason_clean = reason.strip()
+    valid_labels = [
+        "[Particionamento]",
+        "[Ajuste de Personalização]",
+        "[Erro de Dados ONET]",
+        "[Cancelamento de Pedido]",
+        "[Outros]"
+    ]
+    reason_clean = effective_reason
     if not any(reason_clean.startswith(label) for label in valid_labels):
         reason_clean = f"[Outros]: {reason_clean}"
         
@@ -2161,7 +2185,10 @@ async def return_po_status(
         )
     
     current_status = po.status_macro
-    prev_status = STATUS_FLOW.get(current_status, {}).get("prev")
+    if reason_clean.startswith("[Cancelamento de Pedido]"):
+        prev_status = "SUBMITTED"
+    else:
+        prev_status = STATUS_FLOW.get(current_status, {}).get("prev")
     
     if not prev_status:
         raise HTTPException(
@@ -2173,6 +2200,13 @@ async def return_po_status(
     from_status = current_status
     po.status_macro = prev_status
     po.updated_at = datetime.utcnow()
+    
+    # Ensure all po.items have their status_item synchronized to prev_status
+    for item in po.items:
+        if hasattr(item, 'status_item'):
+            item.status_item = prev_status
+        if hasattr(item, 'status'):
+            item.status = prev_status
     
     # Save justification to po.partition_metadata["priority_note"]
     if po.partition_metadata is None:
@@ -2187,7 +2221,7 @@ async def return_po_status(
     }
     po.partition_metadata = meta
     
-    # Create audit log for return
+    # Create audit log for return (populates handoff_history)
     log_po_status_transition(
         db=db,
         po=po,
@@ -2210,7 +2244,7 @@ async def return_po_status(
     return {
         "success": True,
         "message": f"Pedido devolvido para {STATUS_DISPLAY_MAP.get(prev_status, prev_status)}",
-        "po_id": po_id,
+        "po_id": str(po.id),
         "from_status": STATUS_DISPLAY_MAP.get(from_status, from_status),
         "to_status": STATUS_DISPLAY_MAP.get(prev_status, prev_status),
         "reason": reason_clean

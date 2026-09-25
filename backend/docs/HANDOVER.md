@@ -168,6 +168,8 @@ User profiles and access permissions.
 - `name` (String(255))
 - `role` (String(50)) — Valid roles: `'user'`, `'operator'`, `'admin'`, `'master'`.
 - `area` (String(100)) — Operational area: `'Comercial'`, `'PCP'`, `'Produção'`, `'Faturamento'`, `'Logística'`, `'Diretoria'`.
+- `is_sla_manager` (Boolean, Default False) — SLA management access delegation.
+- `can_cancel_commercial` (Boolean, Default False) — Delegated permission to cancel orders in Commercial stage (`SUBMITTED`/`DRAFT`) (CR-F3).
 
 ---
 
@@ -217,6 +219,12 @@ Order cards transition through six distinct columns:
 - **N+1 Query Elimination:** `GET /api/kanban/board` bulk-preloads all item relationships using SQLAlchemy `selectinload` / `joinedload`.
 - **Concluded Cards Hygiene Filter:** Orders in terminal states (`COMPLETED`, `ARCHIVED`, `CANCELLED`) updated more than **3 days ago** are automatically excluded from the active board payload. This maintains active Kanban board response times below **50ms** regardless of database size.
 - **Scroll Preservation & Alt+Tab Silent Refresh (CR-F4):** Frontend `KanbanPage.jsx` uses `fetchBoard(isBackground = true)` on window focus (`handleFocus`), skipping full-screen loading spinners and preventing UI flashing while preserving column scroll positions via a double-buffered `requestAnimationFrame` and `setTimeout(50ms, 150ms)` loop. Errant background sync attempts fail silently with `console.warn`.
+
+### 3.4 Express Return & Commercial Cancellation Engine (CR-F3)
+
+- **Universal Express Return:** In any production phase (PCP, Produção, Faturamento, Expedição), choosing `[Cancelamento de Pedido]` in the Return Modal (`POST /api/kanban/return-status` or `POST /api/kanban/pos/{po_id}/return`) dynamically updates the modal title to "Devolver para Comercial (Cancelamento)" and routes the PO directly back to `SUBMITTED` (Comercial), bypassing all intermediate stages. All PO line items have `status_item` synchronized to `SUBMITTED`.
+- **Gated Commercial Cancellation:** At the Commercial stage (`SUBMITTED`/`DRAFT`), the `[ 🚫 Cancelar Pedido ]` button is visible and active only for users with `admin`/`master` roles or `can_cancel_commercial = true`.
+- **Transactional Cascade & Audit:** `POST /api/kanban/pos/{po_id}/cancel` validates minimum 3-character reason, sets `po.status_macro = 'CANCELLED'`, cascades `status_item = 'CANCELLED'` across all order items and child partitions, and logs an immutable SHA-256 Ledger V2 audit record.
 
 ---
 
@@ -314,7 +322,7 @@ Below is the active backlog of 7 work fronts under client evaluation, highlighti
 | :--- | :--- | :--- | :--- | :--- |
 | **CR-F1** | **Módulo de Estoque em M² + Endereçamento** | Full inventory tracking in M², physical rack/aisle location addressing (`A-01-02`), and real-time roll availability check during PCP linking. | **Phase 1 Priority** | 🔴 HIGH |
 | **CR-F2** | **Alterações ONET + [Atributo]** | Parsing structured attribute tags `[Atributo]` from ONET item notes. | Blocked (Awaiting Ewaldo/ONET) | 🟡 MED |
-| **CR-F3** | **Cancelamento Comercial c/ Flag + Devolução Expressa** | Flag commercial cancellations on client preferences & express return workflow from Faturamento back to Comercial. | **Phase 1 Priority** | 🔴 HIGH |
+| **CR-F3** | **Cancelamento Comercial c/ Flag + Devolução Expressa** | Delegated user cancellation flag (`can_cancel_commercial`), universal express return (`[Cancelamento de Pedido]`) direct to Comercial, and transactional order/item cancellation cascade. | 🟢 **COMPLETED (Live Production)** | 🔴 HIGH |
 | **CR-F4** | **Alt+Tab sem Spinner** | Silent background refetching on window focus without triggering global loading spinners (`fetchBoard(true)`). | 🟢 **COMPLETED (Live Production)** | 🟢 QUICK |
 | **CR-F5** | **Calculadora de Apontamento + Medidas no Card do PCP** | On-card dimension calculator (width $\times$ length $\times$ qty) directly visible on PCP Kanban cards. | **Phase 1 Priority** | 🔴 HIGH |
 | **CR-F6** | **Picking List da Logística** | Automated truck loading picking list generation. | Blocked (Awaiting Ewaldo/ONET) | 🟡 MED |

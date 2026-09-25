@@ -158,6 +158,14 @@ In `frontend/src/pages/KanbanPage.jsx`:
 - **Silent Catch Guard:** Errors encountered during background focus refresh log a warning to console (`console.warn('[FF-CR-F4] Silent background auto-sync failed gracefully:', err)`) without interrupting operator interaction.
 - **Scroll Position Shield:** Double-buffered frame preservation (`requestAnimationFrame` + `setTimeout(50ms, 150ms)`) locks column scroll positions during background re-renders.
 
+### 3.6 CR-F3 Universal Return to Commercial & Cancellation Architecture
+
+Implemented in `backend/routers/kanban.py` and `frontend/src/pages/KanbanPage.jsx`:
+- **Universal Express Return:** Selecting `[Cancelamento de Pedido]` in the Return Modal (`POST /api/kanban/return-status` or `POST /api/kanban/pos/{po_id}/return`) dynamically updates the modal header to "Devolver para Comercial (Cancelamento)" with an amber warning badge. When executed, it overrides standard step-back logic and immediately routes the PO directly to `SUBMITTED` (Comercial), bypassing all intermediate stages (PCP, Produção, Faturamento, Expedição).
+- **Item Status Synchronization:** All line items in `po.items` have their `status_item` and `status` synchronized directly to `SUBMITTED`.
+- **Commercial Cancellation Gating:** Order cancellation in the Commercial stage (`SUBMITTED` / `DRAFT`) via `POST /api/kanban/pos/{po_id}/cancel` is restricted to users with `admin` or `master` roles, OR users granted the explicit delegated permission `can_cancel_commercial = true`.
+- **Cascade Cancellation:** Cancelling a PO transitions `po.status_macro = 'CANCELLED'`, cascades `status_item = 'CANCELLED'` across all line items, cancels child partition orders (if partitioned), and persists an immutable SHA-256 Ledger V2 audit log entry.
+
 ---
 
 ## 4. ONET Final Production Excel Schema (2026-07-01)
@@ -215,6 +223,13 @@ A new claim `is_sla_manager` can be embedded in the JWT `app_metadata` to grant 
 - View SLA performance metrics on the Kanban board
 - Override SLA justification categories
 - Access the SLA management panel in Settings
+
+### 5.2.1 `can_cancel_commercial` Field (CR-F3)
+
+A boolean flag `can_cancel_commercial` (default `FALSE`) on the `users` table, exposed in JWT claims and `/api/users`:
+- Allows administrators to grant specific non-admin users permission to cancel purchase orders directly within the Commercial stage (`SUBMITTED`/`DRAFT`).
+- In `KanbanPage.jsx`, renders the `[ 🚫 Cancelar Pedido ]` button for authorized users.
+- In `backend/routers/kanban.py`, gates `POST /api/kanban/pos/{po_id}/cancel` to ensure unauthorized users receive HTTP 403 Forbidden.
 
 ### 5.3 Role-Based Separation of Duties (SoD) in Sales Filtering
 

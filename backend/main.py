@@ -271,6 +271,12 @@ async def lifespan(app: FastAPI):
             ]
         )
 
+        # Step 9 — CR-F3: User permission for commercial cancellation
+        _run_ddl_step(
+            "added 'can_cancel_commercial' column to users table",
+            ["ALTER TABLE users ADD COLUMN IF NOT EXISTS can_cancel_commercial BOOLEAN DEFAULT FALSE;"]
+        )
+
         print("[DEBUG] Background DB schema initialization completed.")
 
     async def init_db_background():

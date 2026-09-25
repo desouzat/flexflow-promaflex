@@ -3700,6 +3700,21 @@ const KanbanPage = () => {
                                             Devolver para {getPreviousStatus(selectedPO.status)}
                                         </button>
                                     )}
+
+                                    {/* CR-F3: Cancel PO button in Commercial (SUBMITTED / DRAFT) */}
+                                    {['SUBMITTED', 'DRAFT'].includes(selectedPO?.status_macro) && !isArchived && (
+                                        (['admin', 'master'].includes((user?.role || '').toLowerCase()) || Boolean(user?.can_cancel_commercial)) && (
+                                            <button
+                                                onClick={() => {
+                                                    setCancelJustification('');
+                                                    setShowCancelModal(true);
+                                                }}
+                                                className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-bold text-sm cursor-pointer shadow-md transition-colors"
+                                            >
+                                                🚫 Cancelar Pedido
+                                            </button>
+                                        )
+                                    )}
                                 </div>
 
                                 <div className="flex items-center gap-3">
@@ -3795,8 +3810,16 @@ const KanbanPage = () => {
                     >
                         <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
                             <h3 className="text-xl font-bold text-gray-900 mb-4">
-                                Devolver para {getPreviousStatus(selectedPO?.status)}
+                                {returnLabel === '[Cancelamento de Pedido]'
+                                    ? 'Devolver para Comercial (Cancelamento)'
+                                    : `Devolver para ${getPreviousStatus(selectedPO?.status)}`}
                             </h3>
+
+                            {returnLabel === '[Cancelamento de Pedido]' && (
+                                <div className="mb-4 p-3 bg-amber-50 border border-amber-300 rounded-lg flex items-center gap-2 text-amber-800 text-xs font-semibold">
+                                    <span>⚠️ Este pedido será devolvido diretamente ao Comercial para tratativa de cancelamento.</span>
+                                </div>
+                            )}
                             
                             <div className="mb-4">
                                 <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
@@ -3811,6 +3834,7 @@ const KanbanPage = () => {
                                     <option value="[Particionamento]">[Particionamento]</option>
                                     <option value="[Ajuste de Personalização]">[Ajuste de Personalização]</option>
                                     <option value="[Erro de Dados ONET]">[Erro de Dados ONET]</option>
+                                    <option value="[Cancelamento de Pedido]">[Cancelamento de Pedido]</option>
                                     <option value="[Outros]">[Outros]</option>
                                 </select>
                             </div>
@@ -4400,13 +4424,14 @@ const KanbanPage = () => {
                                 setCancellingPO(true);
                                 try {
                                     await api.post(`/kanban/pos/${selectedPO.id}/cancel`, {
+                                        reason: cancelJustification.trim(),
                                         justification: cancelJustification.trim()
                                     });
                                     showSuccess(`✅ Pedido ${selectedPO.po_number} cancelado com sucesso.`);
                                     setShowCancelModal(false);
                                     setCancelJustification('');
                                     handleCloseModal();
-                                    await fetchBoard();
+                                    await fetchBoard(true);
                                 } catch (err) {
                                     showError(err.response?.data?.detail || 'Erro ao cancelar pedido');
                                 } finally {

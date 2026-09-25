@@ -33,6 +33,8 @@ class UserInfo(BaseModel):
     is_active: bool = Field(default=True, description="User active status")
     # FF-HARDENING-011: SLA manager delegation flag (from DB, baked into JWT at login)
     is_sla_manager: bool = Field(default=False, description="Whether user can manage SLA config")
+    # CR-F3: Commercial cancellation delegation flag
+    can_cancel_commercial: bool = Field(default=False, description="Whether user can cancel orders in Commercial stage")
 
 
 class MeResponse(BaseModel):
