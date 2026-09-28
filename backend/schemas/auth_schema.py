@@ -29,6 +29,7 @@ class UserInfo(BaseModel):
     email: str = Field(..., description="User email")
     name: str = Field(..., description="User name")
     role: str = Field(..., description="User role")
+    area: Optional[str] = Field(None, description="User area")
     permissions: List[str] = Field(default_factory=list, description="User permissions")
     is_active: bool = Field(default=True, description="User active status")
     # FF-HARDENING-011: SLA manager delegation flag (from DB, baked into JWT at login)

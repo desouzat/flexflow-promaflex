@@ -1272,9 +1272,33 @@ async def cancel_purchase_order(
     CR-F3 / FF-HARDENING-012.1 — Cancel a Purchase Order with mandatory reason and permission check.
     Accessible to: admin, master, or users with can_cancel_commercial delegation.
     """
-    is_admin = current_user.role.lower() in ['admin', 'master']
+    user_role = (getattr(current_user, 'role', '') or '').lower()
+    user_area = (getattr(current_user, 'area', '') or '').upper()
     has_flag = getattr(current_user, 'can_cancel_commercial', False)
-    if not (is_admin or has_flag):
+
+    # In case current_user is UserInfo from an existing token that doesn't yet have updated flag or area,
+    # fallback to database User query to guarantee zero token desynchronization
+    if not (user_role in ['admin', 'master'] or has_flag is True or user_area == 'COMERCIAL'):
+        try:
+            import uuid
+            from backend.models import User
+            db_user = db.query(User).filter(User.id == uuid.UUID(str(current_user.id))).first()
+            if db_user:
+                if db_user.can_cancel_commercial:
+                    has_flag = True
+                if (db_user.area or '').strip().upper() == 'COMERCIAL':
+                    user_area = 'COMERCIAL'
+                if (db_user.role or '').strip().lower() in ['admin', 'master']:
+                    user_role = db_user.role.lower()
+        except Exception:
+            pass
+
+    is_authorized = (
+        user_role in ['admin', 'master'] or 
+        has_flag is True or 
+        user_area == 'COMERCIAL'
+    )
+    if not is_authorized:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Permissão insuficiente para cancelar pedidos."
@@ -2200,13 +2224,6 @@ async def return_po_status(
     from_status = current_status
     po.status_macro = prev_status
     po.updated_at = datetime.utcnow()
-    
-    # Ensure all po.items have their status_item synchronized to prev_status
-    for item in po.items:
-        if hasattr(item, 'status_item'):
-            item.status_item = prev_status
-        if hasattr(item, 'status'):
-            item.status = prev_status
     
     # Save justification to po.partition_metadata["priority_note"]
     if po.partition_metadata is None:

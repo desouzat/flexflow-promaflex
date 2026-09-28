@@ -162,8 +162,12 @@ In `frontend/src/pages/KanbanPage.jsx`:
 
 Implemented in `backend/routers/kanban.py` and `frontend/src/pages/KanbanPage.jsx`:
 - **Universal Express Return:** Selecting `[Cancelamento de Pedido]` in the Return Modal (`POST /api/kanban/return-status` or `POST /api/kanban/pos/{po_id}/return`) dynamically updates the modal header to "Devolver para Comercial (Cancelamento)" with an amber warning badge. When executed, it overrides standard step-back logic and immediately routes the PO directly to `SUBMITTED` (Comercial), bypassing all intermediate stages (PCP, Produção, Faturamento, Expedição).
-- **Item Status Synchronization:** All line items in `po.items` have their `status_item` and `status` synchronized directly to `SUBMITTED`.
-- **Commercial Cancellation Gating:** Order cancellation in the Commercial stage (`SUBMITTED` / `DRAFT`) via `POST /api/kanban/pos/{po_id}/cancel` is restricted to users with `admin` or `master` roles, OR users granted the explicit delegated permission `can_cancel_commercial = true`.
+- **PostgreSQL `check_item_status` Safety:** During PO workflow returns, only `po.status_macro = prev_status` is transitioned. Line items in `order_items` remain intact to strictly prevent PostgreSQL constraint violations (`check_item_status` constraint rejects PO macro statuses such as `MANUFACTURING` or `SUBMITTED`).
+- **Commercial Cancellation Gating & Resilience:** Order cancellation in the Commercial stage (`SUBMITTED` / `DRAFT`) via `POST /api/kanban/pos/{po_id}/cancel` is authorized for:
+  1. Users with `admin` or `master` roles.
+  2. Users granted explicit delegation via `can_cancel_commercial = true`.
+  3. Any user assigned to the `COMERCIAL` area (`user.area == 'COMERCIAL'`).
+- **Zero Token-Desynchronization Fallback:** If an operator's active JWT token payload lacks fresh delegation flags or area data, `cancel_purchase_order` performs a direct database lookup on the `users` table to guarantee operators (such as Mairla, Abimael, Andrea) are never locked out due to stale browser sessions.
 - **Cascade Cancellation:** Cancelling a PO transitions `po.status_macro = 'CANCELLED'`, cascades `status_item = 'CANCELLED'` across all line items, cancels child partition orders (if partitioned), and persists an immutable SHA-256 Ledger V2 audit log entry.
 
 ---
@@ -224,12 +228,13 @@ A new claim `is_sla_manager` can be embedded in the JWT `app_metadata` to grant 
 - Override SLA justification categories
 - Access the SLA management panel in Settings
 
-### 5.2.1 `can_cancel_commercial` Field (CR-F3)
+### 5.2.1 `can_cancel_commercial` Field & Commercial Authorization (CR-F3)
 
 A boolean flag `can_cancel_commercial` (default `FALSE`) on the `users` table, exposed in JWT claims and `/api/users`:
 - Allows administrators to grant specific non-admin users permission to cancel purchase orders directly within the Commercial stage (`SUBMITTED`/`DRAFT`).
-- In `KanbanPage.jsx`, renders the `[ 🚫 Cancelar Pedido ]` button for authorized users.
-- In `backend/routers/kanban.py`, gates `POST /api/kanban/pos/{po_id}/cancel` to ensure unauthorized users receive HTTP 403 Forbidden.
+- Additionally, all users with `area == 'COMERCIAL'` are recognized as authorized to cancel commercial stage orders, providing high operational availability.
+- In `KanbanPage.jsx`, renders the `[ 🚫 Cancelar Pedido ]` button for authorized users (`admin`, `master`, `can_cancel_commercial`, or `area === 'COMERCIAL'`).
+- In `backend/routers/kanban.py`, gates `POST /api/kanban/pos/{po_id}/cancel` with zero-latency database fallback query on the `users` table to prevent token staleness issues.
 
 ### 5.3 Role-Based Separation of Duties (SoD) in Sales Filtering
 

@@ -222,8 +222,9 @@ Order cards transition through six distinct columns:
 
 ### 3.4 Express Return & Commercial Cancellation Engine (CR-F3)
 
-- **Universal Express Return:** In any production phase (PCP, Produção, Faturamento, Expedição), choosing `[Cancelamento de Pedido]` in the Return Modal (`POST /api/kanban/return-status` or `POST /api/kanban/pos/{po_id}/return`) dynamically updates the modal title to "Devolver para Comercial (Cancelamento)" and routes the PO directly back to `SUBMITTED` (Comercial), bypassing all intermediate stages. All PO line items have `status_item` synchronized to `SUBMITTED`.
-- **Gated Commercial Cancellation:** At the Commercial stage (`SUBMITTED`/`DRAFT`), the `[ 🚫 Cancelar Pedido ]` button is visible and active only for users with `admin`/`master` roles or `can_cancel_commercial = true`.
+- **Universal Express Return:** In any production phase (PCP, Produção, Faturamento, Expedição), choosing `[Cancelamento de Pedido]` in the Return Modal (`POST /api/kanban/return-status` or `POST /api/kanban/pos/{po_id}/return`) dynamically updates the modal title to "Devolver para Comercial (Cancelamento)" and routes the PO directly back to `SUBMITTED` (Comercial), bypassing all intermediate stages.
+- **PostgreSQL `check_item_status` Safety:** During normal workflow returns and express returns, only `po.status_macro = prev_status` is updated. Line items in `order_items` are preserved to prevent violation of PostgreSQL constraint `check_item_status` (which restricts `status_item` to item lifecycle states and rejects macro statuses like `MANUFACTURING`).
+- **Gated Commercial Cancellation & Resiliency:** At the Commercial stage (`SUBMITTED`/`DRAFT`), order cancellation via `POST /api/kanban/pos/{po_id}/cancel` is accessible to users with `admin`/`master` roles, users with `can_cancel_commercial = true`, and any user whose area is `COMERCIAL` (`user.area == 'COMERCIAL'`). The backend performs a live database fallback query against `users` if active JWT claims lack delegation or area metadata, preventing session lockout.
 - **Transactional Cascade & Audit:** `POST /api/kanban/pos/{po_id}/cancel` validates minimum 3-character reason, sets `po.status_macro = 'CANCELLED'`, cascades `status_item = 'CANCELLED'` across all order items and child partitions, and logs an immutable SHA-256 Ledger V2 audit record.
 
 ---

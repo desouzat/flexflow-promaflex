@@ -64,22 +64,34 @@ def test_universal_return_to_commercial_routing():
 
 
 def test_cancellation_permission_gating():
+    # Helper replicating backend authorization check
+    def is_authorized(user: UserInfo) -> bool:
+        role = (getattr(user, 'role', '') or '').lower()
+        area = (getattr(user, 'area', '') or '').upper()
+        has_flag = getattr(user, 'can_cancel_commercial', False)
+        return role in ['admin', 'master'] or has_flag is True or area == 'COMERCIAL'
+
     # Master role -> allowed
     master_user = UserInfo(id="1", tenant_id="t", email="m@p.com", name="Master", role="master", can_cancel_commercial=False)
-    assert (master_user.role.lower() in ['admin', 'master'] or getattr(master_user, 'can_cancel_commercial', False)) is True
+    assert is_authorized(master_user) is True
 
     # Admin role -> allowed
     admin_user = UserInfo(id="2", tenant_id="t", email="a@p.com", name="Admin", role="admin", can_cancel_commercial=False)
-    assert (admin_user.role.lower() in ['admin', 'master'] or getattr(admin_user, 'can_cancel_commercial', False)) is True
+    assert is_authorized(admin_user) is True
 
     # Delegated user (operator with can_cancel_commercial = True) -> allowed
     delegated_user = UserInfo(id="3", tenant_id="t", email="d@p.com", name="Delegated", role="operator", can_cancel_commercial=True)
-    assert (delegated_user.role.lower() in ['admin', 'master'] or getattr(delegated_user, 'can_cancel_commercial', False)) is True
+    assert is_authorized(delegated_user) is True
 
-    # Standard operator without flag -> blocked
-    standard_op = UserInfo(id="4", tenant_id="t", email="o@p.com", name="Op", role="operator", can_cancel_commercial=False)
-    assert (standard_op.role.lower() in ['admin', 'master'] or getattr(standard_op, 'can_cancel_commercial', False)) is False
+    # Commercial operator without flag -> allowed by area
+    commercial_op = UserInfo(id="4", tenant_id="t", email="c@p.com", name="Com", role="operator", area="COMERCIAL", can_cancel_commercial=False)
+    assert is_authorized(commercial_op) is True
 
-    # Standard sales user without flag -> blocked
-    sales_user = UserInfo(id="5", tenant_id="t", email="s@p.com", name="Sales", role="user", can_cancel_commercial=False)
-    assert (sales_user.role.lower() in ['admin', 'master'] or getattr(sales_user, 'can_cancel_commercial', False)) is False
+    # Standard operator in PCP without flag -> blocked
+    standard_op = UserInfo(id="5", tenant_id="t", email="o@p.com", name="Op", role="operator", area="PCP", can_cancel_commercial=False)
+    assert is_authorized(standard_op) is False
+
+    # Standard sales user in FINANCEIRO without flag -> blocked
+    finance_user = UserInfo(id="6", tenant_id="t", email="s@p.com", name="Finance", role="user", area="FINANCEIRO", can_cancel_commercial=False)
+    assert is_authorized(finance_user) is False
+

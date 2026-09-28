@@ -3703,7 +3703,7 @@ const KanbanPage = () => {
 
                                     {/* CR-F3: Cancel PO button in Commercial (SUBMITTED / DRAFT) */}
                                     {['SUBMITTED', 'DRAFT'].includes(selectedPO?.status_macro) && !isArchived && (
-                                        (['admin', 'master'].includes((user?.role || '').toLowerCase()) || Boolean(user?.can_cancel_commercial)) && (
+                                        (['admin', 'master'].includes((user?.role || '').toLowerCase()) || Boolean(user?.can_cancel_commercial) || (user?.area || '').toUpperCase() === 'COMERCIAL') && (
                                             <button
                                                 onClick={() => {
                                                     setCancelJustification('');

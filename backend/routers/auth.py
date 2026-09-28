@@ -135,6 +135,7 @@ async def get_current_user(
         email=email,
         name=payload.get("name", "User"),
         role=payload.get("role", "user"),
+        area=payload.get("area"),
         permissions=payload.get("permissions", []),
         is_active=True,
         is_sla_manager=payload.get("is_sla_manager", False),  # FF-HARDENING-011
@@ -212,6 +213,7 @@ async def login(
         "email": user.email,
         "name": user.name,
         "role": user.role,
+        "area": user.area,
         "permissions": permissions,
         "is_sla_manager": bool(getattr(user, 'is_sla_manager', False)),  # FF-HARDENING-011
         "can_cancel_commercial": bool(getattr(user, 'can_cancel_commercial', False)),  # CR-F3
@@ -249,6 +251,7 @@ async def login(
         "email": user.email,
         "name": user.name,
         "role": user.role,
+        "area": user.area,
         "permissions": permissions,
         "is_active": user.is_active,
         "is_sla_manager": bool(getattr(user, 'is_sla_manager', False)),  # FF-HARDENING-011
