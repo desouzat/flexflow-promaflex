@@ -227,6 +227,16 @@ Order cards transition through six distinct columns:
 - **Gated Commercial Cancellation & Resiliency:** At the Commercial stage (`SUBMITTED`/`DRAFT`), order cancellation via `POST /api/kanban/pos/{po_id}/cancel` is accessible to users with `admin`/`master` roles, users with `can_cancel_commercial = true`, and any user whose area is `COMERCIAL` (`user.area == 'COMERCIAL'`). The backend performs a live database fallback query against `users` if active JWT claims lack delegation or area metadata, preventing session lockout.
 - **Transactional Cascade & Audit:** `POST /api/kanban/pos/{po_id}/cancel` validates minimum 3-character reason, sets `po.status_macro = 'CANCELLED'`, cascades `status_item = 'CANCELLED'` across all order items and child partitions, and logs an immutable SHA-256 Ledger V2 audit record.
 
+### 3.5 PCP Physical Dimensions & Packaging Area Calculator (CR-F5)
+
+- **Kanban Card Face Dimensions:** Cards in the PCP column (`APPROVED` / `WAITING_MATERIAL`) display physical roll dimensions directly on the card face in both Full View and Compact View:
+  - Single item: `📐 {width}mm × {length}m ({qty} {unit})` (e.g. `📐 1200mm × 50m (10 RL)`)
+  - Multi-item: `📐 {width}mm × {length}m (+{extraCount} {extraCount === 1 ? 'item' : 'itens'})`
+  - Resilient parsing via `parseBrazilianFloat` normalizes comma/dot inputs and suppresses the badge gracefully if width or length is missing or zero.
+- **Produção Packaging Area Calculator:** Inside `SkuProductionRow` (module-scoped component in `KanbanPage.jsx`), an inline helper computes unit area:
+  $$\text{Unit Area } (m^2) = \left(\frac{\text{width}_{\text{mm}}}{1000}\right) \times \text{length}_{\text{m}}$$
+  Operators enter rolls/pieces produced in their shift and click `➕ Somar` or `Substituir`, which writes to `QTD REAL PRODUZIDA` and autosaves via `POST /api/kanban/pos/{po_id}/production` directly into `order_items.extra_metadata`.
+
 ---
 
 ## 4. Financial Calculation Engines (Formulas & DRE)
@@ -325,7 +335,7 @@ Below is the active backlog of 7 work fronts under client evaluation, highlighti
 | **CR-F2** | **Alterações ONET + [Atributo]** | Parsing structured attribute tags `[Atributo]` from ONET item notes. | Blocked (Awaiting Ewaldo/ONET) | 🟡 MED |
 | **CR-F3** | **Cancelamento Comercial c/ Flag + Devolução Expressa** | Delegated user cancellation flag (`can_cancel_commercial`), universal express return (`[Cancelamento de Pedido]`) direct to Comercial, and transactional order/item cancellation cascade. | 🟢 **COMPLETED (Live Production)** | 🔴 HIGH |
 | **CR-F4** | **Alt+Tab sem Spinner** | Silent background refetching on window focus without triggering global loading spinners (`fetchBoard(true)`). | 🟢 **COMPLETED (Live Production)** | 🟢 QUICK |
-| **CR-F5** | **Calculadora de Apontamento + Medidas no Card do PCP** | On-card dimension calculator (width $\times$ length $\times$ qty) directly visible on PCP Kanban cards. | **Phase 1 Priority** | 🔴 HIGH |
+| **CR-F5** | **Calculadora de Apontamento + Medidas no Card do PCP** | On-card dimension calculator (width $\times$ length $\times$ qty) directly visible on PCP Kanban cards and inline Packaging Area Calculator helper in Produção. | 🟢 **COMPLETED (Live Production)** | 🔴 HIGH |
 | **CR-F6** | **Picking List da Logística** | Automated truck loading picking list generation. | Blocked (Awaiting Ewaldo/ONET) | 🟡 MED |
 | **CR-F7** | **Relatório do Kanban com Valores Financeiros** | Financial report export for Faturamento (`GET /api/reports/po-export`) with RBAC/SoD gating (29 cols vs 26 cols) and currency formatting. | 🟢 **COMPLETED (Live Production)** | 🔴 HIGH |
 

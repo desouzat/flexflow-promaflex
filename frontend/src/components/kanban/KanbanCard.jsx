@@ -18,6 +18,13 @@ import { STRATEGIC_INDICATORS } from '../../config/helpConfig'
 import { calculatePOMargins } from '../../utils/marginCalculator'
 import { useAuth } from '../../context/AuthContext'
 
+const parseBrazilianFloat = (val) => {
+    if (val === null || val === undefined) return 0;
+    const clean = String(val).trim().replace(',', '.');
+    const num = parseFloat(clean);
+    return isNaN(num) ? 0 : num;
+};
+
 const KanbanCard = ({ po, onCardClick, compactView = false }) => {
     const { user } = useAuth()
     const isPrivileged = ['admin', 'master'].includes((user?.role || '').toLowerCase())
@@ -95,6 +102,42 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
     const isTriangular = !!(safepo.partition_metadata?.is_triangular || safepo.extra_metadata?.is_triangular)
     const isEstoque = !!(safepo.partition_metadata?.is_estoque || safepo.extra_metadata?.is_estoque)
 
+    // CR-F5: Physical dimensions on PCP Kanban card face
+    const pcpDimensionBadge = useMemo(() => {
+        const isPCP = safepo.status === 'PCP' || ['APPROVED', 'WAITING_MATERIAL'].includes(safepo.status_macro)
+        if (!isPCP || !safepo.items || safepo.items.length === 0) return null
+
+        const primaryItem = safepo.items[0]
+        const iMeta = primaryItem?.extra_metadata || {}
+
+        // Fallback chain checking width (mm) and length (m)
+        const rawW = primaryItem?.width ?? iMeta.width ?? iMeta.largura ?? iMeta['Largura (mm)'] ?? iMeta['Largura']
+        const rawL = primaryItem?.length ?? iMeta.length ?? iMeta.comprimento ?? iMeta['Comprimento (m)'] ?? iMeta['Comprimento']
+        const width = parseBrazilianFloat(rawW)
+        const length = parseBrazilianFloat(rawL)
+
+        // Defensive checks: Gracefully hide if width or length is null/zero/NaN
+        if (width <= 0 || length <= 0) return null
+
+        const qty = parseBrazilianFloat(primaryItem?.quantity ?? iMeta.quantity ?? 1)
+        const unit = (iMeta.unit || iMeta.unidade_medida || primaryItem?.unit || 'UN').toUpperCase()
+        const totalItems = safepo.items.length
+        const extraCount = totalItems - 1
+
+        const label = extraCount > 0
+            ? `📐 ${width}mm × ${length}m (+${extraCount} ${extraCount === 1 ? 'item' : 'itens'})`
+            : `📐 ${width}mm × ${length}m (${qty} ${unit})`
+
+        return {
+            width,
+            length,
+            qty,
+            unit,
+            extraCount,
+            label
+        }
+    }, [safepo.status, safepo.status_macro, safepo.items])
+
     const marginInfo = useMemo(() => {
         if (safepo.margin_percentage === '***' || safepo.margin_global === '***') {
             return {
@@ -107,6 +150,7 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
         }
         return calculatePOMargins(safepo)
     }, [safepo.items, safepo.total_value, safepo.payment_terms, safepo.margin_percentage, safepo.margin_global])
+
 
     const getStatusColor = (status) => {
         const colors = {
@@ -375,6 +419,19 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
                 <p className="font-bold text-gray-800 mb-2" style={{ fontSize: '12px' }}>
                     Cliente: {safepo.client_name}
                 </p>
+
+                {/* CR-F5: PCP Physical Dimensions Badge (Compact View) */}
+                {pcpDimensionBadge && (
+                    <div className="mb-2">
+                        <span 
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-100 text-slate-800 border border-slate-300 shadow-2xs"
+                            title="Medidas físicas do item principal (PCP)"
+                        >
+                            {pcpDimensionBadge.label}
+                        </span>
+                    </div>
+                )}
+
                 <div className="flex items-center justify-between text-xs">
                     <span className="font-semibold text-gray-900">
                         Vl.Pedido: {formatCurrency(safepo.total_value)}
@@ -557,6 +614,17 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
                     <p className="font-bold text-gray-800 mb-1" style={{ fontSize: '12px' }}>
                         Cliente: {safepo.client_name}
                     </p>
+                    {/* CR-F5: PCP Physical Dimensions Badge (Full View) */}
+                    {pcpDimensionBadge && (
+                        <div className="mb-1.5">
+                            <span 
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-slate-100 text-slate-800 border border-slate-300 shadow-2xs"
+                                title="Medidas físicas do item principal (PCP)"
+                            >
+                                {pcpDimensionBadge.label}
+                            </span>
+                        </div>
+                    )}
                 </div>
                 <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium border ${getStatusColor(safepo.status)}`}>
                     {getStatusIcon(safepo.status)}

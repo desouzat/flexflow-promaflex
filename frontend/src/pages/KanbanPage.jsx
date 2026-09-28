@@ -217,6 +217,13 @@ const LogisticsUploadSection = ({
     )
 }
 
+const parseBrazilianFloat = (val) => {
+    if (val === null || val === undefined) return 0;
+    const clean = String(val).trim().replace(',', '.');
+    const num = parseFloat(clean);
+    return isNaN(num) ? 0 : num;
+};
+
 /**
  * SkuProductionRow — module-scope component (MUST stay outside KanbanPage).
  *
@@ -234,12 +241,20 @@ const SkuProductionRow = ({ item, itemProdFields, setItemProductionFields, onSav
     const iProd = itemProdFields[item.id] || {}
     const codigoEstruturado = iMeta.codigo_estruturado || item.codigo_estruturado || iMeta.description || ''
 
-    // Dimensions — stored as largura/comprimento in extra_metadata (mm)
-    const largura = iMeta.largura ?? iMeta.width ?? item.width ?? null
-    const comprimento = iMeta.comprimento ?? iMeta.length ?? item.length ?? null
-    const dimensaoLabel = (largura != null && comprimento != null)
-        ? ` (Medidas: ${parseFloat(largura)} mm × ${parseFloat(comprimento)} mm)`
+    // Dimensions — stored as largura/comprimento in extra_metadata (mm / m)
+    const widthMm = parseBrazilianFloat(iMeta.largura ?? iMeta.width ?? item.width ?? null)
+    const lengthM = parseBrazilianFloat(iMeta.comprimento ?? iMeta.length ?? item.length ?? null)
+    const hasDimensions = widthMm > 0 && lengthM > 0
+    const unitAreaM2 = hasDimensions ? (widthMm / 1000.0) * lengthM : null
+    const dimensaoLabel = hasDimensions
+        ? ` (Medidas: ${widthMm} mm × ${lengthM} m)`
         : ''
+
+    // CR-F5: Incremental Packaging Area Calculator state
+    const [showCalc, setShowCalc] = React.useState(false)
+    const [rollCountInput, setRollCountInput] = React.useState('')
+    const rolls = parseBrazilianFloat(rollCountInput)
+    const calculatedAreaM2 = unitAreaM2 ? (rolls * unitAreaM2) : 0
 
     // Seed from the persisted DB value (stable). iProd.status_producao is the
     // transient in-flight parent value — use it only as the higher-priority override.
@@ -288,6 +303,26 @@ const SkuProductionRow = ({ item, itemProdFields, setItemProductionFields, onSav
         })
     }
 
+    // CR-F5: Apply calculated area directly into qtd_real_produzida (add or replace)
+    const handleApplyApontamento = (mode = 'add') => {
+        if (!calculatedAreaM2 || calculatedAreaM2 <= 0) return
+
+        const currentVal = parseBrazilianFloat(iProd.qtd_real_produzida || iMeta.qtd_real_produzida || 0)
+        const newVal = mode === 'add' ? (currentVal + calculatedAreaM2) : calculatedAreaM2
+        const formattedVal = newVal.toFixed(2).replace(/\.00$/, '')
+
+        const updated = {
+            ...itemProdFields,
+            [item.id]: {
+                ...(itemProdFields[item.id] || {}),
+                qtd_real_produzida: formattedVal
+            }
+        }
+        setItemProductionFields(updated)
+        onSave(updated)
+        setRollCountInput('')
+    }
+
     return (
         <div className="p-4 bg-blue-50 border border-blue-100 rounded-lg space-y-3">
             <div className="text-xs font-bold text-blue-800 uppercase tracking-wide">
@@ -313,7 +348,7 @@ const SkuProductionRow = ({ item, itemProdFields, setItemProductionFields, onSav
                         Qtd Real Produzida ({poUnit}) <span className="text-red-500">*</span>
                     </label>
                     <input
-                        type="number" step="1" min="1"
+                        type="number" step="any" min="0"
                         value={iProd.qtd_real_produzida || ''}
                         onChange={handleQtyChange}
                         onBlur={onSave}
@@ -327,7 +362,7 @@ const SkuProductionRow = ({ item, itemProdFields, setItemProductionFields, onSav
                         Perda Técnica ({poUnit}) <span className="text-gray-400 normal-case font-normal">(opcional)</span>
                     </label>
                     <input
-                        type="number" step="1" min="0"
+                        type="number" step="any" min="0"
                         value={iProd.perda_tecnica || ''}
                         onChange={handlePerdaChange}
                         onBlur={onSave}
@@ -336,6 +371,61 @@ const SkuProductionRow = ({ item, itemProdFields, setItemProductionFields, onSav
                     />
                 </div>
             </div>
+
+            {/* CR-F5: Incremental Packaging Area Calculator */}
+            {hasDimensions && (
+                <div className="pt-2 border-t border-blue-200">
+                    <button
+                        type="button"
+                        onClick={() => setShowCalc(!showCalc)}
+                        className="text-xs text-blue-700 hover:text-blue-900 font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
+                    >
+                        <span>🧮</span>
+                        <span>{showCalc ? 'Ocultar Calculadora de Apontamento' : `Calculadora de Apontamento (${unitAreaM2.toFixed(2)} m²/bobina)`}</span>
+                    </button>
+
+                    {showCalc && (
+                        <div className="mt-2 p-3 bg-white border border-blue-200 rounded-lg space-y-2 text-xs shadow-xs">
+                            <div className="flex flex-wrap items-center justify-between font-medium text-gray-700 gap-2">
+                                <span>Área Unitária: <strong className="text-blue-800">{unitAreaM2.toFixed(2)} m²</strong> por bobina ({widthMm}mm × {lengthM}m)</span>
+                                <span className="text-gray-500">Qtd Pedido: <strong className="text-gray-800">{item.quantity} {poUnit}</strong></span>
+                            </div>
+                            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                                <div className="flex-1">
+                                    <input
+                                        type="text"
+                                        inputMode="decimal"
+                                        placeholder="Qtd de bobinas / peças produzidas no turno"
+                                        value={rollCountInput}
+                                        onChange={(e) => setRollCountInput(e.target.value)}
+                                        className="w-full px-2.5 py-1.5 border border-gray-300 rounded text-xs font-semibold focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    />
+                                </div>
+                                {rolls > 0 && (
+                                    <div className="flex items-center gap-1.5">
+                                        <button
+                                            type="button"
+                                            onClick={() => handleApplyApontamento('add')}
+                                            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded font-bold cursor-pointer transition-colors text-xs shadow-xs"
+                                            title="Soma a metragem calculada à quantidade já apontada"
+                                        >
+                                            ➕ Somar (+{calculatedAreaM2.toFixed(2).replace(/\.00$/, '')} m²)
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleApplyApontamento('replace')}
+                                            className="px-3 py-1.5 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded font-bold cursor-pointer transition-colors text-xs"
+                                            title="Substitui o valor atual pela metragem calculada"
+                                        >
+                                            Substituir ({calculatedAreaM2.toFixed(2).replace(/\.00$/, '')} m²)
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
         </div>
     )
 }
@@ -1659,7 +1749,7 @@ const KanbanPage = () => {
                 const qRealStr = iProd.qtd_real_produzida !== undefined
                     ? iProd.qtd_real_produzida
                     : (iMeta.qtd_real_produzida != null ? String(iMeta.qtd_real_produzida) : '')
-                const qReal = parseFloat(qRealStr)
+                const qReal = parseBrazilianFloat(qRealStr)
                 // Accept any non-empty status ('START' = Em Andamento, 'Concluído' = FINISH)
                 return statusProd !== '' && !isNaN(qReal) && qReal > 0
             })

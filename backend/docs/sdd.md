@@ -310,6 +310,10 @@ Calculates item cost according to the item's unit of measurement (`unidade_medid
   $$\text{Total Area}_{\text{m2}} = \text{Width}_{\text{m}} \times \text{Length}_{\text{m}} \times \text{Quantity}$$
   $$\text{Total Cost} = \text{Total Area}_{\text{m2}} \times \text{Custo}_{\text{m2}}$$
 
+- **Packaging Area Calculator Formula (CR-F5):**
+  $$\text{Unit Area } (m^2) = \left(\frac{\text{Width}_{\text{mm}}}{1000}\right) \times \text{Length}_{\text{m}}$$
+  $$\text{Accumulated Area } (m^2) = \text{Roll Count} \times \text{Unit Area } (m^2)$$
+
 - **Fallback:**
   $$\text{Total Cost} = \text{Quantity} \times \text{Custo}_{\text{m2}}$$
 
@@ -346,13 +350,19 @@ Five-card summary row (md:grid-cols-5):
 4. **Status** — `status_macro` human label
 5. **Data do Pedido** (blue card) — `partition_metadata.order_date` ← sourced from `Data do Pedido`
 
-### 9.2 KanbanPage — PCP Grade de Itens Table
-Five-column table:
-1. SKU / Produto
-2. **Cód. Estruturado** (indigo badge, `extra_metadata.codigo_estruturado`)
-3. Quantidade
-4. Status de Custo
-5. Ações
+### 9.2 KanbanPage — PCP Card Dimensions & Produção Area Calculator (CR-F5)
+- **PCP Card Face Dimensions:** When PO cards are in the PCP / Mensuração column (`APPROVED` / `WAITING_MATERIAL`), physical dimensions are rendered on the card face:
+  - Single item: `📐 {width}mm × {length}m ({qty} {unit})`
+  - Multi-item: `📐 {width}mm × {length}m (+{extraCount} {extraCount === 1 ? 'item' : 'itens'})`
+  - Resilient parsing via `parseBrazilianFloat` normalizes comma/dot decimals and cleanly suppresses the badge if width or length is missing/zero.
+- **Produção Packaging Area Calculator:** Inside `SkuProductionRow` in the Produção modal, an interactive calculator helper computes $m^2$ per roll/piece and allows the operator to add (`➕ Somar`) or overwrite (`Substituir`) into `QTD REAL PRODUZIDA`, with immediate persistence to `order_items.extra_metadata` via `POST /api/kanban/pos/{po_id}/production`.
+- **PCP Grade de Itens Table (Inside Modal):**
+  Five-column table:
+  1. SKU / Produto
+  2. **Cód. Estruturado** (indigo badge, `extra_metadata.codigo_estruturado`)
+  3. Quantidade
+  4. Status de Custo
+  5. Ações
 
 ### 9.3 Faturamento Stage — Transportadora Auto-Population
 On modal open, `localFields.transportadora` is pre-seeded from `partition_metadata.carrier_name` (if `extra_metadata.transportadora` is not already saved). This eliminates manual re-entry for operators.
