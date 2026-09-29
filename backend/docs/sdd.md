@@ -167,6 +167,11 @@ Implemented in `backend/routers/kanban.py` and `frontend/src/pages/KanbanPage.js
   1. Users with `admin` or `master` roles.
   2. Users granted explicit delegation via `can_cancel_commercial = true`.
   3. Any user assigned to the `COMERCIAL` area (`user.area == 'COMERCIAL'`).
+- **Commercial Cancellation Request Flag & Lifecycle Persistence:** When a PO is returned from downstream stages (PCP, Produção, Faturamento, Expedição) with reason starting with `[Cancelamento de Pedido]`:
+  - `po.partition_metadata` stores `cancellation_requested: true`, `cancellation_requested_at`, `cancellation_requested_by`, and `cancellation_requested_from` (origin stage display name, e.g. `Faturamento`, `Expedição`).
+  - Standard returns purge these keys automatically.
+  - When Commercial operators advance the card (`POST /api/kanban/pos/{po_id}/advance` or `POST /api/kanban/pos/{po_id}/approve-credit`), the cancellation flags (`cancellation_requested*`) and priority notes are purged, ensuring a clean state transition forward.
+- **Card Face Alert Badge (Full & Compact Views):** While in `SUBMITTED` (`Comercial`), Kanban cards render a prominent, pulsating red alert badge: `🚨 SOLICITAÇÃO DE CANCELAMENTO` (with origin chip: e.g. `de Faturamento`). Dual fallback in frontend checks `partition_metadata.cancellation_requested` and retroactive check on `priority_note.text.startsWith('[Cancelamento de Pedido]')` for immediate zero-migration visibility on historical orders.
 - **Zero Token-Desynchronization Fallback:** If an operator's active JWT token payload lacks fresh delegation flags or area data, `cancel_purchase_order` performs a direct database lookup on the `users` table to guarantee operators (such as Mairla, Abimael, Andrea) are never locked out due to stale browser sessions.
 - **Cascade Cancellation:** Cancelling a PO transitions `po.status_macro = 'CANCELLED'`, cascades `status_item = 'CANCELLED'` across all line items, cancels child partition orders (if partitioned), and persists an immutable SHA-256 Ledger V2 audit log entry.
 
@@ -364,10 +369,16 @@ Five-card summary row (md:grid-cols-5):
   4. Status de Custo
   5. Ações
 
-### 9.3 Faturamento Stage — Transportadora Auto-Population
+### 9.3 KanbanCard — Commercial Cancellation Request Badge (CR-F3 Extension)
+- **Compact & Full View Cards:** While in the `SUBMITTED` (Comercial / Análise de Crédito) column, if an order has an active return request for cancellation:
+  - Displays a high-visibility badge: `🚨 SOLICITAÇÃO DE CANCELAMENTO` with an origin chip (e.g. `de Faturamento`, `de Produção`, `de PCP`, `de Expedição`).
+  - Styled with bold rose/red borders and continuous pulse animation (`animate-pulse`) to guarantee immediate operator triage.
+  - Automatically unmounted once Commercial operators advance the order or conclude the credit review.
+
+### 9.4 Faturamento Stage — Transportadora Auto-Population
 On modal open, `localFields.transportadora` is pre-seeded from `partition_metadata.carrier_name` (if `extra_metadata.transportadora` is not already saved). This eliminates manual re-entry for operators.
 
-### 9.4 ImportPage Mesa de Conferência
+### 9.5 ImportPage Mesa de Conferência
 - **Item header:** `codigo_estruturado` rendered as indigo badge under Descrição do Produto.
 - **Date strip:** Expanded from 6 → 7 cells. Seventh cell (blue) shows `Data do Pedido` when present.
 - **Auto-Save:** Draft changes in Mesa de Conferência trigger a 300ms debounced auto-save to `staging_sessions`.

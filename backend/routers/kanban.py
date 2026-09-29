@@ -2110,11 +2110,17 @@ async def advance_po_status(
     po.status_macro = next_status
     po.updated_at = datetime.utcnow()
     
-    # Clean up return priority note upon successful advance
-    if po.partition_metadata and "priority_note" in po.partition_metadata:
+    # Clean up return priority note and cancellation request upon successful advance
+    if po.partition_metadata:
+        from sqlalchemy.orm.attributes import flag_modified as _flag_modified_adv
         meta = dict(po.partition_metadata)
         meta.pop("priority_note", None)
+        meta.pop("cancellation_requested", None)
+        meta.pop("cancellation_requested_at", None)
+        meta.pop("cancellation_requested_by", None)
+        meta.pop("cancellation_requested_from", None)
         po.partition_metadata = meta
+        _flag_modified_adv(po, "partition_metadata")
     
     # Log status transition
     # UAT-FIX-4 (extended): Log "CONFERIDO (TROCA/DEVOLUÇÃO)" for ALL forward advances of
@@ -2236,6 +2242,19 @@ async def return_po_status(
         "timestamp": datetime.utcnow().isoformat(),
         "user": current_user.name or current_user.email or "Sistema"
     }
+
+    # CR-F3 / Commercial Cancellation Badge: Track active cancellation request
+    if reason_clean.startswith("[Cancelamento de Pedido]"):
+        meta["cancellation_requested"] = True
+        meta["cancellation_requested_at"] = datetime.utcnow().isoformat()
+        meta["cancellation_requested_by"] = current_user.name or current_user.email or "Sistema"
+        meta["cancellation_requested_from"] = STATUS_DISPLAY_MAP.get(from_status, from_status)
+    else:
+        meta.pop("cancellation_requested", None)
+        meta.pop("cancellation_requested_at", None)
+        meta.pop("cancellation_requested_by", None)
+        meta.pop("cancellation_requested_from", None)
+
     po.partition_metadata = meta
     
     # Create audit log for return (populates handoff_history)
@@ -2304,6 +2323,11 @@ async def approve_credit(
     meta["audit_comment"] = body.audit_comment
     meta["block_status"] = "LIBERADO"
     meta["credit_reproved"] = False
+    meta.pop("cancellation_requested", None)
+    meta.pop("cancellation_requested_at", None)
+    meta.pop("cancellation_requested_by", None)
+    meta.pop("cancellation_requested_from", None)
+    meta.pop("priority_note", None)
     po.partition_metadata = meta
     
     for item in po.items:

@@ -138,6 +138,35 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
         }
     }, [safepo.status, safepo.status_macro, safepo.items])
 
+    // Commercial Cancellation Request Badge (CR-F3 Extension)
+    const cancellationInfo = useMemo(() => {
+        const isCommercial = safepo.status_macro === 'SUBMITTED' || safepo.status === 'Comercial'
+        if (!isCommercial) return null
+
+        const pMeta = safepo.partition_metadata || {}
+        const eMeta = safepo.extra_metadata || {}
+
+        const hasFlag = Boolean(pMeta.cancellation_requested || eMeta.cancellation_requested)
+        const priorityNoteText = (
+            (typeof pMeta.priority_note === 'object' ? pMeta.priority_note?.text : pMeta.priority_note) ||
+            (typeof eMeta.priority_note === 'object' ? eMeta.priority_note?.text : eMeta.priority_note) ||
+            ''
+        )
+        const isNoteCancellation = priorityNoteText.startsWith('[Cancelamento de Pedido]')
+
+        if (!hasFlag && !isNoteCancellation) return null
+
+        const fromArea = (
+            pMeta.cancellation_requested_from ||
+            eMeta.cancellation_requested_from ||
+            (typeof pMeta.priority_note === 'object' ? pMeta.priority_note?.from_area : null) ||
+            (typeof eMeta.priority_note === 'object' ? eMeta.priority_note?.from_area : null) ||
+            null
+        )
+
+        return { fromArea }
+    }, [safepo.status_macro, safepo.status, safepo.partition_metadata, safepo.extra_metadata])
+
     const marginInfo = useMemo(() => {
         if (safepo.margin_percentage === '***' || safepo.margin_global === '***') {
             return {
@@ -352,6 +381,18 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
                     </div>
                 )}
 
+                {/* CR-F3 Extension: Commercial Cancellation Request Badge (Compact View) */}
+                {cancellationInfo && (
+                    <div className="mb-2">
+                        <span 
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black bg-rose-100 text-rose-800 border-2 border-rose-500 animate-pulse tracking-wide"
+                            title={cancellationInfo.fromArea ? `Pedido devolvido de ${cancellationInfo.fromArea} para cancelamento comercial` : "Pedido devolvido para cancelamento comercial"}
+                        >
+                            🚨 SOLICITAÇÃO DE CANCELAMENTO
+                        </span>
+                    </div>
+                )}
+
                 {safepo.status_macro === 'SHIPPING' && (
                     <div className="mb-2">
                         {(safepo.partition_metadata?.current_phase === 'FASE_A' || safepo.extra_metadata?.current_phase === 'FASE_A') ? (
@@ -496,6 +537,26 @@ const KanbanCard = ({ po, onCardClick, compactView = false }) => {
                     <span className="text-xs font-extrabold text-red-700 flex items-center gap-1.5">
                         <span>🚫</span> CRÉDITO REPROVADO
                     </span>
+                </div>
+            )}
+
+            {/* CR-F3 Extension: Commercial Cancellation Request Badge (Full View) */}
+            {cancellationInfo && (
+                <div 
+                    className="mb-3 px-3 py-2 bg-rose-50 border-2 border-rose-500 rounded-lg flex items-center justify-between shadow-xs animate-pulse" 
+                    title={cancellationInfo.fromArea 
+                        ? `Solicitação de cancelamento devolvida de ${cancellationInfo.fromArea}` 
+                        : "Pedido devolvido para cancelamento comercial"
+                    }
+                >
+                    <span className="text-xs font-black text-rose-800 flex items-center gap-1.5 tracking-wide">
+                        <span className="text-sm">🚨</span> SOLICITAÇÃO DE CANCELAMENTO
+                    </span>
+                    {cancellationInfo.fromArea && (
+                        <span className="text-[10px] font-bold text-rose-700 bg-rose-200 border border-rose-300 rounded px-1.5 py-0.5 uppercase">
+                            de {cancellationInfo.fromArea}
+                        </span>
+                    )}
                 </div>
             )}
 
