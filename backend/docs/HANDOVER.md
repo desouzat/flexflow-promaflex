@@ -241,6 +241,25 @@ Order cards transition through six distinct columns:
   $$\text{Unit Area } (m^2) = \left(\frac{\text{width}_{\text{mm}}}{1000}\right) \times \text{length}_{\text{m}}$$
   Operators enter rolls/pieces produced in their shift and click `➕ Somar` or `Substituir`, which writes to `QTD REAL PRODUZIDA` and autosaves via `POST /api/kanban/pos/{po_id}/production` directly into `order_items.extra_metadata`.
 
+### 3.6 Date & SLA Integrity Engine (CR-DATES)
+
+- **Strict Decoupling of Contractual SLA vs. Factory Scheduling:**
+  - Client SLA `expected_delivery_date` (contractual deadline sourced from ONET `Dt.Faturamento`) is strictly decoupled from factory manufacturing scheduling `data_programada` (stored solely in `po.partition_metadata["data_programada"]`).
+  - Permanently removed the line in `backend/routers/kanban.py` (`update_po_area_fields`) that overwrote `po.expected_delivery_date = fields["data_programada"]`. Factory rescheduling by PCP never alters or resets contractual client SLA metrics.
+- **Brasília Timezone Shield (UTC-3):**
+  - Eliminates the 1-day subtraction drift caused by `new Date("YYYY-MM-DD")` UTC midnight parsing in UTC-3.
+  - The frontend (`KanbanPage.jsx`) uses direct string decomposition (`d/m/y` splitting) and `toIsoDateString(val)` comparisons without timezone instantiation.
+  - The backend (`kanban.py`) uses `parse_date_safe(val)` returning timezone-naive `datetime.date(y, m, d)` objects.
+- **PCP SLA Breach Warning & Advance Gating:**
+  - When `data_programada` is scheduled past the client SLA `expected_delivery_date`, an amber pulsating warning banner renders directly beneath the date picker in the PCP accordion.
+  - Advancing from `APPROVED` to `MANUFACTURING` is strictly blocked in both frontend (`canAdvanceCurrentArea`) and backend (`advance_po_status` returning `400 Bad Request`) unless the operator selects an SLA justification category (`po.sla_justification_category`).
+- **Card 5 (Data do Pedido) Precedence Fix:**
+  - Fixed inversion where database ingestion timestamp (`created_at`) masked the genuine ERP order date.
+  - Strict precedence order: `partition_metadata?.order_date || extra_metadata?.order_date || order_date || created_at`. PO #214441 now cleanly displays `21/09/2026`.
+- **Historical SLA Repair Utility (`restore_sla_dates.py`):**
+  - Surgical repair script in `backend/scripts/restore_sla_dates.py` inspects `audit_logs` and item metadata to identify and restore original contractual delivery dates.
+  - Production dry-run scanned 1,657 orders, identified 633 historical records with overwritten dates, and enables safe restoration via `--commit` or `--po-number <PO>`.
+
 ---
 
 ## 4. Financial Calculation Engines (Formulas & DRE)
@@ -342,6 +361,7 @@ Below is the active backlog of 7 work fronts under client evaluation, highlighti
 | **CR-F5** | **Calculadora de Apontamento + Medidas no Card do PCP** | On-card dimension calculator (width $\times$ length $\times$ qty) directly visible on PCP Kanban cards and inline Packaging Area Calculator helper in Produção. | 🟢 **COMPLETED (Live Production)** | 🔴 HIGH |
 | **CR-F6** | **Picking List da Logística** | Automated truck loading picking list generation. | Blocked (Awaiting Ewaldo/ONET) | 🟡 MED |
 | **CR-F7** | **Relatório do Kanban com Valores Financeiros** | Financial report export for Faturamento (`GET /api/reports/po-export`) with RBAC/SoD gating (29 cols vs 26 cols) and currency formatting. | 🟢 **COMPLETED (Live Production)** | 🔴 HIGH |
+| **CR-DATES** | **Engine de Integridade de Datas e SLA** | Strict decoupling of client SLA (`expected_delivery_date`) and factory schedule (`data_programada`), Brasília timezone shield (UTC-3), PCP SLA breach gate, Card 5 order date precedence, and `restore_sla_dates.py` historical repair utility. | 🟢 **COMPLETED (Live Production)** | 🔴 HIGH |
 
 ---
 

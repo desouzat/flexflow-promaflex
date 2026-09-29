@@ -197,15 +197,34 @@ Both names remain accepted (backward compatibility alias in `FIELD_ALIASES`).
 | `Cod. Transportadora` | `CARRIER_CODE` | `partition_metadata["carrier_code"]` |
 | `Nome Transportadora` | `CARRIER_NAME` | `partition_metadata["carrier_name"]` |
 
-### 4.3 Date Role Alignment (Critical)
+### 4.3 Date Role Alignment & SLA Integrity Engine (CR-DATES)
 
 | Column | Old interpretation | **Correct interpretation** |
 |---|---|---|
 | `Dt.Entrega` | SLA base → `expected_delivery_date` ❌ | Order entry/receipt date → `order_entry_date` ✅ |
-| `Dt.Faturamento` | Not used as SLA | **SLA base → `expected_delivery_date`** ✅ |
+| `Dt.Faturamento` | Not used as SLA | **Contractual SLA deadline → `expected_delivery_date`** ✅ |
 | `Data do Pedido` | Not captured | Original ERP order creation date → `order_date` |
 
-> **Impact:** The SLA countdown timer in the Kanban card, PO header, and all delay calculations are now driven by `Dt.Faturamento` (the contractual billing/delivery deadline), not the order entry date.
+> **Impact:** The SLA countdown timer in the Kanban card, PO header, and all delay calculations are driven exclusively by `Dt.Faturamento` (the client's contractual billing/delivery deadline), not the internal factory schedule.
+
+#### 4.3.1 Strict Decoupling of Contractual SLA vs. Factory Scheduling
+- **`expected_delivery_date` (Contractual SLA):** Represents the agreed commitment with the customer (from `Dt.Faturamento`). Remains immutable during internal manufacturing planning.
+- **`data_programada` (Factory Schedule):** Represents the production timeline scheduled by PCP, stored strictly in `po.partition_metadata["data_programada"]`.
+- **Elimination of Overwrite Bug:** In `backend/routers/kanban.py` (`update_po_area_fields`), the previous assignment `po.expected_delivery_date = fields["data_programada"]` has been permanently deleted. Factory rescheduling never alters client SLA commitments.
+
+#### 4.3.2 Brasília Timezone Shield (UTC-3)
+- **Problem:** Standard JavaScript `new Date("YYYY-MM-DD")` parses strings at UTC midnight (00:00:00 UTC). In Brazil's official timezone (America/Sao_Paulo, UTC-3), this results in 21:00:00 of the previous calendar day, causing a persistent 1-day visual shift across Kanban cards and date pickers.
+- **Frontend Shield (`KanbanPage.jsx`):** Pure calendar dates are handled via timezone-naive string decomposition (`d/m/y` direct slicing/splitting) and `toIsoDateString(val)` comparisons, completely avoiding UTC object conversions.
+- **Backend Shield (`kanban.py`):** The `parse_date_safe(val)` utility parses `DD/MM/YYYY` and `YYYY-MM-DD` inputs directly into timezone-naive `datetime.date(y, m, d)` objects, rejecting UTC midnight shifts.
+
+#### 4.3.3 PCP SLA Breach Gate & Gating Rule
+- When PCP schedules `data_programada` to a date strictly later than `expected_delivery_date`:
+  1. **Visual Alert:** An amber pulsing warning banner is rendered directly beneath the date input in the PCP accordion: *"⚠️ ATENÇÃO: A data programada excede o SLA do cliente. Selecione uma justificativa de SLA abaixo para prosseguir com a liberação para Produção."*
+  2. **Advance Block:** Moving the PO from `APPROVED` (PCP) to `MANUFACTURING` (Produção) is strictly blocked in both frontend (`canAdvanceCurrentArea`) and backend (`POST /api/kanban/pos/{po_id}/advance`), returning `HTTP 400 Bad Request` unless `po.sla_justification_category` is explicitly recorded.
+
+#### 4.3.4 Historical SLA Repair Utility (`restore_sla_dates.py`)
+- Automated maintenance script located in `backend/scripts/restore_sla_dates.py`.
+- Reconstructs the genuine contractual delivery SLA from historical `audit_logs` and original item metadata for all POs whose SLA was corrupted by prior `data_programada` overwrites. Supports `--dry-run`, `--commit`, and `--po-number <PO>`.
 
 ### 4.4 ERP Noise Guard
 
@@ -339,6 +358,7 @@ $$\text{Net Profit Margin \%} = \left(\frac{\text{Net Profit}}{\text{Gross Reven
 | `FF-HARDENING-006` | SLA justification persistence in `purchase_orders.sla_justification_category` + `sla_justification_text`. |
 | `FF-HARDENING-012.2` | Faturamento stage gate: NF-e number + Transportadora + emission date + at least one invoice PDF required before advancing. |
 | `CR-F7` | Dynamic financial export in `GET /api/reports/po-export` gated by RBAC/SoD (`role in ['admin', 'master']` OR `area in ['FATURAMENTO', 'FINANCEIRO', 'DIRETORIA']`). Adds 3 currency-formatted columns (`VALOR UNITARIO (R$)`, `VALOR TOTAL ITEM (R$)`, `VALOR TOTAL PEDIDO (R$)`) totaling 29 columns for authorized users, while enforcing 26 baseline columns for non-authorized users. |
+| `CR-DATES` | Strict decoupling of client SLA (`expected_delivery_date`) and factory schedule (`data_programada`). Brasília timezone shield (`parse_date_safe`), PCP SLA breach gate (blocks advancement to Produção without SLA justification if schedule exceeds SLA), Card 5 ERP date precedence, and `restore_sla_dates.py` historical repair utility. |
 | ERP Noise Guard | `clean_brazilian_number()` & `safe_format_currency()` coerce values `< -9,999,999` to `0.0`. Prevents legacy ONET NULL sentinel crashes. |
 | `NullPool` | Database connection pool strategy — see §2.3. |
 | Startup DDL | `_run_ddl_step()` in `main.py` runs idempotent DDL on startup (e.g. `BILLING` constraint, index creation). |
@@ -353,7 +373,7 @@ Five-card summary row (md:grid-cols-5):
 2. **Dt.Entrega (SLA)** — `partition_metadata.expected_delivery_date` ← sourced from `Dt.Faturamento`
 3. **Itens** — `items_count`
 4. **Status** — `status_macro` human label
-5. **Data do Pedido** (blue card) — `partition_metadata.order_date` ← sourced from `Data do Pedido`
+5. **Data do Pedido** (blue card) — `partition_metadata.order_date || extra_metadata.order_date || order_date || created_at`. Prioritizes genuine ERP order creation date; falls back to system ingestion timestamp (`created_at`) only when explicit order date is absent. Sourced from ONET `Data do Pedido`.
 
 ### 9.2 KanbanPage — PCP Card Dimensions & Produção Area Calculator (CR-F5)
 - **PCP Card Face Dimensions:** When PO cards are in the PCP / Mensuração column (`APPROVED` / `WAITING_MATERIAL`), physical dimensions are rendered on the card face:

@@ -8,11 +8,36 @@ from sqlalchemy.orm import Session, selectinload, joinedload
 from sqlalchemy import or_
 from typing import List, Optional, Any
 from decimal import Decimal
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, date, timezone, timedelta
 from pydantic import BaseModel, validator, root_validator, Field
 import uuid
 
 CONCLUDED_STATUSES = ["COMPLETED", "CANCELLED", "ARCHIVED", "ARCHIVED_PARTITIONED"]
+
+
+def parse_date_safe(date_val):
+    """Parse DD/MM/YYYY or YYYY-MM-DD strictly into a timezone-naive date object."""
+    if not date_val:
+        return None
+    if isinstance(date_val, datetime):
+        return date_val.date()
+    if isinstance(date_val, date):
+        return date_val
+    s = str(date_val).strip().split("T")[0]
+    try:
+        if "/" in s:
+            parts = s.split("/")
+            if len(parts) == 3:
+                d, m, y = parts
+                return date(int(y), int(m), int(d))
+        elif "-" in s:
+            parts = s.split("-")
+            if len(parts) == 3:
+                y, m, d = parts
+                return date(int(y), int(m), int(d))
+    except Exception:
+        return None
+    return None
 
 from backend.schemas.kanban_schema import (
     KanbanBoardResponse,
@@ -1116,10 +1141,9 @@ async def update_po_area_fields(
     po.partition_metadata = meta
     
     # Synchronize specific properties
+    # CR-DATES: data_programada is strictly internal factory scheduling and MUST NOT touch expected_delivery_date
     if "client_name" in fields:
         po.client_name = fields["client_name"]
-    if "data_programada" in fields:
-        po.expected_delivery_date = fields["data_programada"]
     elif "expected_delivery_date" in fields:
         po.expected_delivery_date = fields["expected_delivery_date"]
         
@@ -2047,8 +2071,15 @@ async def advance_po_status(
             validation_errors.append("Pedido deve ter itens validados")
     
     elif current_status == "APPROVED":
-        # Production must have items processed
-        pass  # Add production-specific validations if needed
+        # CR-DATES: Gating for factory scheduled date exceeding client SLA
+        meta = po.partition_metadata or {}
+        prog_date = parse_date_safe(meta.get("data_programada"))
+        sla_date = parse_date_safe(po.expected_delivery_date)
+        if prog_date and sla_date and prog_date > sla_date and not po.sla_justification_category:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"A data programada de fábrica ({prog_date.strftime('%d/%m/%Y')}) ultrapassa a data de entrega contratual do cliente ({sla_date.strftime('%d/%m/%Y')}). Justificativa de SLA obrigatória para liberação da produção."
+            )
     
     elif current_status == "BILLING":
         # FF-HARDENING-012.2: Faturamento must have NF-e number, Transportadora, and emission date

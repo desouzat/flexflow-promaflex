@@ -15,7 +15,7 @@ import {
     Star, RefreshCw as RefreshIcon, Zap, AlertCircle, Upload,
     CheckCircle, Edit2, Save, XCircle, Truck, Tag, Lock, Unlock,
     ArrowUpRight, ShieldAlert, ChevronLeft, ChevronRight, Split, Paperclip, Percent,
-    Download, Plus  // FF-HARDENING-012.2: Export CSV + Exchange card
+    Download, Plus, AlertTriangle  // FF-HARDENING-012.2: Export CSV + Exchange card + CR-DATES
 } from 'lucide-react'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1650,10 +1650,37 @@ const KanbanPage = () => {
         }).format(value || 0)
     }
 
+    // CR-DATES: Brasília Timezone Shield (UTC-3) — string decomposition prevents 1-day shifts
     const formatDate = (dateString) => {
-        if (!dateString) return 'N/A'
-        return new Date(dateString).toLocaleDateString('pt-BR')
-    }
+        if (!dateString) return 'N/A';
+        if (typeof dateString === 'string') {
+            const clean = dateString.trim().split('T')[0];
+            // Brazilian format DD/MM/YYYY: return directly
+            if (/^\d{2}\/\d{2}\/\d{4}$/.test(clean)) return clean;
+            // ISO format YYYY-MM-DD: direct string decomposition (NEVER new Date() to avoid UTC-3 shifts!)
+            if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
+                const [y, m, d] = clean.split('-');
+                return `${d}/${m}/${y}`;
+            }
+        }
+        try {
+            const d = new Date(dateString);
+            return isNaN(d.getTime()) ? (String(dateString) || 'N/A') : d.toLocaleDateString('pt-BR');
+        } catch (_) {
+            return String(dateString) || 'N/A';
+        }
+    };
+
+    const toIsoDateString = (val) => {
+        if (!val) return '';
+        const clean = String(val).trim().split('T')[0];
+        if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) return clean;
+        if (/^\d{2}\/\d{2}\/\d{4}$/.test(clean)) {
+            const [d, m, y] = clean.split('/');
+            return `${y}-${m}-${d}`;
+        }
+        return '';
+    };
 
     const getStrategicIndicators = (metadata) => {
         const indicators = []
@@ -1731,7 +1758,15 @@ const KanbanPage = () => {
                     const unitCost = parseFloat(item.total_cost) || parseFloat(item.cost_mp) || parseFloat(item.extra_metadata?.total_cost) || parseFloat(item.extra_metadata?.cost_mp) || 0;
                     return unitCost > 0;
                 });
-            return packaging !== '' && deliveryDate !== '' && allItemsLinked
+
+            // CR-DATES: Block advancement if factory schedule exceeds client SLA and no justification is provided
+            const clientSlaIso = toIsoDateString(selectedPO.expected_delivery_date || selectedPO.delivery_date);
+            const progDateIso = toIsoDateString(deliveryDate);
+            const slaBreachedWithoutJustification = Boolean(
+                clientSlaIso && progDateIso && progDateIso > clientSlaIso && !selectedPO.sla_justification_category
+            );
+
+            return packaging !== '' && deliveryDate !== '' && allItemsLinked && !slaBreachedWithoutJustification
         }
 
         if (selectedPO.status === 'Produção/Embalagem') {
@@ -1807,6 +1842,13 @@ const KanbanPage = () => {
             if (packaging === '') missing.push('Tipo de Embalagem');
             if (deliveryDate === '') missing.push('Data Programada');
             if (!allItemsLinked) missing.push('Vincular todos os SKUs (custo > 0)');
+
+            // CR-DATES: Gating for factory scheduled date exceeding client SLA
+            const clientSlaIso = toIsoDateString(selectedPO.expected_delivery_date || selectedPO.delivery_date);
+            const progDateIso = toIsoDateString(deliveryDate);
+            if (clientSlaIso && progDateIso && progDateIso > clientSlaIso && !selectedPO.sla_justification_category) {
+                missing.push('Justificativa de SLA obrigatória (Data programada excede o SLA do cliente)');
+            }
         }
 
         if (selectedPO.status === 'Produção/Embalagem') {
@@ -2252,18 +2294,29 @@ const KanbanPage = () => {
 
                             {/* Modal Content */}
                             <div className="flex-1 overflow-y-auto p-6">
-                                {/* PO Summary — 5-card header: Vl.Pedido | SLA Entrega | Itens | Status | Data Pedido */}
                                 {(() => {
-                                    const rawDate1 = selectedPO.created_at || selectedPO.extra_metadata?.order_date || selectedPO.partition_metadata?.order_date || selectedPO.order_date;
+                                    // CR-DATES: Prioritize ERP order_date over database created_at timestamp
+                                    const rawDate1 = (
+                                        selectedPO.partition_metadata?.order_date ||
+                                        selectedPO.extra_metadata?.order_date ||
+                                        selectedPO.order_date ||
+                                        selectedPO.created_at
+                                    );
                                     const rawDate2 = selectedPO.expected_delivery_date || selectedPO.delivery_date || selectedPO.data_limite;
 
                                     let displayOrderDate = rawDate1;
                                     let displayDeliveryDate = rawDate2;
 
-                                    if (rawDate1 && rawDate2) {
+                                    const hasExplicitOrderDate = Boolean(
+                                        selectedPO.partition_metadata?.order_date ||
+                                        selectedPO.extra_metadata?.order_date ||
+                                        selectedPO.order_date
+                                    );
+
+                                    if (!hasExplicitOrderDate && rawDate1 && rawDate2) {
                                         const time1 = parseDateToTime(rawDate1);
                                         const time2 = parseDateToTime(rawDate2);
-                                        // Fail-safe swap: If order creation date is mathematically AFTER delivery date in DB, swap them
+                                        // Fail-safe swap only when rawDate1 is fallback created_at and mathematically after delivery date
                                         if (time1 !== Infinity && time2 !== Infinity && time1 > time2) {
                                             displayOrderDate = rawDate2;
                                             displayDeliveryDate = rawDate1;
@@ -3046,7 +3099,11 @@ const KanbanPage = () => {
                                                                                 </div>
                                                                                 <div>
                                                                                     <span className="text-xs text-gray-500 font-semibold uppercase block">Data Programada</span>
-                                                                                    <span className="font-semibold text-gray-800">{selectedPO.extra_metadata?.data_programada ? new Date(selectedPO.extra_metadata.data_programada + 'T00:00:00').toLocaleDateString('pt-BR') : 'Não agendada'}</span>
+                                                                                    <span className="font-semibold text-gray-800">
+                                                                                        {selectedPO.extra_metadata?.data_programada || selectedPO.partition_metadata?.data_programada 
+                                                                                            ? formatDate(selectedPO.extra_metadata?.data_programada || selectedPO.partition_metadata?.data_programada) 
+                                                                                            : 'Não agendada'}
+                                                                                    </span>
                                                                                 </div>
                                                                             </div>
                                                                         ) : (
@@ -3082,6 +3139,27 @@ const KanbanPage = () => {
                                                                                         className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-850 font-medium"
                                                                                     />
                                                                                 </div>
+
+                                                                                {/* CR-DATES: Warning if factory scheduled date exceeds client SLA */}
+                                                                                {(() => {
+                                                                                    const clientSlaIso = toIsoDateString(selectedPO.expected_delivery_date || selectedPO.delivery_date);
+                                                                                    const progDateIso = toIsoDateString(localFields.data_programada);
+                                                                                    const isDelayPastSla = Boolean(clientSlaIso && progDateIso && progDateIso > clientSlaIso);
+
+                                                                                    if (!isDelayPastSla) return null;
+
+                                                                                    return (
+                                                                                        <div className="md:col-span-2 mt-2 p-3 bg-amber-50 border-2 border-amber-400 rounded-lg flex items-start gap-2.5 animate-pulse">
+                                                                                            <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                                                                                            <div className="text-xs text-amber-950 leading-relaxed">
+                                                                                                <span className="font-bold">⚠️ Agendamento de Fábrica Ultrapassa o SLA do Cliente!</span>
+                                                                                                <p className="mt-0.5 text-amber-800">
+                                                                                                    A data programada (<strong>{formatDate(localFields.data_programada)}</strong>) ultrapassa a Data de Entrega Contratual (<strong>{formatDate(selectedPO.expected_delivery_date || selectedPO.delivery_date)}</strong>). O Comercial deve ser notificado e a <strong>Justificativa de SLA</strong> é obrigatória.
+                                                                                                </p>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    );
+                                                                                })()}
 
 
 
