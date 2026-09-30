@@ -219,7 +219,15 @@ const LogisticsUploadSection = ({
 
 const parseBrazilianFloat = (val) => {
     if (val === null || val === undefined) return 0;
-    const clean = String(val).trim().replace(',', '.');
+    if (typeof val === 'number') return isNaN(val) ? 0 : val;
+    let clean = String(val).trim().replace(/\s+/g, '');
+    const hasComma = clean.includes(',');
+    const dotCount = (clean.match(/\./g) || []).length;
+    if (hasComma) {
+        clean = clean.replace(/\./g, '').replace(',', '.');
+    } else if (dotCount > 1) {
+        clean = clean.replace(/\./g, '');
+    }
     const num = parseFloat(clean);
     return isNaN(num) ? 0 : num;
 };
@@ -237,7 +245,20 @@ const parseBrazilianFloat = (val) => {
  */
 const SkuProductionRow = ({ item, itemProdFields, setItemProductionFields, onSave }) => {
     const iMeta = item.extra_metadata || {}
-    const poUnit = (iMeta.unit || item.unit || 'UN').toUpperCase()
+    const poUnit = (
+        item.unit ||
+        item.unidade_medida ||
+        iMeta.unit ||
+        iMeta.unidade_medida ||
+        iMeta['Un. Med.'] ||
+        iMeta['Unidade'] ||
+        'UN'
+    ).toString().toUpperCase().trim()
+
+    const isM2Unit = ['M2', 'M²', 'METRO QUADRADO', 'METROS QUADRADOS'].includes(poUnit)
+    const isLinearUnit = ['M', 'ML', 'METRO', 'METROS', 'METRO LINEAR', 'METROS LINEARES'].includes(poUnit)
+    const isRollUnit = ['RL', 'UN', 'PC', 'PÇ', 'ROLO', 'ROLOS', 'BOBINA', 'BOBINAS', 'PECAS', 'PEÇAS', 'PECA', 'PEÇA', 'UND', 'UNID'].includes(poUnit)
+
     const iProd = itemProdFields[item.id] || {}
     const codigoEstruturado = iMeta.codigo_estruturado || item.codigo_estruturado || iMeta.description || ''
 
@@ -248,13 +269,37 @@ const SkuProductionRow = ({ item, itemProdFields, setItemProductionFields, onSav
     const unitAreaM2 = hasDimensions ? (widthMm / 1000.0) * lengthM : null
     const dimensaoLabel = hasDimensions
         ? ` (Medidas: ${widthMm} mm × ${lengthM} m)`
-        : ''
+        : (widthMm > 0 ? ` (Largura: ${widthMm} mm)` : '')
 
-    // CR-F5: Incremental Packaging Area Calculator state
+    // CR-F5: Incremental Unit-Aware Packaging Area Calculator state
+    const canShowCalc = hasDimensions || widthMm > 0 || isM2Unit
     const [showCalc, setShowCalc] = React.useState(false)
-    const [rollCountInput, setRollCountInput] = React.useState('')
-    const rolls = parseBrazilianFloat(rollCountInput)
-    const calculatedAreaM2 = unitAreaM2 ? (rolls * unitAreaM2) : 0
+    const [m2Mode, setM2Mode] = React.useState(widthMm > 0 ? 'linear_meters' : 'direct_m2') // 'linear_meters' | 'direct_m2'
+    const [calcInput, setCalcInput] = React.useState('')
+
+    const inputValue = parseBrazilianFloat(calcInput)
+    let calculatedAreaM2 = 0
+    let calcExplanation = ''
+
+    if (isM2Unit) {
+        if (m2Mode === 'direct_m2') {
+            calculatedAreaM2 = inputValue > 0 ? inputValue : 0
+            calcExplanation = `Entrada direta: ${calculatedAreaM2.toFixed(2)} m²`
+        } else {
+            // linear_meters: metros da bobina * (largura / 1000)
+            const widthM = widthMm > 0 ? (widthMm / 1000.0) : 0
+            calculatedAreaM2 = (inputValue > 0 && widthM > 0) ? (inputValue * widthM) : 0
+            calcExplanation = `${inputValue} m × ${widthM.toFixed(4)} m = ${calculatedAreaM2.toFixed(2)} m²`
+        }
+    } else if (isLinearUnit) {
+        const widthM = widthMm > 0 ? (widthMm / 1000.0) : 0
+        calculatedAreaM2 = (inputValue > 0 && widthM > 0) ? (inputValue * widthM) : 0
+        calcExplanation = `${inputValue} m × ${widthM.toFixed(4)} m = ${calculatedAreaM2.toFixed(2)} m²`
+    } else {
+        // Roll count mode (RL, UN, etc.)
+        calculatedAreaM2 = (inputValue > 0 && unitAreaM2) ? (inputValue * unitAreaM2) : 0
+        calcExplanation = `${inputValue} bobinas × ${unitAreaM2?.toFixed(2)} m² = ${calculatedAreaM2.toFixed(2)} m²`
+    }
 
     // Seed from the persisted DB value (stable). iProd.status_producao is the
     // transient in-flight parent value — use it only as the higher-priority override.
@@ -320,7 +365,7 @@ const SkuProductionRow = ({ item, itemProdFields, setItemProductionFields, onSav
         }
         setItemProductionFields(updated)
         onSave(updated)
-        setRollCountInput('')
+        setCalcInput('')
     }
 
     return (
@@ -372,8 +417,8 @@ const SkuProductionRow = ({ item, itemProdFields, setItemProductionFields, onSav
                 </div>
             </div>
 
-            {/* CR-F5: Incremental Packaging Area Calculator */}
-            {hasDimensions && (
+            {/* CR-F5: Incremental Unit-Aware Packaging Area Calculator */}
+            {canShowCalc && (
                 <div className="pt-2 border-t border-blue-200">
                     <button
                         type="button"
@@ -381,28 +426,89 @@ const SkuProductionRow = ({ item, itemProdFields, setItemProductionFields, onSav
                         className="text-xs text-blue-700 hover:text-blue-900 font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
                     >
                         <span>🧮</span>
-                        <span>{showCalc ? 'Ocultar Calculadora de Apontamento' : `Calculadora de Apontamento (${unitAreaM2.toFixed(2)} m²/bobina)`}</span>
+                        <span>
+                            {showCalc
+                                ? 'Ocultar Calculadora de Apontamento'
+                                : isM2Unit
+                                    ? 'Calculadora de Apontamento (M² / Metros da Bobina)'
+                                    : isLinearUnit
+                                        ? 'Calculadora de Apontamento (Metros Lineares)'
+                                        : `Calculadora de Apontamento (${unitAreaM2 ? unitAreaM2.toFixed(2) + ' m²/bobina' : 'Qtd'})`
+                            }
+                        </span>
                     </button>
 
                     {showCalc && (
-                        <div className="mt-2 p-3 bg-white border border-blue-200 rounded-lg space-y-2 text-xs shadow-xs">
-                            <div className="flex flex-wrap items-center justify-between font-medium text-gray-700 gap-2">
-                                <span>Área Unitária: <strong className="text-blue-800">{unitAreaM2.toFixed(2)} m²</strong> por bobina ({widthMm}mm × {lengthM}m)</span>
-                                <span className="text-gray-500">Qtd Pedido: <strong className="text-gray-800">{item.quantity} {poUnit}</strong></span>
+                        <div className="mt-2 p-3 bg-white border border-blue-200 rounded-lg space-y-2.5 text-xs shadow-xs">
+                            {/* Header de Metadados e Qtd do Pedido */}
+                            <div className="flex flex-wrap items-center justify-between font-medium text-gray-700 gap-2 border-b border-gray-100 pb-2">
+                                <div className="flex items-center gap-2">
+                                    {widthMm > 0 && (
+                                        <span className="bg-blue-50 text-blue-800 px-2 py-0.5 rounded font-semibold text-[11px]">
+                                            Largura: {widthMm} mm ({(widthMm / 1000).toFixed(4)} m)
+                                        </span>
+                                    )}
+                                    {lengthM > 0 && !isM2Unit && (
+                                        <span className="bg-gray-100 text-gray-700 px-2 py-0.5 rounded font-semibold text-[11px]">
+                                            Comp. Nominal: {lengthM} m
+                                        </span>
+                                    )}
+                                </div>
+                                <span className="text-gray-500">
+                                    Qtd Pedido: <strong className="text-gray-800">{item.quantity} {poUnit}</strong>
+                                </span>
                             </div>
+
+                            {/* Se for unidade M2: Seletor Segmentado de Modos */}
+                            {isM2Unit && (
+                                <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-md max-w-fit">
+                                    <button
+                                        type="button"
+                                        onClick={() => { setM2Mode('linear_meters'); setCalcInput(''); }}
+                                        className={`px-2.5 py-1 rounded text-[11px] font-bold transition-all cursor-pointer ${
+                                            m2Mode === 'linear_meters'
+                                                ? 'bg-blue-600 text-white shadow-xs'
+                                                : 'text-gray-600 hover:text-gray-900'
+                                        }`}
+                                    >
+                                        📏 Por Metros da Bobina (m)
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => { setM2Mode('direct_m2'); setCalcInput(''); }}
+                                        className={`px-2.5 py-1 rounded text-[11px] font-bold transition-all cursor-pointer ${
+                                            m2Mode === 'direct_m2'
+                                                ? 'bg-blue-600 text-white shadow-xs'
+                                                : 'text-gray-600 hover:text-gray-900'
+                                        }`}
+                                    >
+                                        📐 M² Direto
+                                    </button>
+                                </div>
+                            )}
+
+                            {/* Linha de Entrada de Dados e Ação */}
                             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                                 <div className="flex-1">
                                     <input
                                         type="text"
                                         inputMode="decimal"
-                                        placeholder="Qtd de bobinas / peças produzidas no turno"
-                                        value={rollCountInput}
-                                        onChange={(e) => setRollCountInput(e.target.value)}
-                                        className="w-full px-2.5 py-1.5 border border-gray-300 rounded text-xs font-semibold focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                        placeholder={
+                                            isM2Unit
+                                                ? m2Mode === 'linear_meters'
+                                                    ? "Metros lineares produzidos nesta bobina (ex: 4000)"
+                                                    : "Quantidade em m² produzida no turno (ex: 10000)"
+                                                : isLinearUnit
+                                                    ? "Metros lineares produzidos no turno (ex: 1000)"
+                                                    : "Qtd de bobinas / peças produzidas no turno (ex: 5)"
+                                        }
+                                        value={calcInput}
+                                        onChange={(e) => setCalcInput(e.target.value)}
+                                        className="w-full px-2.5 py-1.5 border border-gray-300 rounded text-xs font-semibold focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800"
                                     />
                                 </div>
-                                {rolls > 0 && (
-                                    <div className="flex items-center gap-1.5">
+                                {calculatedAreaM2 > 0 && (
+                                    <div className="flex items-center gap-1.5 flex-wrap sm:flex-nowrap">
                                         <button
                                             type="button"
                                             onClick={() => handleApplyApontamento('add')}
@@ -422,6 +528,13 @@ const SkuProductionRow = ({ item, itemProdFields, setItemProductionFields, onSav
                                     </div>
                                 )}
                             </div>
+
+                            {/* Badge de Auditoria em Tempo Real da Fórmula */}
+                            {calculatedAreaM2 > 0 && (
+                                <div className="text-[11px] text-blue-700 bg-blue-50/70 border border-blue-100 px-2 py-1 rounded font-medium">
+                                    ℹ️ <strong>Cálculo:</strong> {calcExplanation}
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>

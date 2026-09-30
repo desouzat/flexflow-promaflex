@@ -375,12 +375,22 @@ Five-card summary row (md:grid-cols-5):
 4. **Status** — `status_macro` human label
 5. **Data do Pedido** (blue card) — `partition_metadata.order_date || extra_metadata.order_date || order_date || created_at`. Prioritizes genuine ERP order creation date; falls back to system ingestion timestamp (`created_at`) only when explicit order date is absent. Sourced from ONET `Data do Pedido`.
 
-### 9.2 KanbanPage — PCP Card Dimensions & Produção Area Calculator (CR-F5)
+### 9.2 KanbanPage — PCP Card Dimensions & Unit-Aware Produção Area Calculator (CR-F5)
 - **PCP Card Face Dimensions:** When PO cards are in the PCP / Mensuração column (`APPROVED` / `WAITING_MATERIAL`), physical dimensions are rendered on the card face:
   - Single item: `📐 {width}mm × {length}m ({qty} {unit})`
   - Multi-item: `📐 {width}mm × {length}m (+{extraCount} {extraCount === 1 ? 'item' : 'itens'})`
   - Resilient parsing via `parseBrazilianFloat` normalizes comma/dot decimals and cleanly suppresses the badge if width or length is missing/zero.
-- **Produção Packaging Area Calculator:** Inside `SkuProductionRow` in the Produção modal, an interactive calculator helper computes $m^2$ per roll/piece and allows the operator to add (`➕ Somar`) or overwrite (`Substituir`) into `QTD REAL PRODUZIDA`, with immediate persistence to `order_items.extra_metadata` via `POST /api/kanban/pos/{po_id}/production`.
+- **Unit-Aware Packaging Area Calculator (`SkuProductionRow`):** In the Produção modal, the packaging calculator dynamically inspects the order item unit (`poUnit`):
+  1. **Pedidos em M² (ex: CSN e filmes industriais):**
+     - Fornece seletor segmentado com dois modos operacionais:
+       - **📏 Por Metros da Bobina (m):** Para bobinas com metragem linear variável (ex: 3.800m, 4.000m, 5.000m). Calcula: $\text{Área }(m^2) = \text{Metros} \times (\text{Largura}_{\text{mm}} / 1000)$.
+       - **📐 M² Direto:** Para apontamento direto em área ($m^2$) medido em balança/sistema. Não realiza multiplicação por área nominal de bobina, eliminando distorções de escala (ex: 10.000 m² gerando 73 milhões de m²).
+     - **Prevenção de Vazamento de Estado:** A alternância entre abas limpa o input automaticamente (`setCalcInput('')`), impedindo que valores em metros sejam somados como m².
+  2. **Pedidos em Bobinas/Rolos (RL, UN, PC, BOBINA):**
+     - Modo padrão de contagem: $\text{Área }(m^2) = \text{Qtd de Bobinas} \times \text{Área Unitária Nominal } (m^2)$.
+  3. **Pedidos em Metros Lineares (M, ML):**
+     - Calcula: $\text{Área }(m^2) = \text{Metros Lineares} \times (\text{Largura}_{\text{mm}} / 1000)$.
+  4. **Persistência Imediata:** Os botões `➕ Somar` e `Substituir` formatam o valor e invocam `onSave(updated)`, persistindo os dados em `order_items.extra_metadata` via `POST /api/kanban/pos/{po_id}/production`.
 - **PCP Grade de Itens Table (Inside Modal):**
   Five-column table:
   1. SKU / Produto

@@ -231,15 +231,22 @@ Order cards transition through six distinct columns:
   - On the Kanban card face (`KanbanCard.jsx`), in both Compact and Full Views, a bold pulsating alert badge `🚨 SOLICITAÇÃO DE CANCELAMENTO` (with origin chip: e.g. `de Faturamento`) renders immediately. Dual fallback supports retroactive POs whose `priority_note` starts with `[Cancelamento de Pedido]`.
 - **Transactional Cascade & Audit:** `POST /api/kanban/pos/{po_id}/cancel` validates minimum 3-character reason, sets `po.status_macro = 'CANCELLED'`, cascades `status_item = 'CANCELLED'` across all order items and child partitions, and logs an immutable SHA-256 Ledger V2 audit record.
 
-### 3.5 PCP Physical Dimensions & Packaging Area Calculator (CR-F5)
+### 3.5 PCP Physical Dimensions & Unit-Aware Packaging Area Calculator (CR-F5)
 
 - **Kanban Card Face Dimensions:** Cards in the PCP column (`APPROVED` / `WAITING_MATERIAL`) display physical roll dimensions directly on the card face in both Full View and Compact View:
   - Single item: `📐 {width}mm × {length}m ({qty} {unit})` (e.g. `📐 1200mm × 50m (10 RL)`)
   - Multi-item: `📐 {width}mm × {length}m (+{extraCount} {extraCount === 1 ? 'item' : 'itens'})`
   - Resilient parsing via `parseBrazilianFloat` normalizes comma/dot inputs and suppresses the badge gracefully if width or length is missing or zero.
-- **Produção Packaging Area Calculator:** Inside `SkuProductionRow` (module-scoped component in `KanbanPage.jsx`), an inline helper computes unit area:
-  $$\text{Unit Area } (m^2) = \left(\frac{\text{width}_{\text{mm}}}{1000}\right) \times \text{length}_{\text{m}}$$
-  Operators enter rolls/pieces produced in their shift and click `➕ Somar` or `Substituir`, which writes to `QTD REAL PRODUZIDA` and autosaves via `POST /api/kanban/pos/{po_id}/production` directly into `order_items.extra_metadata`.
+- **Unit-Aware Packaging Area Calculator (`SkuProductionRow`):** Inside `SkuProductionRow` in the Produção modal, an inline helper dynamically inspects `poUnit`:
+  - **Pedidos em M² (CSN & Bobinas de Metragem Variável):**
+    - **Metros da Bobina (m):** Permite apontar o comprimento linear real produzido em bobinas com metragem não padrão (ex: 3.800m, 4.000m, 5.000m). Calcula: $\text{Metros} \times (\text{Largura}_{\text{mm}} / 1000) = \text{Área }(m^2)$.
+    - **M² Direto:** Para apontamento direto em área ($m^2$) medido em balança/computador de bordo. Evita a multiplicação por área nominal de bobina que causava distorções astronômicas (ex: entrada de 10.000 m² gerando 73 milhões de m²).
+    - **Prevenção de Vazamento:** Alternância entre abas limpa o input automaticamente, garantindo que valores em metros lineares não sejam aplicados inadvertidamente como m².
+  - **Pedidos em Bobinas/Rolos (RL, UN, PC, BOBINA):**
+    - Mantém a multiplicação por área unitária nominal: $\text{Área } (m^2) = \text{Qtd Bobinas} \times \left[(\text{width}_{\text{mm}} / 1000) \times \text{length}_{\text{m}}\right]$.
+  - **Pedidos em Metros Lineares (M, ML):**
+    - Calcula: $\text{Metros Lineares} \times (\text{width}_{\text{mm}} / 1000)$.
+  - **Persistência Transacional:** Operadores clicam em `➕ Somar` ou `Substituir`, gravando em `QTD REAL PRODUZIDA` com autosave imediato via `POST /api/kanban/pos/{po_id}/production` direto em `order_items.extra_metadata`.
 
 ### 3.6 Date & SLA Integrity Engine (CR-DATES)
 
